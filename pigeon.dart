@@ -16,6 +16,7 @@ enum PreferredBackend {
 enum PermissionType {
   contacts,
   calendar,
+  notifications,
 }
 
 enum PermissionStatus {
@@ -258,6 +259,25 @@ abstract class PlatformService {
     int? endDate,
     int? limit,
   });
+
+  // === Foreground Service Methods ===
+  
+  @async
+  void startIndexingForegroundService();
+
+  @async
+  void stopIndexingForegroundService();
+
+  @async
+  void updateIndexingProgress({
+    required double progress,
+    required String phase,
+    required int entities,
+    required int relationships,
+  });
+
+  @async
+  bool isIndexingServiceRunning();
 }
 
 // === RAG Data Classes ===

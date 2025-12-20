@@ -204,8 +204,28 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
     }
   }
   
+  Future<bool> _requestNotificationPermission() async {
+    try {
+      // Request notification permission (needed for Android 13+ foreground service)
+      final platform = PlatformService();
+      final status = await platform.requestPermission(PermissionType.notifications);
+      if (status != PermissionStatus.granted) {
+        _showSnackBar('Notification permission needed for background indexing', isError: true);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Error requesting notification permission: $e');
+      // Continue anyway - notification might work without explicit permission on older Android
+      return true;
+    }
+  }
+  
   Future<void> _startIndexing({bool fullReindex = false}) async {
     try {
+      // Request notification permission first
+      await _requestNotificationPermission();
+      
       await _service.startIndexing(fullReindex: fullReindex);
       _showSnackBar('Indexing started...');
     } catch (e) {
@@ -307,10 +327,15 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       return _buildSetupView();
     }
     
+    // Check if all permissions are granted
+    final allPermissionsGranted = _permissions != null &&
+        _permissions!.values.every((s) => s == DataPermissionStatus.granted);
+    
     return Column(
       children: [
         _buildStatsCard(),
-        _buildPermissionsCard(),
+        // Only show permissions card if not all permissions are granted
+        if (!allPermissionsGranted) _buildPermissionsCard(),
         _buildIndexingCard(),
         const Divider(color: Colors.white24),
         _buildQuerySection(),
@@ -488,7 +513,9 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.stop),
-                    onPressed: _service.cancelIndexing,
+                    onPressed: () async {
+                      await _service.cancelIndexing();
+                    },
                     iconSize: 20,
                   ),
                 ] else ...[

@@ -149,10 +149,17 @@ class GraphRAGService {
   }
   
   /// Start indexing system data
-  Future<void> startIndexing({bool fullReindex = false}) async {
+  /// Set [useForegroundService] to true to keep indexing alive when app is backgrounded
+  Future<void> startIndexing({
+    bool fullReindex = false,
+    bool useForegroundService = true,
+  }) async {
     _checkInitialized();
-    debugPrint('[GraphRAGService] Starting indexing (fullReindex: $fullReindex)');
-    await _graphRag!.startIndexing(fullReindex: fullReindex);
+    debugPrint('[GraphRAGService] Starting indexing (fullReindex: $fullReindex, foreground: $useForegroundService)');
+    await _graphRag!.startIndexing(
+      fullReindex: fullReindex,
+      useForegroundService: useForegroundService,
+    );
   }
   
   /// Pause indexing
@@ -168,9 +175,9 @@ class GraphRAGService {
   }
   
   /// Cancel indexing
-  void cancelIndexing() {
+  Future<void> cancelIndexing() async {
     _checkInitialized();
-    _graphRag!.cancelIndexing();
+    await _graphRag!.cancelIndexing();
   }
   
   /// Query the knowledge graph

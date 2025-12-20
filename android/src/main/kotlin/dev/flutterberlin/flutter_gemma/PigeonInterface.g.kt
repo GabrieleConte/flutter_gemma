@@ -64,7 +64,8 @@ enum class PreferredBackend(val raw: Int) {
 
 enum class PermissionType(val raw: Int) {
   CONTACTS(0),
-  CALENDAR(1);
+  CALENDAR(1),
+  NOTIFICATIONS(2);
 
   companion object {
     fun ofRaw(raw: Int): PermissionType? {
@@ -586,6 +587,10 @@ interface PlatformService {
   fun requestPermission(type: PermissionType, callback: (Result<PermissionStatus>) -> Unit)
   fun fetchContacts(sinceTimestamp: Long?, limit: Long?, callback: (Result<List<ContactResult>>) -> Unit)
   fun fetchCalendarEvents(sinceTimestamp: Long?, startDate: Long?, endDate: Long?, limit: Long?, callback: (Result<List<CalendarEventResult>>) -> Unit)
+  fun startIndexingForegroundService(callback: (Result<Unit>) -> Unit)
+  fun stopIndexingForegroundService(callback: (Result<Unit>) -> Unit)
+  fun updateIndexingProgress(progress: Double, phase: String, entities: Long, relationships: Long, callback: (Result<Unit>) -> Unit)
+  fun isIndexingServiceRunning(callback: (Result<Boolean>) -> Unit)
 
   companion object {
     /** The codec used by PlatformService. */
@@ -1464,6 +1469,80 @@ interface PlatformService {
             val endDateArg = args[2] as Long?
             val limitArg = args[3] as Long?
             api.fetchCalendarEvents(sinceTimestampArg, startDateArg, endDateArg, limitArg) { result: Result<List<CalendarEventResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.startIndexingForegroundService$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.startIndexingForegroundService{ result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.stopIndexingForegroundService$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.stopIndexingForegroundService{ result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.updateIndexingProgress$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val progressArg = args[0] as Double
+            val phaseArg = args[1] as String
+            val entitiesArg = args[2] as Long
+            val relationshipsArg = args[3] as Long
+            api.updateIndexingProgress(progressArg, phaseArg, entitiesArg, relationshipsArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.isIndexingServiceRunning$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.isIndexingServiceRunning{ result: Result<Boolean> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

@@ -824,4 +824,53 @@ private class PlatformServiceImpl(
       }
     }
   }
+
+  // === Foreground Service Methods ===
+
+  override fun startIndexingForegroundService(callback: (Result<Unit>) -> Unit) {
+    try {
+      IndexingForegroundService.startService(context)
+      callback(Result.success(Unit))
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
+
+  override fun stopIndexingForegroundService(callback: (Result<Unit>) -> Unit) {
+    try {
+      IndexingForegroundService.stopService(context)
+      callback(Result.success(Unit))
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
+
+  override fun updateIndexingProgress(
+    progress: Double,
+    phase: String,
+    entities: Long,
+    relationships: Long,
+    callback: (Result<Unit>) -> Unit
+  ) {
+    try {
+      IndexingForegroundService.updateProgress(
+        context,
+        progress.toFloat(),
+        phase,
+        entities.toInt(),
+        relationships.toInt()
+      )
+      callback(Result.success(Unit))
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
+
+  override fun isIndexingServiceRunning(callback: (Result<Boolean>) -> Unit) {
+    try {
+      callback(Result.success(IndexingForegroundService.isRunning()))
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
 }

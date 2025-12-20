@@ -486,7 +486,7 @@ class LLMEntityExtractor implements EntityExtractor {
       }());
       
       return _ParsedExtraction(entities: entities, relationships: relationships);
-    } catch (e, stack) {
+    } catch (e) {
       // If parsing fails, try a more lenient approach
       assert(() {
         print('[EntityExtractor] JSON parsing failed: $e');

@@ -208,9 +208,16 @@ class GraphRAG {
   // === Indexing ===
 
   /// Start background indexing
-  Future<void> startIndexing({bool fullReindex = false}) async {
+  /// Set [useForegroundService] to true to keep indexing alive when app is backgrounded (Android only)
+  Future<void> startIndexing({
+    bool fullReindex = false,
+    bool useForegroundService = true,
+  }) async {
     _checkInitialized();
-    await _indexingService.startIndexing(fullReindex: fullReindex);
+    await _indexingService.startIndexing(
+      fullReindex: fullReindex,
+      useForegroundService: useForegroundService,
+    );
   }
 
   /// Pause indexing
@@ -226,9 +233,9 @@ class GraphRAG {
   }
 
   /// Cancel indexing
-  void cancelIndexing() {
+  Future<void> cancelIndexing() async {
     _checkInitialized();
-    _indexingService.cancelIndexing();
+    await _indexingService.cancelIndexing();
   }
 
   /// Wait for indexing to complete

@@ -6,6 +6,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.os.Build
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.util.Log
@@ -23,12 +24,14 @@ class SystemDataConnector(
     companion object {
         const val PERMISSION_REQUEST_CONTACTS = 1001
         const val PERMISSION_REQUEST_CALENDAR = 1002
+        const val PERMISSION_REQUEST_NOTIFICATIONS = 1003
         private const val TAG = "SystemDataConnector"
     }
 
     // Pending permission callbacks
     private var pendingContactsCallback: ((PermissionStatus) -> Unit)? = null
     private var pendingCalendarCallback: ((PermissionStatus) -> Unit)? = null
+    private var pendingNotificationsCallback: ((PermissionStatus) -> Unit)? = null
 
     fun setActivity(activity: Activity?) {
         this.activity = activity
@@ -61,6 +64,17 @@ class SystemDataConnector(
                 pendingCalendarCallback = null
                 true
             }
+            PERMISSION_REQUEST_NOTIFICATIONS -> {
+                val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    PermissionStatus.GRANTED
+                } else {
+                    PermissionStatus.DENIED
+                }
+                Log.d(TAG, "Notifications permission result: $status")
+                pendingNotificationsCallback?.invoke(status)
+                pendingNotificationsCallback = null
+                true
+            }
             else -> false
         }
     }
@@ -71,6 +85,7 @@ class SystemDataConnector(
         val status = when (type) {
             PermissionType.CONTACTS -> checkContactsPermission()
             PermissionType.CALENDAR -> checkCalendarPermission()
+            PermissionType.NOTIFICATIONS -> checkNotificationsPermission()
         }
         Log.d(TAG, "checkPermission($type) = $status")
         return status
@@ -86,6 +101,7 @@ class SystemDataConnector(
         when (type) {
             PermissionType.CONTACTS -> requestContactsPermission(activity, callback)
             PermissionType.CALENDAR -> requestCalendarPermission(activity, callback)
+            PermissionType.NOTIFICATIONS -> requestNotificationsPermission(activity, callback)
         }
     }
 
@@ -162,6 +178,54 @@ class SystemDataConnector(
             PERMISSION_REQUEST_CALENDAR
         )
         // Don't call callback here - wait for onRequestPermissionsResult
+    }
+
+    private fun checkNotificationsPermission(): PermissionStatus {
+        // For Android 13+ (API 33+), POST_NOTIFICATIONS permission is required
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)) {
+                PackageManager.PERMISSION_GRANTED -> PermissionStatus.GRANTED
+                PackageManager.PERMISSION_DENIED -> {
+                    if (activity != null &&
+                        ActivityCompat.shouldShowRequestPermissionRationale(activity!!, Manifest.permission.POST_NOTIFICATIONS)) {
+                        PermissionStatus.DENIED
+                    } else {
+                        PermissionStatus.NOT_DETERMINED
+                    }
+                }
+                else -> PermissionStatus.NOT_DETERMINED
+            }
+        } else {
+            // Below Android 13, notifications are always allowed
+            PermissionStatus.GRANTED
+        }
+    }
+
+    private fun requestNotificationsPermission(activity: Activity, callback: (PermissionStatus) -> Unit) {
+        Log.d(TAG, "requestNotificationsPermission called")
+        
+        // For Android 13+ (API 33+), request POST_NOTIFICATIONS permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) 
+                == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Notifications permission already granted")
+                callback(PermissionStatus.GRANTED)
+                return
+            }
+
+            // Store callback for when permission result arrives
+            pendingNotificationsCallback = callback
+            
+            Log.d(TAG, "Requesting notifications permission from system")
+            ActivityCompat.requestPermissions(
+                activity,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                PERMISSION_REQUEST_NOTIFICATIONS
+            )
+        } else {
+            // Below Android 13, notifications are always allowed
+            callback(PermissionStatus.GRANTED)
+        }
     }
 
     // MARK: - Contacts

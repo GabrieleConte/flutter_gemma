@@ -77,6 +77,7 @@ enum PreferredBackend: Int {
 enum PermissionType: Int {
   case contacts = 0
   case calendar = 1
+  case notifications = 2
 }
 
 enum PermissionStatus: Int {
@@ -622,6 +623,10 @@ protocol PlatformService {
   func requestPermission(type: PermissionType, completion: @escaping (Result<PermissionStatus, Error>) -> Void)
   func fetchContacts(sinceTimestamp: Int64?, limit: Int64?, completion: @escaping (Result<[ContactResult], Error>) -> Void)
   func fetchCalendarEvents(sinceTimestamp: Int64?, startDate: Int64?, endDate: Int64?, limit: Int64?, completion: @escaping (Result<[CalendarEventResult], Error>) -> Void)
+  func startIndexingForegroundService(completion: @escaping (Result<Void, Error>) -> Void)
+  func stopIndexingForegroundService(completion: @escaping (Result<Void, Error>) -> Void)
+  func updateIndexingProgress(progress: Double, phase: String, entities: Int64, relationships: Int64, completion: @escaping (Result<Void, Error>) -> Void)
+  func isIndexingServiceRunning(completion: @escaping (Result<Bool, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -1402,6 +1407,71 @@ class PlatformServiceSetup {
       }
     } else {
       fetchCalendarEventsChannel.setMessageHandler(nil)
+    }
+    let startIndexingForegroundServiceChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.startIndexingForegroundService\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      startIndexingForegroundServiceChannel.setMessageHandler { _, reply in
+        api.startIndexingForegroundService { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      startIndexingForegroundServiceChannel.setMessageHandler(nil)
+    }
+    let stopIndexingForegroundServiceChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.stopIndexingForegroundService\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      stopIndexingForegroundServiceChannel.setMessageHandler { _, reply in
+        api.stopIndexingForegroundService { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      stopIndexingForegroundServiceChannel.setMessageHandler(nil)
+    }
+    let updateIndexingProgressChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.updateIndexingProgress\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      updateIndexingProgressChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let progressArg = args[0] as! Double
+        let phaseArg = args[1] as! String
+        let entitiesArg = args[2] as! Int64
+        let relationshipsArg = args[3] as! Int64
+        api.updateIndexingProgress(progress: progressArg, phase: phaseArg, entities: entitiesArg, relationships: relationshipsArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      updateIndexingProgressChannel.setMessageHandler(nil)
+    }
+    let isIndexingServiceRunningChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.isIndexingServiceRunning\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      isIndexingServiceRunningChannel.setMessageHandler { _, reply in
+        api.isIndexingServiceRunning { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      isIndexingServiceRunningChannel.setMessageHandler(nil)
     }
   }
 }

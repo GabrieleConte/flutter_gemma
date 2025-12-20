@@ -4,7 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
     <!-- Permissions for GraphRAG system data access -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -37,6 +39,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        
+        <!-- Foreground service for GraphRAG indexing -->
+        <service
+            android:name="dev.flutterberlin.flutter_gemma.IndexingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        
         <uses-native-library
             android:name="libOpenCL.so"
             android:required="false"/>

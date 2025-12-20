@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../pigeon.g.dart';
 import '../connectors/data_connector.dart';
 import 'graph_repository.dart';
 import 'entity_extractor.dart';
@@ -117,6 +118,7 @@ class BackgroundIndexingService {
   
   late final LouvainCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
+  final PlatformService _platform = PlatformService();
   
   IndexingProgress _progress = IndexingProgress(
     status: IndexingStatus.idle,
@@ -127,6 +129,7 @@ class BackgroundIndexingService {
   Timer? _reindexTimer;
   bool _cancelRequested = false;
   Completer<void>? _currentJob;
+  bool _useForegroundService = true;
 
   BackgroundIndexingService({
     required this.repository,
@@ -166,15 +169,27 @@ class BackgroundIndexingService {
   bool get isRunning => _progress.status == IndexingStatus.running;
 
   /// Start indexing process
-  Future<void> startIndexing({bool fullReindex = false}) async {
+  /// Set [useForegroundService] to true to keep indexing alive when app is backgrounded
+  Future<void> startIndexing({bool fullReindex = false, bool useForegroundService = true}) async {
     if (isRunning) {
       throw StateError('Indexing is already running');
     }
 
     _cancelRequested = false;
     _currentJob = Completer<void>();
+    _useForegroundService = useForegroundService;
 
     try {
+      // Start foreground service for background execution
+      if (_useForegroundService) {
+        try {
+          await _platform.startIndexingForegroundService();
+        } catch (e) {
+          print('[BackgroundIndexing] Failed to start foreground service: $e');
+          // Continue without foreground service
+        }
+      }
+      
       _updateProgress(_progress.copyWith(
         status: IndexingStatus.running,
         currentPhase: 'Starting',
@@ -208,6 +223,15 @@ class BackgroundIndexingService {
         endTime: DateTime.now(),
       ));
       print('[BackgroundIndexing] Indexing completed successfully');
+      
+      // Stop foreground service
+      if (_useForegroundService) {
+        try {
+          await _platform.stopIndexingForegroundService();
+        } catch (e) {
+          print('[BackgroundIndexing] Failed to stop foreground service: $e');
+        }
+      }
     } catch (e, stack) {
       print('[BackgroundIndexing] Indexing failed with error: $e');
       print('[BackgroundIndexing] Stack trace: $stack');
@@ -217,6 +241,13 @@ class BackgroundIndexingService {
         errorMessage: e.toString(),
         endTime: DateTime.now(),
       ));
+      
+      // Stop foreground service on failure too
+      if (_useForegroundService) {
+        try {
+          await _platform.stopIndexingForegroundService();
+        } catch (_) {}
+      }
       rethrow;
     } finally {
       _currentJob?.complete();
@@ -247,13 +278,20 @@ class BackgroundIndexingService {
   }
 
   /// Cancel indexing
-  void cancelIndexing() {
+  Future<void> cancelIndexing() async {
     _cancelRequested = true;
     _updateProgress(_progress.copyWith(
       status: IndexingStatus.cancelled,
       currentPhase: 'Cancelled',
       endTime: DateTime.now(),
     ));
+    
+    // Stop foreground service
+    if (_useForegroundService) {
+      try {
+        await _platform.stopIndexingForegroundService();
+      } catch (_) {}
+    }
   }
 
   /// Wait for current indexing job to complete
@@ -650,6 +688,16 @@ class BackgroundIndexingService {
   void _updateProgress(IndexingProgress progress) {
     _progress = progress;
     _progressController.add(progress);
+    
+    // Update notification progress if foreground service is running
+    if (_useForegroundService && progress.status == IndexingStatus.running) {
+      _platform.updateIndexingProgress(
+        progress: progress.progress,
+        phase: progress.currentPhase,
+        entities: progress.extractedEntities,
+        relationships: progress.extractedRelationships,
+      ).catchError((_) {}); // Ignore errors
+    }
   }
 
   /// Dispose resources

@@ -343,7 +343,8 @@ class GraphStore(
     ) {
         val db = database ?: throw IllegalStateException("Database not initialized")
 
-        if (detectedDimension != null && embedding.size != detectedDimension) {
+        // Allow empty embeddings for initial community creation (will be updated later with real embeddings)
+        if (embedding.isNotEmpty() && detectedDimension != null && embedding.size != detectedDimension) {
             throw IllegalArgumentException(
                 "Embedding dimension mismatch: expected $detectedDimension, got ${embedding.size}"
             )
