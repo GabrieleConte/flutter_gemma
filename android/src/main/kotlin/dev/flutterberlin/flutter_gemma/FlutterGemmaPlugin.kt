@@ -2,6 +2,7 @@ package dev.flutterberlin.flutter_gemma
 
 import android.app.Activity
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 
@@ -104,6 +105,7 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, PluginRegistry.RequestPe
 private class PlatformServiceImpl(
   val context: Context
 ) : PlatformService, EventChannel.StreamHandler {
+  private val TAG = "PlatformServiceImpl"
   private val scope = CoroutineScope(Dispatchers.IO)
   private var eventSink: EventChannel.EventSink? = null
   private var inferenceModel: InferenceModel? = null
@@ -479,11 +481,14 @@ private class PlatformServiceImpl(
   override fun initializeGraphStore(databasePath: String, callback: (Result<Unit>) -> Unit) {
     scope.launch {
       try {
+        Log.d(TAG, "initializeGraphStore called with path: $databasePath")
         graphStore?.close()
         graphStore = GraphStore(context)
         graphStore!!.initialize(databasePath)
+        Log.d(TAG, "GraphStore initialized successfully")
         callback(Result.success(Unit))
       } catch (e: Exception) {
+        Log.e(TAG, "initializeGraphStore failed: ${e.message}")
         callback(Result.failure(e))
       }
     }
@@ -546,8 +551,9 @@ private class PlatformServiceImpl(
   override fun getEntity(id: String, callback: (Result<EntityResult?>) -> Unit) {
     scope.launch {
       try {
-        val entity = graphStore?.getEntity(id)
+        val store = graphStore
           ?: throw IllegalStateException("Graph store not initialized")
+        val entity = store.getEntity(id)
         callback(Result.success(entity))
       } catch (e: Exception) {
         callback(Result.failure(e))

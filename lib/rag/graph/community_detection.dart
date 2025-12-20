@@ -182,13 +182,21 @@ class LouvainCommunityDetector {
   }
 
   /// Run Louvain algorithm recursively
+  /// nodeToEntityIds maps graph node IDs to original entity IDs (for aggregated levels)
   Future<List<List<DetectedCommunity>>> _runLouvain(
     _Graph graph,
-    int currentLevel,
-  ) async {
+    int currentLevel, {
+    Map<String, Set<String>>? nodeToEntityIds,
+  }) async {
     if (currentLevel >= config.maxDepth) {
       return [];
     }
+    
+    // At level 0, each node IS an entity
+    // At higher levels, nodes are community IDs that represent multiple entities
+    nodeToEntityIds ??= {
+      for (final nodeId in graph.nodes.keys) nodeId: {nodeId}
+    };
 
     // Phase 1: Local optimization
     var improved = true;
@@ -236,8 +244,8 @@ class LouvainCommunityDetector {
       iteration++;
     }
     
-    // Extract communities at this level
-    final communities = _extractCommunities(graph, currentLevel);
+    // Extract communities at this level with proper entity ID mapping
+    final communities = _extractCommunities(graph, currentLevel, nodeToEntityIds);
     
     if (communities.length == graph.nodes.length || communities.length <= 1) {
       // No aggregation possible
@@ -253,11 +261,21 @@ class LouvainCommunityDetector {
       return [communities];
     }
     
+    // Build mapping from new community IDs to original entity IDs for next level
+    final nextLevelNodeToEntityIds = <String, Set<String>>{};
+    for (final community in validCommunities) {
+      nextLevelNodeToEntityIds[community.id] = community.entityIds;
+    }
+    
     // Phase 2: Build aggregated graph
     final aggregatedGraph = _aggregateGraph(graph, validCommunities);
     
-    // Recursive call for next level
-    final nextLevels = await _runLouvain(aggregatedGraph, currentLevel + 1);
+    // Recursive call for next level with updated entity mapping
+    final nextLevels = await _runLouvain(
+      aggregatedGraph, 
+      currentLevel + 1,
+      nodeToEntityIds: nextLevelNodeToEntityIds,
+    );
     
     return [validCommunities, ...nextLevels];
   }
@@ -351,19 +369,28 @@ class LouvainCommunityDetector {
   }
 
   /// Extract communities from current partition
-  List<DetectedCommunity> _extractCommunities(_Graph graph, int level) {
+  /// nodeToEntityIds maps graph node IDs to original entity IDs
+  List<DetectedCommunity> _extractCommunities(
+    _Graph graph, 
+    int level,
+    Map<String, Set<String>> nodeToEntityIds,
+  ) {
     final communityNodes = <String, Set<String>>{};
     
     for (final entry in graph.nodes.entries) {
-      communityNodes.putIfAbsent(entry.value.community, () => {});
-      communityNodes[entry.value.community]!.add(entry.key);
+      final communityId = entry.value.community;
+      communityNodes.putIfAbsent(communityId, () => {});
+      
+      // Map graph node to original entity IDs
+      final originalEntityIds = nodeToEntityIds[entry.key] ?? {entry.key};
+      communityNodes[communityId]!.addAll(originalEntityIds);
     }
     
     return communityNodes.entries.map((entry) {
       return DetectedCommunity(
         id: 'community_${level}_${entry.key}',
         level: level,
-        entityIds: entry.value,
+        entityIds: entry.value,  // Now contains original entity IDs
         modularity: 0.0, // Could calculate individual modularity
       );
     }).toList();

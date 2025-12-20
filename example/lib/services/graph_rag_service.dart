@@ -84,12 +84,17 @@ class GraphRAGService {
   }
   
   /// Generate LLM response using the chat model
+  /// For entity extraction, we clear history before each call to avoid context overflow
   Future<String> _generateLLMResponse(String prompt) async {
     if (_chat == null) {
       throw StateError('Chat model not initialized');
     }
     
     debugPrint('[GraphRAGService] Generating LLM response for prompt (${prompt.length} chars)');
+    
+    // Clear history before each extraction to avoid context window overflow
+    // Entity extraction should be stateless - each prompt is independent
+    await _chat!.clearHistory();
     
     // Add prompt and generate response
     await _chat!.addQuery(Message(text: prompt));

@@ -33,9 +33,19 @@ class ExtractedEntity {
   });
 
   factory ExtractedEntity.fromJson(Map<String, dynamic> json) {
+    // Handle various key names that LLMs might produce
+    final name = json['name'] as String? 
+        ?? json['entity'] as String?
+        ?? json['entity_name'] as String?
+        ?? json['label'] as String?
+        ?? '';
+    final type = json['type'] as String? 
+        ?? json['entity_type'] as String?
+        ?? json['category'] as String?
+        ?? 'UNKNOWN';
     return ExtractedEntity(
-      name: json['name'] as String? ?? '',
-      type: json['type'] as String? ?? 'UNKNOWN',
+      name: name,
+      type: type.toUpperCase(),
       description: json['description'] as String?,
       attributes: json['attributes'] as Map<String, dynamic>?,
       confidence: (json['confidence'] as num?)?.toDouble() ?? 1.0,
@@ -70,10 +80,28 @@ class ExtractedRelationship {
   });
 
   factory ExtractedRelationship.fromJson(Map<String, dynamic> json) {
+    // Handle various key names that LLMs might produce
+    final source = json['source'] as String? 
+        ?? json['sourceEntity'] as String? 
+        ?? json['entity1'] as String?
+        ?? json['from'] as String?
+        ?? json['subject'] as String?
+        ?? '';
+    final target = json['target'] as String? 
+        ?? json['targetEntity'] as String? 
+        ?? json['entity2'] as String?
+        ?? json['to'] as String?
+        ?? json['object'] as String?
+        ?? '';
+    final type = json['type'] as String? 
+        ?? json['relationship'] as String? 
+        ?? json['relation'] as String?
+        ?? json['relationship_type'] as String?
+        ?? 'RELATED_TO';
     return ExtractedRelationship(
-      sourceEntity: json['source'] as String? ?? json['sourceEntity'] as String? ?? '',
-      targetEntity: json['target'] as String? ?? json['targetEntity'] as String? ?? '',
-      type: json['type'] as String? ?? json['relationship'] as String? ?? 'RELATED_TO',
+      sourceEntity: source,
+      targetEntity: target,
+      type: type.toUpperCase().replaceAll(' ', '_'),
       description: json['description'] as String?,
       weight: (json['weight'] as num?)?.toDouble() ?? 1.0,
       confidence: (json['confidence'] as num?)?.toDouble() ?? 1.0,
@@ -229,26 +257,20 @@ JSON output:''';
     final phones = (contact['phoneNumbers'] as List?)?.join(', ') ?? '';
     final note = contact['note'] ?? '';
 
-    return '''Analyze this contact and extract entities and relationships.
+    return '''Extract entities and relationships from this contact.
 
-Contact Information:
-- Name: $name
-- Organization: $org
-- Job Title: $job
-- Email(s): $emails
-- Phone(s): $phones
-- Notes: $note
+Contact:
+Name: $name
+Organization: $org
+Job: $job
+Email: $emails
+Phone: $phones
+Notes: $note
 
-Extract entities (the person, their organization, location, skills mentioned, etc.)
-and relationships between them.
+Return JSON with this exact format:
+{"entities":[{"name":"PersonName","type":"PERSON"},{"name":"CompanyName","type":"ORGANIZATION"}],"relationships":[{"source":"PersonName","target":"CompanyName","type":"WORKS_AT"}]}
 
-Return as JSON:
-{
-  "entities": [...],
-  "relationships": [...]
-}
-
-JSON output:''';
+Your JSON:''';
   }
 
   static String eventExtractionPrompt(Map<String, dynamic> event) {
@@ -259,26 +281,20 @@ JSON output:''';
     final startDate = event['startDate'] ?? event['start'] ?? '';
     final endDate = event['endDate'] ?? event['end'] ?? '';
 
-    return '''Analyze this calendar event and extract entities and relationships.
+    return '''Extract entities and relationships from this event.
 
-Event Information:
-- Title: $title
-- Location: $location
-- Description: $description
-- Attendees: $attendees
-- Start: $startDate
-- End: $endDate
+Event:
+Title: $title
+Location: $location
+Description: $description
+Attendees: $attendees
+Start: $startDate
+End: $endDate
 
-Extract entities (people, places, topics, projects mentioned)
-and relationships between them.
+Return JSON with this exact format:
+{"entities":[{"name":"EventTitle","type":"EVENT"},{"name":"PersonName","type":"PERSON"},{"name":"PlaceName","type":"LOCATION"}],"relationships":[{"source":"PersonName","target":"EventTitle","type":"ATTENDS"}]}
 
-Return as JSON:
-{
-  "entities": [...],
-  "relationships": [...]
-}
-
-JSON output:''';
+Your JSON:''';
   }
 
   static String communitySummaryPrompt(
@@ -410,64 +426,174 @@ class LLMEntityExtractor implements EntityExtractor {
     try {
       // Try to extract JSON from response
       final jsonStr = _extractJson(response);
+      
+      // Debug: Log extracted JSON
+      assert(() {
+        print('[EntityExtractor] Extracted JSON: ${jsonStr.length > 500 ? "${jsonStr.substring(0, 500)}..." : jsonStr}');
+        return true;
+      }());
+      
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
       
       final entitiesJson = json['entities'] as List<dynamic>? ?? [];
       final relationshipsJson = json['relationships'] as List<dynamic>? ?? [];
       
+      // Debug: Log parsed counts
+      assert(() {
+        print('[EntityExtractor] Found ${entitiesJson.length} entity entries, ${relationshipsJson.length} relationship entries');
+        return true;
+      }());
+      
       final entities = entitiesJson
-          .map((e) => ExtractedEntity.fromJson(e as Map<String, dynamic>))
+          .map((e) {
+            try {
+              return ExtractedEntity.fromJson(e as Map<String, dynamic>);
+            } catch (err) {
+              assert(() {
+                print('[EntityExtractor] Error parsing entity: $e -> $err');
+                return true;
+              }());
+              return null;
+            }
+          })
+          .whereType<ExtractedEntity>()
           .where((e) => e.name.isNotEmpty)
           .toList();
       
       final relationships = relationshipsJson
-          .map((r) => ExtractedRelationship.fromJson(r as Map<String, dynamic>))
+          .map((r) {
+            try {
+              return ExtractedRelationship.fromJson(r as Map<String, dynamic>);
+            } catch (err) {
+              assert(() {
+                print('[EntityExtractor] Error parsing relationship: $r -> $err');
+                return true;
+              }());
+              return null;
+            }
+          })
+          .whereType<ExtractedRelationship>()
           .where((r) => r.sourceEntity.isNotEmpty && r.targetEntity.isNotEmpty)
           .toList();
       
+      // Debug: Log final counts
+      assert(() {
+        print('[EntityExtractor] Parsed ${entities.length} entities, ${relationships.length} relationships');
+        if (entities.isNotEmpty) {
+          print('[EntityExtractor] First entity: ${entities.first.name} (${entities.first.type})');
+        }
+        return true;
+      }());
+      
       return _ParsedExtraction(entities: entities, relationships: relationships);
-    } catch (e) {
+    } catch (e, stack) {
       // If parsing fails, try a more lenient approach
+      assert(() {
+        print('[EntityExtractor] JSON parsing failed: $e');
+        print('[EntityExtractor] Response preview: ${response.length > 200 ? "${response.substring(0, 200)}..." : response}');
+        return true;
+      }());
       return _fallbackParsing(response);
     }
   }
 
-  /// Extract JSON from response that might contain extra text
+  /// Extract JSON from response that might contain extra text or markdown
   String _extractJson(String response) {
+    var text = response;
+    
+    // Remove markdown code blocks if present
+    if (text.contains('```json')) {
+      final jsonStart = text.indexOf('```json');
+      final jsonEnd = text.indexOf('```', jsonStart + 7);
+      if (jsonEnd > jsonStart) {
+        text = text.substring(jsonStart + 7, jsonEnd).trim();
+      }
+    } else if (text.contains('```')) {
+      // Generic code block
+      final codeStart = text.indexOf('```');
+      final codeEnd = text.indexOf('```', codeStart + 3);
+      if (codeEnd > codeStart) {
+        text = text.substring(codeStart + 3, codeEnd).trim();
+      }
+    }
+    
     // Find the first { and last }
-    final start = response.indexOf('{');
-    final end = response.lastIndexOf('}');
+    final start = text.indexOf('{');
+    final end = text.lastIndexOf('}');
     
     if (start >= 0 && end > start) {
-      return response.substring(start, end + 1);
+      return text.substring(start, end + 1);
     }
     
     throw const FormatException('No JSON found in response');
   }
 
-  /// Fallback parsing for non-JSON responses
+  /// Fallback parsing for non-JSON or malformed JSON responses
   _ParsedExtraction _fallbackParsing(String response) {
-    // Simple fallback - extract entity names from response
     final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
     
-    // Look for capitalized words/phrases as potential entities
-    final namePattern = RegExp(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b');
-    final matches = namePattern.allMatches(response);
+    // Try to extract partial JSON - look for individual entity objects
+    final entityPattern = RegExp(
+      r'\{"name"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"([^"]+)"',
+      caseSensitive: false,
+    );
     
-    final seenNames = <String>{};
-    for (final match in matches) {
-      final name = match.group(1)!;
-      if (!seenNames.contains(name.toLowerCase())) {
-        seenNames.add(name.toLowerCase());
+    for (final match in entityPattern.allMatches(response)) {
+      final name = match.group(1) ?? '';
+      final type = match.group(2) ?? 'UNKNOWN';
+      if (name.isNotEmpty && name.length > 1 && !name.contains('+39')) {
         entities.add(ExtractedEntity(
           name: name,
-          type: EntityTypes.person, // Default type
-          confidence: 0.5,
+          type: type.toUpperCase(),
+          confidence: 0.7,
         ));
       }
     }
     
-    return _ParsedExtraction(entities: entities, relationships: []);
+    // Try to extract relationships
+    final relPattern = RegExp(
+      r'\{"source"\s*:\s*"([^"]+)"\s*,\s*"target"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"([^"]+)"',
+      caseSensitive: false,
+    );
+    
+    for (final match in relPattern.allMatches(response)) {
+      final source = match.group(1) ?? '';
+      final target = match.group(2) ?? '';
+      final type = match.group(3) ?? 'RELATED_TO';
+      if (source.isNotEmpty && target.isNotEmpty) {
+        relationships.add(ExtractedRelationship(
+          sourceEntity: source,
+          targetEntity: target,
+          type: type.toUpperCase().replaceAll(' ', '_'),
+          confidence: 0.7,
+        ));
+      }
+    }
+    
+    // If still no entities, fallback to capitalized word extraction
+    if (entities.isEmpty) {
+      final namePattern = RegExp(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b');
+      final seenNames = <String>{};
+      for (final match in namePattern.allMatches(response)) {
+        final name = match.group(1)!;
+        if (!seenNames.contains(name.toLowerCase()) && name.length > 2) {
+          seenNames.add(name.toLowerCase());
+          entities.add(ExtractedEntity(
+            name: name,
+            type: EntityTypes.person,
+            confidence: 0.5,
+          ));
+        }
+      }
+    }
+    
+    assert(() {
+      print('[EntityExtractor] Fallback parsed ${entities.length} entities, ${relationships.length} relationships');
+      return true;
+    }());
+    
+    return _ParsedExtraction(entities: entities, relationships: relationships);
   }
 
   /// Convert structured data to text for generic extraction

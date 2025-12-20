@@ -207,7 +207,10 @@ class BackgroundIndexingService {
         currentPhase: 'Completed',
         endTime: DateTime.now(),
       ));
-    } catch (e) {
+      print('[BackgroundIndexing] Indexing completed successfully');
+    } catch (e, stack) {
+      print('[BackgroundIndexing] Indexing failed with error: $e');
+      print('[BackgroundIndexing] Stack trace: $stack');
       _updateProgress(_progress.copyWith(
         status: IndexingStatus.failed,
         currentPhase: 'Failed',
@@ -322,6 +325,12 @@ class BackgroundIndexingService {
           sourceId: sourceId,
           sourceType: dataType,
         );
+        
+        // Debug: Log extraction results
+        assert(() {
+          print('[BackgroundIndexing] Extracted ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
+          return true;
+        }());
 
         // Add extracted entities to graph
         for (final entity in extraction.entities) {
@@ -343,6 +352,10 @@ class BackgroundIndexingService {
           final existing = await repository.getEntity(graphEntity.id);
           if (existing == null) {
             await repository.addEntity(graphEntity);
+            assert(() {
+              print('[BackgroundIndexing] Added entity: ${entity.name} (${entity.type})');
+              return true;
+            }());
           } else if (graphEntity.lastModified.isAfter(existing.lastModified)) {
             await repository.updateEntity(
               graphEntity.id,
@@ -353,13 +366,61 @@ class BackgroundIndexingService {
               metadata: graphEntity.metadata,
               lastModified: graphEntity.lastModified,
             );
+            assert(() {
+              print('[BackgroundIndexing] Updated entity: ${entity.name}');
+              return true;
+            }());
           }
+        }
+
+        // Build a map of entity names to their IDs for relationship creation
+        final entityNameToId = <String, String>{};
+        for (final entity in extraction.entities) {
+          final entityId = _generateEntityId(entity.name, entity.type);
+          // Store both exact name and lowercase version for matching
+          entityNameToId[entity.name] = entityId;
+          entityNameToId[entity.name.toLowerCase()] = entityId;
         }
 
         // Add extracted relationships
         for (final rel in extraction.relationships) {
-          final sourceEntityId = _generateEntityId(rel.sourceEntity, '');
-          final targetEntityId = _generateEntityId(rel.targetEntity, '');
+          // Try to find actual entity IDs by matching names
+          String? sourceEntityId = entityNameToId[rel.sourceEntity] 
+              ?? entityNameToId[rel.sourceEntity.toLowerCase()];
+          String? targetEntityId = entityNameToId[rel.targetEntity]
+              ?? entityNameToId[rel.targetEntity.toLowerCase()];
+          
+          // If we can't find the entities in this extraction, try generating IDs
+          // with common type prefixes
+          if (sourceEntityId == null) {
+            for (final type in ['PERSON', 'ORGANIZATION', 'LOCATION', 'EVENT', '']) {
+              final candidateId = _generateEntityId(rel.sourceEntity, type);
+              final exists = await repository.getEntity(candidateId);
+              if (exists != null) {
+                sourceEntityId = candidateId;
+                break;
+              }
+            }
+          }
+          if (targetEntityId == null) {
+            for (final type in ['PERSON', 'ORGANIZATION', 'LOCATION', 'EVENT', '']) {
+              final candidateId = _generateEntityId(rel.targetEntity, type);
+              final exists = await repository.getEntity(candidateId);
+              if (exists != null) {
+                targetEntityId = candidateId;
+                break;
+              }
+            }
+          }
+          
+          // Skip if we still can't find valid entity IDs
+          if (sourceEntityId == null || targetEntityId == null) {
+            assert(() {
+              print('[BackgroundIndexing] Skipping relationship: could not find entity IDs for ${rel.sourceEntity} -> ${rel.targetEntity}');
+              return true;
+            }());
+            continue;
+          }
 
           final relationship = GraphRelationship(
             id: '${sourceEntityId}_${rel.type}_$targetEntityId',
@@ -374,8 +435,16 @@ class BackgroundIndexingService {
 
           try {
             await repository.addRelationship(relationship);
+            assert(() {
+              print('[BackgroundIndexing] Added relationship: ${rel.sourceEntity} -[${rel.type}]-> ${rel.targetEntity}');
+              return true;
+            }());
           } catch (e) {
             // Relationship might already exist or entities might not exist
+            assert(() {
+              print('[BackgroundIndexing] Relationship error: $e');
+              return true;
+            }());
           }
         }
 
@@ -388,7 +457,7 @@ class BackgroundIndexingService {
         // to allow batch processing to continue
         assert(() {
           // ignore: avoid_print
-          print('Error processing item: $e');
+          print('[BackgroundIndexing] Error processing item: $e');
           return true;
         }());
       }
@@ -401,6 +470,8 @@ class BackgroundIndexingService {
       currentPhase: 'Detecting communities',
     ));
 
+    print('[BackgroundIndexing] Starting community detection phase');
+
     // Get all entities and relationships
     final entities = <GraphEntity>[];
     final relationships = <GraphRelationship>[];
@@ -409,33 +480,66 @@ class BackgroundIndexingService {
     for (final type in ['PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION']) {
       final typeEntities = await repository.getEntitiesByType(type);
       entities.addAll(typeEntities);
+      print('[BackgroundIndexing] Loaded ${typeEntities.length} $type entities');
     }
+    
+    print('[BackgroundIndexing] Total entities for community detection: ${entities.length}');
 
     // Load relationships for each entity
     for (final entity in entities) {
       final rels = await repository.getRelationships(entity.id);
       relationships.addAll(rels);
     }
+    
+    print('[BackgroundIndexing] Total relationships for community detection: ${relationships.length}');
 
     // Run community detection
     final result = await _communityDetector.detectCommunities(
       entities,
       relationships,
     );
+    
+    print('[BackgroundIndexing] Detected ${result.communities.length} communities');
+    
+    // Build set of valid entity IDs for validation
+    final validEntityIds = entities.map((e) => e.id).toSet();
+    print('[BackgroundIndexing] Valid entity IDs: ${validEntityIds.length}');
 
     // Store communities
+    var storedCount = 0;
     for (final community in result.communities) {
+      // Filter entity IDs to only include ones that exist in the database
+      final validCommunityEntityIds = community.entityIds
+          .where((id) => validEntityIds.contains(id))
+          .toList();
+      
+      if (validCommunityEntityIds.isEmpty) {
+        print('[BackgroundIndexing] Skipping community ${community.id} - no valid entity IDs');
+        continue;
+      }
+      
+      if (validCommunityEntityIds.length != community.entityIds.length) {
+        print('[BackgroundIndexing] Community ${community.id} filtered from ${community.entityIds.length} to ${validCommunityEntityIds.length} entity IDs');
+      }
+      
       final graphCommunity = GraphCommunity(
         id: community.id,
         level: community.level,
         summary: '', // Will be generated in next phase
-        entityIds: community.entityIds.toList(),
+        entityIds: validCommunityEntityIds,
         embedding: null,
         metadata: {'modularity': community.modularity},
       );
 
-      await repository.addCommunity(graphCommunity);
+      try {
+        await repository.addCommunity(graphCommunity);
+        storedCount++;
+      } catch (e) {
+        print('[BackgroundIndexing] Failed to store community ${community.id}: $e');
+      }
     }
+    
+    print('[BackgroundIndexing] Successfully stored $storedCount communities');
 
     _updateProgress(_progress.copyWith(
       detectedCommunities: result.communities.length,
