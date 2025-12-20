@@ -10,10 +10,11 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry
 import kotlinx.coroutines.*
 
 /** FlutterGemmaPlugin */
-class FlutterGemmaPlugin: FlutterPlugin, ActivityAware {
+class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, PluginRegistry.RequestPermissionsResultListener {
   /// The MethodChannel that will the communication between Flutter and native Android
   ///
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
@@ -22,6 +23,7 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware {
   private lateinit var bundledChannel: MethodChannel
   private lateinit var context: Context
   private var service: PlatformServiceImpl? = null
+  private var activityBinding: ActivityPluginBinding? = null
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     context = flutterPluginBinding.applicationContext
@@ -68,20 +70,33 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware {
     service = null
   }
 
+  // RequestPermissionsResultListener - forward permission results to service
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
+    return service?.onRequestPermissionsResult(requestCode, permissions, grantResults) ?: false
+  }
+
   // ActivityAware implementation for permission handling
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+    activityBinding = binding
+    binding.addRequestPermissionsResultListener(this)
     service?.setActivity(binding.activity)
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
+    activityBinding?.removeRequestPermissionsResultListener(this)
+    activityBinding = null
     service?.setActivity(null)
   }
 
   override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+    activityBinding = binding
+    binding.addRequestPermissionsResultListener(this)
     service?.setActivity(binding.activity)
   }
 
   override fun onDetachedFromActivity() {
+    activityBinding?.removeRequestPermissionsResultListener(this)
+    activityBinding = null
     service?.setActivity(null)
   }
 }
@@ -106,6 +121,11 @@ private class PlatformServiceImpl(
   fun setActivity(activity: Activity?) {
     this.activity = activity
     systemDataConnector?.setActivity(activity)
+  }
+
+  // Forward permission results to SystemDataConnector
+  fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
+    return systemDataConnector?.onRequestPermissionsResult(requestCode, permissions, grantResults) ?: false
   }
 
   override fun createModel(

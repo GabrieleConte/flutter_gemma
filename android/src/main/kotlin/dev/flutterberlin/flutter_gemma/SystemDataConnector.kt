@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.provider.CalendarContract
 import android.provider.ContactsContract
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.util.*
@@ -22,23 +23,62 @@ class SystemDataConnector(
     companion object {
         const val PERMISSION_REQUEST_CONTACTS = 1001
         const val PERMISSION_REQUEST_CALENDAR = 1002
+        private const val TAG = "SystemDataConnector"
     }
+
+    // Pending permission callbacks
+    private var pendingContactsCallback: ((PermissionStatus) -> Unit)? = null
+    private var pendingCalendarCallback: ((PermissionStatus) -> Unit)? = null
 
     fun setActivity(activity: Activity?) {
         this.activity = activity
     }
 
+    // Handle permission result from Activity
+    fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
+        Log.d(TAG, "onRequestPermissionsResult: requestCode=$requestCode, results=${grantResults.toList()}")
+        
+        return when (requestCode) {
+            PERMISSION_REQUEST_CONTACTS -> {
+                val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    PermissionStatus.GRANTED
+                } else {
+                    PermissionStatus.DENIED
+                }
+                Log.d(TAG, "Contacts permission result: $status")
+                pendingContactsCallback?.invoke(status)
+                pendingContactsCallback = null
+                true
+            }
+            PERMISSION_REQUEST_CALENDAR -> {
+                val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    PermissionStatus.GRANTED
+                } else {
+                    PermissionStatus.DENIED
+                }
+                Log.d(TAG, "Calendar permission result: $status")
+                pendingCalendarCallback?.invoke(status)
+                pendingCalendarCallback = null
+                true
+            }
+            else -> false
+        }
+    }
+
     // MARK: - Permission Methods
 
     fun checkPermission(type: PermissionType): PermissionStatus {
-        return when (type) {
+        val status = when (type) {
             PermissionType.CONTACTS -> checkContactsPermission()
             PermissionType.CALENDAR -> checkCalendarPermission()
         }
+        Log.d(TAG, "checkPermission($type) = $status")
+        return status
     }
 
     fun requestPermission(type: PermissionType, callback: (PermissionStatus) -> Unit) {
         val activity = this.activity ?: run {
+            Log.w(TAG, "requestPermission: No activity attached!")
             callback(PermissionStatus.DENIED)
             return
         }
@@ -81,44 +121,57 @@ class SystemDataConnector(
     }
 
     private fun requestContactsPermission(activity: Activity, callback: (PermissionStatus) -> Unit) {
+        Log.d(TAG, "requestContactsPermission called")
+        
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) 
             == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Contacts permission already granted")
             callback(PermissionStatus.GRANTED)
             return
         }
 
-        // Store callback for later use in onRequestPermissionsResult
+        // Store callback for when permission result arrives
+        pendingContactsCallback = callback
+        
+        Log.d(TAG, "Requesting contacts permission from system")
         ActivityCompat.requestPermissions(
             activity,
             arrayOf(Manifest.permission.READ_CONTACTS),
             PERMISSION_REQUEST_CONTACTS
         )
-
-        // Note: The actual callback will be called from onRequestPermissionsResult
-        // For now, we check the current state
-        callback(PermissionStatus.NOT_DETERMINED)
+        // Don't call callback here - wait for onRequestPermissionsResult
     }
 
     private fun requestCalendarPermission(activity: Activity, callback: (PermissionStatus) -> Unit) {
+        Log.d(TAG, "requestCalendarPermission called")
+        
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) 
             == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "Calendar permission already granted")
             callback(PermissionStatus.GRANTED)
             return
         }
 
+        // Store callback for when permission result arrives
+        pendingCalendarCallback = callback
+        
+        Log.d(TAG, "Requesting calendar permission from system")
         ActivityCompat.requestPermissions(
             activity,
             arrayOf(Manifest.permission.READ_CALENDAR),
             PERMISSION_REQUEST_CALENDAR
         )
-
-        callback(PermissionStatus.NOT_DETERMINED)
+        // Don't call callback here - wait for onRequestPermissionsResult
     }
 
     // MARK: - Contacts
 
     fun fetchContacts(sinceTimestamp: Long?, limit: Long?): List<ContactResult> {
-        if (checkContactsPermission() != PermissionStatus.GRANTED) {
+        Log.d(TAG, "fetchContacts called, sinceTimestamp=$sinceTimestamp, limit=$limit")
+        
+        val permStatus = checkContactsPermission()
+        if (permStatus != PermissionStatus.GRANTED) {
+            Log.e(TAG, "fetchContacts: Permission not granted (status=$permStatus)")
             throw SecurityException("Contacts permission not granted")
         }
 
@@ -141,6 +194,8 @@ class SystemDataConnector(
             arrayOf(sinceTimestamp.toString())
         } else null
 
+        Log.d(TAG, "Querying contacts, selection=$selection")
+        
         val cursor: Cursor? = contentResolver.query(
             ContactsContract.Contacts.CONTENT_URI,
             projection,
@@ -148,6 +203,8 @@ class SystemDataConnector(
             selectionArgs,
             "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} ASC"
         )
+
+        Log.d(TAG, "Cursor returned: ${cursor?.count ?: 0} contacts")
 
         cursor?.use {
             val idIndex = it.getColumnIndex(ContactsContract.Contacts._ID)
@@ -158,6 +215,8 @@ class SystemDataConnector(
                 val contactId = it.getString(idIndex)
                 val displayName = it.getString(nameIndex) ?: ""
                 val lastUpdated = it.getLong(lastUpdatedIndex)
+                
+                Log.d(TAG, "Found contact: $displayName (id=$contactId)")
 
                 // Parse display name into given/family
                 val nameParts = displayName.split(" ", limit = 2)
@@ -188,6 +247,7 @@ class SystemDataConnector(
             }
         }
 
+        Log.d(TAG, "fetchContacts completed, returning ${results.size} contacts")
         return results
     }
 

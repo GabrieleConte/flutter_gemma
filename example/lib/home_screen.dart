@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma_example/model_selection_screen.dart';
 import 'package:flutter_gemma_example/embedding_models_screen.dart';
+import 'package:flutter_gemma_example/graph_rag_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -65,6 +66,21 @@ class HomeScreen extends StatelessWidget {
                   context,
                   MaterialPageRoute<void>(
                     builder: (context) => const EmbeddingModelsScreen(),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            _NavigationCard(
+              title: 'Knowledge Graph',
+              subtitle: 'Build a personal knowledge graph from your data',
+              icon: Icons.account_tree,
+              color: Colors.orange,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (context) => const GraphRAGScreen(),
                   ),
                 );
               },

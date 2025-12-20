@@ -200,7 +200,7 @@ void main() {
     });
 
     test('parses simple MATCH clause', () {
-      final query = 'MATCH (n:PERSON) RETURN n';
+      const query = 'MATCH (n:PERSON) RETURN n';
       final parsed = parser.parse(query);
 
       expect(parsed.matchPatterns.length, 1);
@@ -209,7 +209,7 @@ void main() {
     });
 
     test('parses MATCH with variable', () {
-      final query = 'MATCH (p:PERSON) RETURN p';
+      const query = 'MATCH (p:PERSON) RETURN p';
       final parsed = parser.parse(query);
 
       expect(parsed.matchPatterns.first.nodes.first.variable, 'p');
@@ -217,7 +217,7 @@ void main() {
 
     test('parses single node pattern', () {
       // Note: Simplified Cypher parser handles single node patterns
-      final query = 'MATCH (p:PERSON) RETURN p';
+      const query = 'MATCH (p:PERSON) RETURN p';
       final parsed = parser.parse(query);
 
       expect(parsed.matchPatterns.first.nodes.length, 1);
@@ -225,7 +225,7 @@ void main() {
     });
 
     test('parses WHERE clause', () {
-      final query = 'MATCH (p:PERSON) WHERE p.name = "John" RETURN p';
+      const query = 'MATCH (p:PERSON) WHERE p.name = "John" RETURN p';
       final parsed = parser.parse(query);
 
       expect(parsed.whereCondition, isNotNull);
@@ -233,21 +233,21 @@ void main() {
     });
 
     test('parses LIMIT clause', () {
-      final query = 'MATCH (p:PERSON) RETURN p LIMIT 10';
+      const query = 'MATCH (p:PERSON) RETURN p LIMIT 10';
       final parsed = parser.parse(query);
 
       expect(parsed.limit, 10);
     });
 
     test('parses RETURN *', () {
-      final query = 'MATCH (p:PERSON) RETURN *';
+      const query = 'MATCH (p:PERSON) RETURN *';
       final parsed = parser.parse(query);
 
       expect(parsed.returnAll, isTrue);
     });
 
     test('parses compound WHERE with AND', () {
-      final query =
+      const query =
           'MATCH (p:PERSON) WHERE p.name = "John" AND p.age > 30 RETURN p';
       final parsed = parser.parse(query);
 

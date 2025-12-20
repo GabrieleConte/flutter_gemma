@@ -45,7 +45,8 @@ export 'mobile/flutter_gemma_mobile.dart'
 // ModelReplacePolicy is already exported from model_file_manager_interface.dart
 
 // Export RAG components
-export 'rag/embedding_models.dart';
+// Hide EmbeddingModel to avoid conflict with abstract class in flutter_gemma_interface.dart
+export 'rag/embedding_models.dart' hide EmbeddingModel;
 
 // Export GraphRAG components
 export 'rag/graph_rag.dart';
