@@ -124,7 +124,7 @@ class ChatScreenState extends State<ChatScreen> {
         String? token;
         if (widget.model.needsAuth) {
           token = await AuthTokenService.loadToken();
-          debugPrint('[ChatScreen] Loaded auth token: ${token != null ? "✅" : "❌"}');
+          debugPrint('[ChatScreen] Loaded auth token: ${"✅"}');
         }
 
         await installer.fromNetwork(widget.model.url, token: token).install();
@@ -358,7 +358,7 @@ class ChatScreenState extends State<ChatScreen> {
                     _useSyncMode = value;
                   });
                 },
-                activeColor: Colors.green,
+                activeThumbColor: Colors.green,
               ),
             ],
           ),

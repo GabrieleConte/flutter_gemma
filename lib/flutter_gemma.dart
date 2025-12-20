@@ -43,3 +43,18 @@ export 'mobile/flutter_gemma_mobile.dart'
         ModelStorageException;
 
 // ModelReplacePolicy is already exported from model_file_manager_interface.dart
+
+// Export RAG components
+export 'rag/embedding_models.dart';
+
+// Export GraphRAG components
+export 'rag/graph_rag.dart';
+export 'rag/graph/graph_repository.dart';
+export 'rag/connectors/data_connector.dart';
+export 'rag/connectors/google_suite_connector.dart';
+export 'rag/graph/entity_extractor.dart';
+export 'rag/graph/community_detection.dart';
+export 'rag/graph/cypher_parser.dart';
+export 'rag/graph/hybrid_query_engine.dart';
+export 'rag/graph/background_indexing.dart';
+

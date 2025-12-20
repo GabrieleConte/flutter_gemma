@@ -1,16 +1,19 @@
 package dev.flutterberlin.flutter_gemma
 
+import android.app.Activity
 import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.*
 
 /** FlutterGemmaPlugin */
-class FlutterGemmaPlugin: FlutterPlugin {
+class FlutterGemmaPlugin: FlutterPlugin, ActivityAware {
   /// The MethodChannel that will the communication between Flutter and native Android
   ///
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
@@ -18,10 +21,11 @@ class FlutterGemmaPlugin: FlutterPlugin {
   private lateinit var eventChannel: EventChannel
   private lateinit var bundledChannel: MethodChannel
   private lateinit var context: Context
+  private var service: PlatformServiceImpl? = null
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     context = flutterPluginBinding.applicationContext
-    val service = PlatformServiceImpl(context)
+    service = PlatformServiceImpl(context)
     eventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "flutter_gemma_stream")
     eventChannel.setStreamHandler(service)
     PlatformService.setUp(flutterPluginBinding.binaryMessenger, service)
@@ -61,6 +65,24 @@ class FlutterGemmaPlugin: FlutterPlugin {
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     eventChannel.setStreamHandler(null)
     bundledChannel.setMethodCallHandler(null)
+    service = null
+  }
+
+  // ActivityAware implementation for permission handling
+  override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+    service?.setActivity(binding.activity)
+  }
+
+  override fun onDetachedFromActivityForConfigChanges() {
+    service?.setActivity(null)
+  }
+
+  override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+    service?.setActivity(binding.activity)
+  }
+
+  override fun onDetachedFromActivity() {
+    service?.setActivity(null)
   }
 }
 
@@ -71,10 +93,20 @@ private class PlatformServiceImpl(
   private var eventSink: EventChannel.EventSink? = null
   private var inferenceModel: InferenceModel? = null
   private var session: InferenceModelSession? = null
+  private var activity: Activity? = null
   
   // RAG components
   private var embeddingModel: EmbeddingModel? = null
   private var vectorStore: VectorStore? = null
+
+  // GraphRAG components
+  private var graphStore: GraphStore? = null
+  private var systemDataConnector: SystemDataConnector? = null
+
+  fun setActivity(activity: Activity?) {
+    this.activity = activity
+    systemDataConnector?.setActivity(activity)
+  }
 
   override fun createModel(
     maxTokens: Long,
@@ -419,6 +451,351 @@ private class PlatformServiceImpl(
       callback(Result.success(Unit))
     } catch (e: Exception) {
       callback(Result.failure(e))
+    }
+  }
+
+  // === GraphRAG Graph Store Methods ===
+
+  override fun initializeGraphStore(databasePath: String, callback: (Result<Unit>) -> Unit) {
+    scope.launch {
+      try {
+        graphStore?.close()
+        graphStore = GraphStore(context)
+        graphStore!!.initialize(databasePath)
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun addEntity(
+    id: String,
+    name: String,
+    type: String,
+    embedding: List<Double>,
+    description: String?,
+    metadata: String?,
+    lastModified: Long,
+    callback: (Result<Unit>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        graphStore?.addEntity(id, name, type, embedding, description, metadata, lastModified)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun updateEntity(
+    id: String,
+    name: String?,
+    type: String?,
+    embedding: List<Double>?,
+    description: String?,
+    metadata: String?,
+    lastModified: Long?,
+    callback: (Result<Unit>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        graphStore?.updateEntity(id, name, type, embedding, description, metadata, lastModified)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun deleteEntity(id: String, callback: (Result<Unit>) -> Unit) {
+    scope.launch {
+      try {
+        graphStore?.deleteEntity(id)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getEntity(id: String, callback: (Result<EntityResult?>) -> Unit) {
+    scope.launch {
+      try {
+        val entity = graphStore?.getEntity(id)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(entity))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getEntitiesByType(type: String, callback: (Result<List<EntityResult>>) -> Unit) {
+    scope.launch {
+      try {
+        val entities = graphStore?.getEntitiesByType(type)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(entities))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun addRelationship(
+    id: String,
+    sourceId: String,
+    targetId: String,
+    type: String,
+    weight: Double,
+    metadata: String?,
+    callback: (Result<Unit>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        graphStore?.addRelationship(id, sourceId, targetId, type, weight, metadata)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun deleteRelationship(id: String, callback: (Result<Unit>) -> Unit) {
+    scope.launch {
+      try {
+        graphStore?.deleteRelationship(id)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getRelationships(entityId: String, callback: (Result<List<RelationshipResult>>) -> Unit) {
+    scope.launch {
+      try {
+        val relationships = graphStore?.getRelationships(entityId)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(relationships))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun addCommunity(
+    id: String,
+    level: Long,
+    summary: String,
+    entityIds: List<String>,
+    embedding: List<Double>,
+    metadata: String?,
+    callback: (Result<Unit>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        graphStore?.addCommunity(id, level, summary, entityIds, embedding, metadata)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun updateCommunitySummary(
+    id: String,
+    summary: String,
+    embedding: List<Double>,
+    callback: (Result<Unit>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        graphStore?.updateCommunitySummary(id, summary, embedding)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getCommunitiesByLevel(level: Long, callback: (Result<List<CommunityResult>>) -> Unit) {
+    scope.launch {
+      try {
+        val communities = graphStore?.getCommunitiesByLevel(level)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(communities))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getEntityNeighbors(
+    entityId: String,
+    depth: Long,
+    relationshipType: String?,
+    callback: (Result<List<EntityResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        val neighbors = graphStore?.getEntityNeighbors(entityId, depth.toInt(), relationshipType)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(neighbors))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun searchEntitiesBySimilarity(
+    queryEmbedding: List<Double>,
+    topK: Long,
+    threshold: Double,
+    entityType: String?,
+    callback: (Result<List<EntityWithScoreResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        val results = graphStore?.searchEntitiesBySimilarity(queryEmbedding, topK.toInt(), threshold, entityType)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(results))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun searchCommunitiesBySimilarity(
+    queryEmbedding: List<Double>,
+    topK: Long,
+    level: Long?,
+    callback: (Result<List<CommunityWithScoreResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        val results = graphStore?.searchCommunitiesBySimilarity(queryEmbedding, topK.toInt(), level)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(results))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun executeGraphQuery(query: String, callback: (Result<GraphQueryResult>) -> Unit) {
+    scope.launch {
+      try {
+        // TODO: Implement Cypher DSL parser
+        // For now, return empty result
+        callback(Result.success(GraphQueryResult(entities = emptyList(), relationships = emptyList())))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getGraphStats(callback: (Result<GraphStats>) -> Unit) {
+    scope.launch {
+      try {
+        val stats = graphStore?.getStats()
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(stats))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun clearGraphStore(callback: (Result<Unit>) -> Unit) {
+    scope.launch {
+      try {
+        graphStore?.clear()
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun closeGraphStore(callback: (Result<Unit>) -> Unit) {
+    try {
+      graphStore?.close()
+      graphStore = null
+      callback(Result.success(Unit))
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
+
+  // === System Data Connector Methods ===
+
+  override fun checkPermission(type: PermissionType, callback: (Result<PermissionStatus>) -> Unit) {
+    try {
+      if (systemDataConnector == null) {
+        systemDataConnector = SystemDataConnector(context, activity)
+      }
+      val status = systemDataConnector!!.checkPermission(type)
+      callback(Result.success(status))
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
+
+  override fun requestPermission(type: PermissionType, callback: (Result<PermissionStatus>) -> Unit) {
+    try {
+      if (systemDataConnector == null) {
+        systemDataConnector = SystemDataConnector(context, activity)
+      }
+      systemDataConnector!!.requestPermission(type) { status ->
+        callback(Result.success(status))
+      }
+    } catch (e: Exception) {
+      callback(Result.failure(e))
+    }
+  }
+
+  override fun fetchContacts(sinceTimestamp: Long?, limit: Long?, callback: (Result<List<ContactResult>>) -> Unit) {
+    scope.launch {
+      try {
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val contacts = systemDataConnector!!.fetchContacts(sinceTimestamp, limit)
+        callback(Result.success(contacts))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun fetchCalendarEvents(
+    sinceTimestamp: Long?,
+    startDate: Long?,
+    endDate: Long?,
+    limit: Long?,
+    callback: (Result<List<CalendarEventResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val events = systemDataConnector!!.fetchCalendarEvents(sinceTimestamp, startDate, endDate, limit)
+        callback(Result.success(events))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
     }
   }
 }

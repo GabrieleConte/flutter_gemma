@@ -2,6 +2,7 @@
 ///
 /// Note: These tests are designed to run in a browser environment
 /// where Cache API is available. Use `flutter test --platform chrome`
+library;
 @TestOn('chrome')
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_gemma/core/infrastructure/web_cache_service.dart';

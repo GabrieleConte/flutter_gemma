@@ -62,6 +62,30 @@ enum class PreferredBackend(val raw: Int) {
   }
 }
 
+enum class PermissionType(val raw: Int) {
+  CONTACTS(0),
+  CALENDAR(1);
+
+  companion object {
+    fun ofRaw(raw: Int): PermissionType? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
+enum class PermissionStatus(val raw: Int) {
+  GRANTED(0),
+  DENIED(1),
+  RESTRICTED(2),
+  NOT_DETERMINED(3);
+
+  companion object {
+    fun ofRaw(raw: Int): PermissionStatus? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
 /** Generated class from Pigeon that represents data sent in messages. */
 data class RetrievalResult (
   val id: String,
@@ -109,6 +133,273 @@ data class VectorStoreStats (
     )
   }
 }
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class EntityResult (
+  val id: String,
+  val name: String,
+  val type: String,
+  val description: String? = null,
+  val metadata: String? = null,
+  val lastModified: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): EntityResult {
+      val id = pigeonVar_list[0] as String
+      val name = pigeonVar_list[1] as String
+      val type = pigeonVar_list[2] as String
+      val description = pigeonVar_list[3] as String?
+      val metadata = pigeonVar_list[4] as String?
+      val lastModified = pigeonVar_list[5] as Long
+      return EntityResult(id, name, type, description, metadata, lastModified)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      name,
+      type,
+      description,
+      metadata,
+      lastModified,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class RelationshipResult (
+  val id: String,
+  val sourceId: String,
+  val targetId: String,
+  val type: String,
+  val weight: Double,
+  val metadata: String? = null
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): RelationshipResult {
+      val id = pigeonVar_list[0] as String
+      val sourceId = pigeonVar_list[1] as String
+      val targetId = pigeonVar_list[2] as String
+      val type = pigeonVar_list[3] as String
+      val weight = pigeonVar_list[4] as Double
+      val metadata = pigeonVar_list[5] as String?
+      return RelationshipResult(id, sourceId, targetId, type, weight, metadata)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      sourceId,
+      targetId,
+      type,
+      weight,
+      metadata,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class CommunityResult (
+  val id: String,
+  val level: Long,
+  val summary: String,
+  val entityIds: List<String?>,
+  val metadata: String? = null
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): CommunityResult {
+      val id = pigeonVar_list[0] as String
+      val level = pigeonVar_list[1] as Long
+      val summary = pigeonVar_list[2] as String
+      val entityIds = pigeonVar_list[3] as List<String?>
+      val metadata = pigeonVar_list[4] as String?
+      return CommunityResult(id, level, summary, entityIds, metadata)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      level,
+      summary,
+      entityIds,
+      metadata,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class GraphStats (
+  val entityCount: Long,
+  val relationshipCount: Long,
+  val communityCount: Long,
+  val maxCommunityLevel: Long,
+  val vectorDimension: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): GraphStats {
+      val entityCount = pigeonVar_list[0] as Long
+      val relationshipCount = pigeonVar_list[1] as Long
+      val communityCount = pigeonVar_list[2] as Long
+      val maxCommunityLevel = pigeonVar_list[3] as Long
+      val vectorDimension = pigeonVar_list[4] as Long
+      return GraphStats(entityCount, relationshipCount, communityCount, maxCommunityLevel, vectorDimension)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      entityCount,
+      relationshipCount,
+      communityCount,
+      maxCommunityLevel,
+      vectorDimension,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class ContactResult (
+  val id: String,
+  val givenName: String? = null,
+  val familyName: String? = null,
+  val organizationName: String? = null,
+  val jobTitle: String? = null,
+  val emailAddresses: List<String?>,
+  val phoneNumbers: List<String?>,
+  val lastModified: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): ContactResult {
+      val id = pigeonVar_list[0] as String
+      val givenName = pigeonVar_list[1] as String?
+      val familyName = pigeonVar_list[2] as String?
+      val organizationName = pigeonVar_list[3] as String?
+      val jobTitle = pigeonVar_list[4] as String?
+      val emailAddresses = pigeonVar_list[5] as List<String?>
+      val phoneNumbers = pigeonVar_list[6] as List<String?>
+      val lastModified = pigeonVar_list[7] as Long
+      return ContactResult(id, givenName, familyName, organizationName, jobTitle, emailAddresses, phoneNumbers, lastModified)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      givenName,
+      familyName,
+      organizationName,
+      jobTitle,
+      emailAddresses,
+      phoneNumbers,
+      lastModified,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class CalendarEventResult (
+  val id: String,
+  val title: String,
+  val location: String? = null,
+  val notes: String? = null,
+  val startDate: Long,
+  val endDate: Long,
+  val attendees: List<String?>,
+  val lastModified: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): CalendarEventResult {
+      val id = pigeonVar_list[0] as String
+      val title = pigeonVar_list[1] as String
+      val location = pigeonVar_list[2] as String?
+      val notes = pigeonVar_list[3] as String?
+      val startDate = pigeonVar_list[4] as Long
+      val endDate = pigeonVar_list[5] as Long
+      val attendees = pigeonVar_list[6] as List<String?>
+      val lastModified = pigeonVar_list[7] as Long
+      return CalendarEventResult(id, title, location, notes, startDate, endDate, attendees, lastModified)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      title,
+      location,
+      notes,
+      startDate,
+      endDate,
+      attendees,
+      lastModified,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class GraphQueryResult (
+  val entities: List<EntityResult?>,
+  val relationships: List<RelationshipResult?>
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): GraphQueryResult {
+      val entities = pigeonVar_list[0] as List<EntityResult?>
+      val relationships = pigeonVar_list[1] as List<RelationshipResult?>
+      return GraphQueryResult(entities, relationships)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      entities,
+      relationships,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class EntityWithScoreResult (
+  val entity: EntityResult,
+  val score: Double
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): EntityWithScoreResult {
+      val entity = pigeonVar_list[0] as EntityResult
+      val score = pigeonVar_list[1] as Double
+      return EntityWithScoreResult(entity, score)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      entity,
+      score,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
+data class CommunityWithScoreResult (
+  val community: CommunityResult,
+  val score: Double
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): CommunityWithScoreResult {
+      val community = pigeonVar_list[0] as CommunityResult
+      val score = pigeonVar_list[1] as Double
+      return CommunityWithScoreResult(community, score)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      community,
+      score,
+    )
+  }
+}
 private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -118,13 +409,68 @@ private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
         }
       }
       130.toByte() -> {
+        return (readValue(buffer) as Long?)?.let {
+          PermissionType.ofRaw(it.toInt())
+        }
+      }
+      131.toByte() -> {
+        return (readValue(buffer) as Long?)?.let {
+          PermissionStatus.ofRaw(it.toInt())
+        }
+      }
+      132.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           RetrievalResult.fromList(it)
         }
       }
-      131.toByte() -> {
+      133.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           VectorStoreStats.fromList(it)
+        }
+      }
+      134.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          EntityResult.fromList(it)
+        }
+      }
+      135.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          RelationshipResult.fromList(it)
+        }
+      }
+      136.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CommunityResult.fromList(it)
+        }
+      }
+      137.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          GraphStats.fromList(it)
+        }
+      }
+      138.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          ContactResult.fromList(it)
+        }
+      }
+      139.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CalendarEventResult.fromList(it)
+        }
+      }
+      140.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          GraphQueryResult.fromList(it)
+        }
+      }
+      141.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          EntityWithScoreResult.fromList(it)
+        }
+      }
+      142.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CommunityWithScoreResult.fromList(it)
         }
       }
       else -> super.readValueOfType(type, buffer)
@@ -136,12 +482,56 @@ private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
         stream.write(129)
         writeValue(stream, value.raw)
       }
-      is RetrievalResult -> {
+      is PermissionType -> {
         stream.write(130)
+        writeValue(stream, value.raw)
+      }
+      is PermissionStatus -> {
+        stream.write(131)
+        writeValue(stream, value.raw)
+      }
+      is RetrievalResult -> {
+        stream.write(132)
         writeValue(stream, value.toList())
       }
       is VectorStoreStats -> {
-        stream.write(131)
+        stream.write(133)
+        writeValue(stream, value.toList())
+      }
+      is EntityResult -> {
+        stream.write(134)
+        writeValue(stream, value.toList())
+      }
+      is RelationshipResult -> {
+        stream.write(135)
+        writeValue(stream, value.toList())
+      }
+      is CommunityResult -> {
+        stream.write(136)
+        writeValue(stream, value.toList())
+      }
+      is GraphStats -> {
+        stream.write(137)
+        writeValue(stream, value.toList())
+      }
+      is ContactResult -> {
+        stream.write(138)
+        writeValue(stream, value.toList())
+      }
+      is CalendarEventResult -> {
+        stream.write(139)
+        writeValue(stream, value.toList())
+      }
+      is GraphQueryResult -> {
+        stream.write(140)
+        writeValue(stream, value.toList())
+      }
+      is EntityWithScoreResult -> {
+        stream.write(141)
+        writeValue(stream, value.toList())
+      }
+      is CommunityWithScoreResult -> {
+        stream.write(142)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -173,6 +563,29 @@ interface PlatformService {
   fun getVectorStoreStats(callback: (Result<VectorStoreStats>) -> Unit)
   fun clearVectorStore(callback: (Result<Unit>) -> Unit)
   fun closeVectorStore(callback: (Result<Unit>) -> Unit)
+  fun initializeGraphStore(databasePath: String, callback: (Result<Unit>) -> Unit)
+  fun addEntity(id: String, name: String, type: String, embedding: List<Double>, description: String?, metadata: String?, lastModified: Long, callback: (Result<Unit>) -> Unit)
+  fun updateEntity(id: String, name: String?, type: String?, embedding: List<Double>?, description: String?, metadata: String?, lastModified: Long?, callback: (Result<Unit>) -> Unit)
+  fun deleteEntity(id: String, callback: (Result<Unit>) -> Unit)
+  fun getEntity(id: String, callback: (Result<EntityResult?>) -> Unit)
+  fun getEntitiesByType(type: String, callback: (Result<List<EntityResult>>) -> Unit)
+  fun addRelationship(id: String, sourceId: String, targetId: String, type: String, weight: Double, metadata: String?, callback: (Result<Unit>) -> Unit)
+  fun deleteRelationship(id: String, callback: (Result<Unit>) -> Unit)
+  fun getRelationships(entityId: String, callback: (Result<List<RelationshipResult>>) -> Unit)
+  fun addCommunity(id: String, level: Long, summary: String, entityIds: List<String>, embedding: List<Double>, metadata: String?, callback: (Result<Unit>) -> Unit)
+  fun updateCommunitySummary(id: String, summary: String, embedding: List<Double>, callback: (Result<Unit>) -> Unit)
+  fun getCommunitiesByLevel(level: Long, callback: (Result<List<CommunityResult>>) -> Unit)
+  fun getEntityNeighbors(entityId: String, depth: Long, relationshipType: String?, callback: (Result<List<EntityResult>>) -> Unit)
+  fun searchEntitiesBySimilarity(queryEmbedding: List<Double>, topK: Long, threshold: Double, entityType: String?, callback: (Result<List<EntityWithScoreResult>>) -> Unit)
+  fun searchCommunitiesBySimilarity(queryEmbedding: List<Double>, topK: Long, level: Long?, callback: (Result<List<CommunityWithScoreResult>>) -> Unit)
+  fun executeGraphQuery(query: String, callback: (Result<GraphQueryResult>) -> Unit)
+  fun getGraphStats(callback: (Result<GraphStats>) -> Unit)
+  fun clearGraphStore(callback: (Result<Unit>) -> Unit)
+  fun closeGraphStore(callback: (Result<Unit>) -> Unit)
+  fun checkPermission(type: PermissionType, callback: (Result<PermissionStatus>) -> Unit)
+  fun requestPermission(type: PermissionType, callback: (Result<PermissionStatus>) -> Unit)
+  fun fetchContacts(sinceTimestamp: Long?, limit: Long?, callback: (Result<List<ContactResult>>) -> Unit)
+  fun fetchCalendarEvents(sinceTimestamp: Long?, startDate: Long?, endDate: Long?, limit: Long?, callback: (Result<List<CalendarEventResult>>) -> Unit)
 
   companion object {
     /** The codec used by PlatformService. */
@@ -578,6 +991,485 @@ interface PlatformService {
                 reply.reply(wrapError(error))
               } else {
                 reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.initializeGraphStore$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val databasePathArg = args[0] as String
+            api.initializeGraphStore(databasePathArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.addEntity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            val nameArg = args[1] as String
+            val typeArg = args[2] as String
+            val embeddingArg = args[3] as List<Double>
+            val descriptionArg = args[4] as String?
+            val metadataArg = args[5] as String?
+            val lastModifiedArg = args[6] as Long
+            api.addEntity(idArg, nameArg, typeArg, embeddingArg, descriptionArg, metadataArg, lastModifiedArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.updateEntity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            val nameArg = args[1] as String?
+            val typeArg = args[2] as String?
+            val embeddingArg = args[3] as List<Double>?
+            val descriptionArg = args[4] as String?
+            val metadataArg = args[5] as String?
+            val lastModifiedArg = args[6] as Long?
+            api.updateEntity(idArg, nameArg, typeArg, embeddingArg, descriptionArg, metadataArg, lastModifiedArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.deleteEntity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            api.deleteEntity(idArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            api.getEntity(idArg) { result: Result<EntityResult?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesByType$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val typeArg = args[0] as String
+            api.getEntitiesByType(typeArg) { result: Result<List<EntityResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.addRelationship$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            val sourceIdArg = args[1] as String
+            val targetIdArg = args[2] as String
+            val typeArg = args[3] as String
+            val weightArg = args[4] as Double
+            val metadataArg = args[5] as String?
+            api.addRelationship(idArg, sourceIdArg, targetIdArg, typeArg, weightArg, metadataArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.deleteRelationship$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            api.deleteRelationship(idArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getRelationships$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val entityIdArg = args[0] as String
+            api.getRelationships(entityIdArg) { result: Result<List<RelationshipResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.addCommunity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            val levelArg = args[1] as Long
+            val summaryArg = args[2] as String
+            val entityIdsArg = args[3] as List<String>
+            val embeddingArg = args[4] as List<Double>
+            val metadataArg = args[5] as String?
+            api.addCommunity(idArg, levelArg, summaryArg, entityIdsArg, embeddingArg, metadataArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.updateCommunitySummary$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            val summaryArg = args[1] as String
+            val embeddingArg = args[2] as List<Double>
+            api.updateCommunitySummary(idArg, summaryArg, embeddingArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getCommunitiesByLevel$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val levelArg = args[0] as Long
+            api.getCommunitiesByLevel(levelArg) { result: Result<List<CommunityResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntityNeighbors$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val entityIdArg = args[0] as String
+            val depthArg = args[1] as Long
+            val relationshipTypeArg = args[2] as String?
+            api.getEntityNeighbors(entityIdArg, depthArg, relationshipTypeArg) { result: Result<List<EntityResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.searchEntitiesBySimilarity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val queryEmbeddingArg = args[0] as List<Double>
+            val topKArg = args[1] as Long
+            val thresholdArg = args[2] as Double
+            val entityTypeArg = args[3] as String?
+            api.searchEntitiesBySimilarity(queryEmbeddingArg, topKArg, thresholdArg, entityTypeArg) { result: Result<List<EntityWithScoreResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.searchCommunitiesBySimilarity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val queryEmbeddingArg = args[0] as List<Double>
+            val topKArg = args[1] as Long
+            val levelArg = args[2] as Long?
+            api.searchCommunitiesBySimilarity(queryEmbeddingArg, topKArg, levelArg) { result: Result<List<CommunityWithScoreResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.executeGraphQuery$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val queryArg = args[0] as String
+            api.executeGraphQuery(queryArg) { result: Result<GraphQueryResult> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getGraphStats$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.getGraphStats{ result: Result<GraphStats> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.clearGraphStore$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.clearGraphStore{ result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.closeGraphStore$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.closeGraphStore{ result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.checkPermission$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val typeArg = args[0] as PermissionType
+            api.checkPermission(typeArg) { result: Result<PermissionStatus> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.requestPermission$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val typeArg = args[0] as PermissionType
+            api.requestPermission(typeArg) { result: Result<PermissionStatus> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchContacts$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val sinceTimestampArg = args[0] as Long?
+            val limitArg = args[1] as Long?
+            api.fetchContacts(sinceTimestampArg, limitArg) { result: Result<List<ContactResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchCalendarEvents$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val sinceTimestampArg = args[0] as Long?
+            val startDateArg = args[1] as Long?
+            val endDateArg = args[2] as Long?
+            val limitArg = args[3] as Long?
+            api.fetchCalendarEvents(sinceTimestampArg, startDateArg, endDateArg, limitArg) { result: Result<List<CalendarEventResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
               }
             }
           }

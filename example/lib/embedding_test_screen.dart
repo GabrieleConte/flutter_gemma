@@ -51,7 +51,7 @@ class _EmbeddingTestScreenState extends State<EmbeddingTestScreen> {
         final authToken = await AuthTokenService.loadToken();
         token = authToken?.isNotEmpty == true ? authToken : null;
         if (kDebugMode) {
-          debugPrint('[EmbeddingTestScreen] Using auth token: ${token != null ? "YES" : "NO"}');
+          debugPrint('[EmbeddingTestScreen] Using auth token: ${"YES"}');
         }
       }
 

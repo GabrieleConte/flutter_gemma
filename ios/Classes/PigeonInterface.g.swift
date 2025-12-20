@@ -74,6 +74,18 @@ enum PreferredBackend: Int {
   case tpu = 6
 }
 
+enum PermissionType: Int {
+  case contacts = 0
+  case calendar = 1
+}
+
+enum PermissionStatus: Int {
+  case granted = 0
+  case denied = 1
+  case restricted = 2
+  case notDetermined = 3
+}
+
 /// Generated class from Pigeon that represents data sent in messages.
 struct RetrievalResult {
   var id: String
@@ -130,6 +142,326 @@ struct VectorStoreStats {
   }
 }
 
+/// Generated class from Pigeon that represents data sent in messages.
+struct EntityResult {
+  var id: String
+  var name: String
+  var type: String
+  var description: String? = nil
+  var metadata: String? = nil
+  var lastModified: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> EntityResult? {
+    let id = pigeonVar_list[0] as! String
+    let name = pigeonVar_list[1] as! String
+    let type = pigeonVar_list[2] as! String
+    let description: String? = nilOrValue(pigeonVar_list[3])
+    let metadata: String? = nilOrValue(pigeonVar_list[4])
+    let lastModified = pigeonVar_list[5] as! Int64
+
+    return EntityResult(
+      id: id,
+      name: name,
+      type: type,
+      description: description,
+      metadata: metadata,
+      lastModified: lastModified
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      name,
+      type,
+      description,
+      metadata,
+      lastModified,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct RelationshipResult {
+  var id: String
+  var sourceId: String
+  var targetId: String
+  var type: String
+  var weight: Double
+  var metadata: String? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> RelationshipResult? {
+    let id = pigeonVar_list[0] as! String
+    let sourceId = pigeonVar_list[1] as! String
+    let targetId = pigeonVar_list[2] as! String
+    let type = pigeonVar_list[3] as! String
+    let weight = pigeonVar_list[4] as! Double
+    let metadata: String? = nilOrValue(pigeonVar_list[5])
+
+    return RelationshipResult(
+      id: id,
+      sourceId: sourceId,
+      targetId: targetId,
+      type: type,
+      weight: weight,
+      metadata: metadata
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      sourceId,
+      targetId,
+      type,
+      weight,
+      metadata,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct CommunityResult {
+  var id: String
+  var level: Int64
+  var summary: String
+  var entityIds: [String?]
+  var metadata: String? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CommunityResult? {
+    let id = pigeonVar_list[0] as! String
+    let level = pigeonVar_list[1] as! Int64
+    let summary = pigeonVar_list[2] as! String
+    let entityIds = pigeonVar_list[3] as! [String?]
+    let metadata: String? = nilOrValue(pigeonVar_list[4])
+
+    return CommunityResult(
+      id: id,
+      level: level,
+      summary: summary,
+      entityIds: entityIds,
+      metadata: metadata
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      level,
+      summary,
+      entityIds,
+      metadata,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct GraphStats {
+  var entityCount: Int64
+  var relationshipCount: Int64
+  var communityCount: Int64
+  var maxCommunityLevel: Int64
+  var vectorDimension: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> GraphStats? {
+    let entityCount = pigeonVar_list[0] as! Int64
+    let relationshipCount = pigeonVar_list[1] as! Int64
+    let communityCount = pigeonVar_list[2] as! Int64
+    let maxCommunityLevel = pigeonVar_list[3] as! Int64
+    let vectorDimension = pigeonVar_list[4] as! Int64
+
+    return GraphStats(
+      entityCount: entityCount,
+      relationshipCount: relationshipCount,
+      communityCount: communityCount,
+      maxCommunityLevel: maxCommunityLevel,
+      vectorDimension: vectorDimension
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      entityCount,
+      relationshipCount,
+      communityCount,
+      maxCommunityLevel,
+      vectorDimension,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct ContactResult {
+  var id: String
+  var givenName: String? = nil
+  var familyName: String? = nil
+  var organizationName: String? = nil
+  var jobTitle: String? = nil
+  var emailAddresses: [String?]
+  var phoneNumbers: [String?]
+  var lastModified: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> ContactResult? {
+    let id = pigeonVar_list[0] as! String
+    let givenName: String? = nilOrValue(pigeonVar_list[1])
+    let familyName: String? = nilOrValue(pigeonVar_list[2])
+    let organizationName: String? = nilOrValue(pigeonVar_list[3])
+    let jobTitle: String? = nilOrValue(pigeonVar_list[4])
+    let emailAddresses = pigeonVar_list[5] as! [String?]
+    let phoneNumbers = pigeonVar_list[6] as! [String?]
+    let lastModified = pigeonVar_list[7] as! Int64
+
+    return ContactResult(
+      id: id,
+      givenName: givenName,
+      familyName: familyName,
+      organizationName: organizationName,
+      jobTitle: jobTitle,
+      emailAddresses: emailAddresses,
+      phoneNumbers: phoneNumbers,
+      lastModified: lastModified
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      givenName,
+      familyName,
+      organizationName,
+      jobTitle,
+      emailAddresses,
+      phoneNumbers,
+      lastModified,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct CalendarEventResult {
+  var id: String
+  var title: String
+  var location: String? = nil
+  var notes: String? = nil
+  var startDate: Int64
+  var endDate: Int64
+  var attendees: [String?]
+  var lastModified: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CalendarEventResult? {
+    let id = pigeonVar_list[0] as! String
+    let title = pigeonVar_list[1] as! String
+    let location: String? = nilOrValue(pigeonVar_list[2])
+    let notes: String? = nilOrValue(pigeonVar_list[3])
+    let startDate = pigeonVar_list[4] as! Int64
+    let endDate = pigeonVar_list[5] as! Int64
+    let attendees = pigeonVar_list[6] as! [String?]
+    let lastModified = pigeonVar_list[7] as! Int64
+
+    return CalendarEventResult(
+      id: id,
+      title: title,
+      location: location,
+      notes: notes,
+      startDate: startDate,
+      endDate: endDate,
+      attendees: attendees,
+      lastModified: lastModified
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      title,
+      location,
+      notes,
+      startDate,
+      endDate,
+      attendees,
+      lastModified,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct GraphQueryResult {
+  var entities: [EntityResult?]
+  var relationships: [RelationshipResult?]
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> GraphQueryResult? {
+    let entities = pigeonVar_list[0] as! [EntityResult?]
+    let relationships = pigeonVar_list[1] as! [RelationshipResult?]
+
+    return GraphQueryResult(
+      entities: entities,
+      relationships: relationships
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      entities,
+      relationships,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct EntityWithScoreResult {
+  var entity: EntityResult
+  var score: Double
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> EntityWithScoreResult? {
+    let entity = pigeonVar_list[0] as! EntityResult
+    let score = pigeonVar_list[1] as! Double
+
+    return EntityWithScoreResult(
+      entity: entity,
+      score: score
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      entity,
+      score,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct CommunityWithScoreResult {
+  var community: CommunityResult
+  var score: Double
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CommunityWithScoreResult? {
+    let community = pigeonVar_list[0] as! CommunityResult
+    let score = pigeonVar_list[1] as! Double
+
+    return CommunityWithScoreResult(
+      community: community,
+      score: score
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      community,
+      score,
+    ]
+  }
+}
+
 private class PigeonInterfacePigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -140,9 +472,39 @@ private class PigeonInterfacePigeonCodecReader: FlutterStandardReader {
       }
       return nil
     case 130:
-      return RetrievalResult.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return PermissionType(rawValue: enumResultAsInt)
+      }
+      return nil
     case 131:
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return PermissionStatus(rawValue: enumResultAsInt)
+      }
+      return nil
+    case 132:
+      return RetrievalResult.fromList(self.readValue() as! [Any?])
+    case 133:
       return VectorStoreStats.fromList(self.readValue() as! [Any?])
+    case 134:
+      return EntityResult.fromList(self.readValue() as! [Any?])
+    case 135:
+      return RelationshipResult.fromList(self.readValue() as! [Any?])
+    case 136:
+      return CommunityResult.fromList(self.readValue() as! [Any?])
+    case 137:
+      return GraphStats.fromList(self.readValue() as! [Any?])
+    case 138:
+      return ContactResult.fromList(self.readValue() as! [Any?])
+    case 139:
+      return CalendarEventResult.fromList(self.readValue() as! [Any?])
+    case 140:
+      return GraphQueryResult.fromList(self.readValue() as! [Any?])
+    case 141:
+      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
+    case 142:
+      return CommunityWithScoreResult.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -154,11 +516,44 @@ private class PigeonInterfacePigeonCodecWriter: FlutterStandardWriter {
     if let value = value as? PreferredBackend {
       super.writeByte(129)
       super.writeValue(value.rawValue)
-    } else if let value = value as? RetrievalResult {
+    } else if let value = value as? PermissionType {
       super.writeByte(130)
+      super.writeValue(value.rawValue)
+    } else if let value = value as? PermissionStatus {
+      super.writeByte(131)
+      super.writeValue(value.rawValue)
+    } else if let value = value as? RetrievalResult {
+      super.writeByte(132)
       super.writeValue(value.toList())
     } else if let value = value as? VectorStoreStats {
-      super.writeByte(131)
+      super.writeByte(133)
+      super.writeValue(value.toList())
+    } else if let value = value as? EntityResult {
+      super.writeByte(134)
+      super.writeValue(value.toList())
+    } else if let value = value as? RelationshipResult {
+      super.writeByte(135)
+      super.writeValue(value.toList())
+    } else if let value = value as? CommunityResult {
+      super.writeByte(136)
+      super.writeValue(value.toList())
+    } else if let value = value as? GraphStats {
+      super.writeByte(137)
+      super.writeValue(value.toList())
+    } else if let value = value as? ContactResult {
+      super.writeByte(138)
+      super.writeValue(value.toList())
+    } else if let value = value as? CalendarEventResult {
+      super.writeByte(139)
+      super.writeValue(value.toList())
+    } else if let value = value as? GraphQueryResult {
+      super.writeByte(140)
+      super.writeValue(value.toList())
+    } else if let value = value as? EntityWithScoreResult {
+      super.writeByte(141)
+      super.writeValue(value.toList())
+    } else if let value = value as? CommunityWithScoreResult {
+      super.writeByte(142)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -204,6 +599,29 @@ protocol PlatformService {
   func getVectorStoreStats(completion: @escaping (Result<VectorStoreStats, Error>) -> Void)
   func clearVectorStore(completion: @escaping (Result<Void, Error>) -> Void)
   func closeVectorStore(completion: @escaping (Result<Void, Error>) -> Void)
+  func initializeGraphStore(databasePath: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func addEntity(id: String, name: String, type: String, embedding: [Double], description: String?, metadata: String?, lastModified: Int64, completion: @escaping (Result<Void, Error>) -> Void)
+  func updateEntity(id: String, name: String?, type: String?, embedding: [Double]?, description: String?, metadata: String?, lastModified: Int64?, completion: @escaping (Result<Void, Error>) -> Void)
+  func deleteEntity(id: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func getEntity(id: String, completion: @escaping (Result<EntityResult?, Error>) -> Void)
+  func getEntitiesByType(type: String, completion: @escaping (Result<[EntityResult], Error>) -> Void)
+  func addRelationship(id: String, sourceId: String, targetId: String, type: String, weight: Double, metadata: String?, completion: @escaping (Result<Void, Error>) -> Void)
+  func deleteRelationship(id: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func getRelationships(entityId: String, completion: @escaping (Result<[RelationshipResult], Error>) -> Void)
+  func addCommunity(id: String, level: Int64, summary: String, entityIds: [String], embedding: [Double], metadata: String?, completion: @escaping (Result<Void, Error>) -> Void)
+  func updateCommunitySummary(id: String, summary: String, embedding: [Double], completion: @escaping (Result<Void, Error>) -> Void)
+  func getCommunitiesByLevel(level: Int64, completion: @escaping (Result<[CommunityResult], Error>) -> Void)
+  func getEntityNeighbors(entityId: String, depth: Int64, relationshipType: String?, completion: @escaping (Result<[EntityResult], Error>) -> Void)
+  func searchEntitiesBySimilarity(queryEmbedding: [Double], topK: Int64, threshold: Double, entityType: String?, completion: @escaping (Result<[EntityWithScoreResult], Error>) -> Void)
+  func searchCommunitiesBySimilarity(queryEmbedding: [Double], topK: Int64, level: Int64?, completion: @escaping (Result<[CommunityWithScoreResult], Error>) -> Void)
+  func executeGraphQuery(query: String, completion: @escaping (Result<GraphQueryResult, Error>) -> Void)
+  func getGraphStats(completion: @escaping (Result<GraphStats, Error>) -> Void)
+  func clearGraphStore(completion: @escaping (Result<Void, Error>) -> Void)
+  func closeGraphStore(completion: @escaping (Result<Void, Error>) -> Void)
+  func checkPermission(type: PermissionType, completion: @escaping (Result<PermissionStatus, Error>) -> Void)
+  func requestPermission(type: PermissionType, completion: @escaping (Result<PermissionStatus, Error>) -> Void)
+  func fetchContacts(sinceTimestamp: Int64?, limit: Int64?, completion: @escaping (Result<[ContactResult], Error>) -> Void)
+  func fetchCalendarEvents(sinceTimestamp: Int64?, startDate: Int64?, endDate: Int64?, limit: Int64?, completion: @escaping (Result<[CalendarEventResult], Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -564,6 +982,426 @@ class PlatformServiceSetup {
       }
     } else {
       closeVectorStoreChannel.setMessageHandler(nil)
+    }
+    let initializeGraphStoreChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.initializeGraphStore\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      initializeGraphStoreChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let databasePathArg = args[0] as! String
+        api.initializeGraphStore(databasePath: databasePathArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      initializeGraphStoreChannel.setMessageHandler(nil)
+    }
+    let addEntityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.addEntity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      addEntityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        let nameArg = args[1] as! String
+        let typeArg = args[2] as! String
+        let embeddingArg = args[3] as! [Double]
+        let descriptionArg: String? = nilOrValue(args[4])
+        let metadataArg: String? = nilOrValue(args[5])
+        let lastModifiedArg = args[6] as! Int64
+        api.addEntity(id: idArg, name: nameArg, type: typeArg, embedding: embeddingArg, description: descriptionArg, metadata: metadataArg, lastModified: lastModifiedArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      addEntityChannel.setMessageHandler(nil)
+    }
+    let updateEntityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.updateEntity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      updateEntityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        let nameArg: String? = nilOrValue(args[1])
+        let typeArg: String? = nilOrValue(args[2])
+        let embeddingArg: [Double]? = nilOrValue(args[3])
+        let descriptionArg: String? = nilOrValue(args[4])
+        let metadataArg: String? = nilOrValue(args[5])
+        let lastModifiedArg: Int64? = nilOrValue(args[6])
+        api.updateEntity(id: idArg, name: nameArg, type: typeArg, embedding: embeddingArg, description: descriptionArg, metadata: metadataArg, lastModified: lastModifiedArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      updateEntityChannel.setMessageHandler(nil)
+    }
+    let deleteEntityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.deleteEntity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteEntityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        api.deleteEntity(id: idArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      deleteEntityChannel.setMessageHandler(nil)
+    }
+    let getEntityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getEntityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        api.getEntity(id: idArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getEntityChannel.setMessageHandler(nil)
+    }
+    let getEntitiesByTypeChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesByType\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getEntitiesByTypeChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let typeArg = args[0] as! String
+        api.getEntitiesByType(type: typeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getEntitiesByTypeChannel.setMessageHandler(nil)
+    }
+    let addRelationshipChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.addRelationship\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      addRelationshipChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        let sourceIdArg = args[1] as! String
+        let targetIdArg = args[2] as! String
+        let typeArg = args[3] as! String
+        let weightArg = args[4] as! Double
+        let metadataArg: String? = nilOrValue(args[5])
+        api.addRelationship(id: idArg, sourceId: sourceIdArg, targetId: targetIdArg, type: typeArg, weight: weightArg, metadata: metadataArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      addRelationshipChannel.setMessageHandler(nil)
+    }
+    let deleteRelationshipChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.deleteRelationship\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteRelationshipChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        api.deleteRelationship(id: idArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      deleteRelationshipChannel.setMessageHandler(nil)
+    }
+    let getRelationshipsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getRelationships\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getRelationshipsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let entityIdArg = args[0] as! String
+        api.getRelationships(entityId: entityIdArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getRelationshipsChannel.setMessageHandler(nil)
+    }
+    let addCommunityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.addCommunity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      addCommunityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        let levelArg = args[1] as! Int64
+        let summaryArg = args[2] as! String
+        let entityIdsArg = args[3] as! [String]
+        let embeddingArg = args[4] as! [Double]
+        let metadataArg: String? = nilOrValue(args[5])
+        api.addCommunity(id: idArg, level: levelArg, summary: summaryArg, entityIds: entityIdsArg, embedding: embeddingArg, metadata: metadataArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      addCommunityChannel.setMessageHandler(nil)
+    }
+    let updateCommunitySummaryChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.updateCommunitySummary\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      updateCommunitySummaryChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        let summaryArg = args[1] as! String
+        let embeddingArg = args[2] as! [Double]
+        api.updateCommunitySummary(id: idArg, summary: summaryArg, embedding: embeddingArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      updateCommunitySummaryChannel.setMessageHandler(nil)
+    }
+    let getCommunitiesByLevelChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getCommunitiesByLevel\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getCommunitiesByLevelChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let levelArg = args[0] as! Int64
+        api.getCommunitiesByLevel(level: levelArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getCommunitiesByLevelChannel.setMessageHandler(nil)
+    }
+    let getEntityNeighborsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntityNeighbors\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getEntityNeighborsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let entityIdArg = args[0] as! String
+        let depthArg = args[1] as! Int64
+        let relationshipTypeArg: String? = nilOrValue(args[2])
+        api.getEntityNeighbors(entityId: entityIdArg, depth: depthArg, relationshipType: relationshipTypeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getEntityNeighborsChannel.setMessageHandler(nil)
+    }
+    let searchEntitiesBySimilarityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.searchEntitiesBySimilarity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      searchEntitiesBySimilarityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let queryEmbeddingArg = args[0] as! [Double]
+        let topKArg = args[1] as! Int64
+        let thresholdArg = args[2] as! Double
+        let entityTypeArg: String? = nilOrValue(args[3])
+        api.searchEntitiesBySimilarity(queryEmbedding: queryEmbeddingArg, topK: topKArg, threshold: thresholdArg, entityType: entityTypeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      searchEntitiesBySimilarityChannel.setMessageHandler(nil)
+    }
+    let searchCommunitiesBySimilarityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.searchCommunitiesBySimilarity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      searchCommunitiesBySimilarityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let queryEmbeddingArg = args[0] as! [Double]
+        let topKArg = args[1] as! Int64
+        let levelArg: Int64? = nilOrValue(args[2])
+        api.searchCommunitiesBySimilarity(queryEmbedding: queryEmbeddingArg, topK: topKArg, level: levelArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      searchCommunitiesBySimilarityChannel.setMessageHandler(nil)
+    }
+    let executeGraphQueryChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.executeGraphQuery\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      executeGraphQueryChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let queryArg = args[0] as! String
+        api.executeGraphQuery(query: queryArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      executeGraphQueryChannel.setMessageHandler(nil)
+    }
+    let getGraphStatsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getGraphStats\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getGraphStatsChannel.setMessageHandler { _, reply in
+        api.getGraphStats { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getGraphStatsChannel.setMessageHandler(nil)
+    }
+    let clearGraphStoreChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.clearGraphStore\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      clearGraphStoreChannel.setMessageHandler { _, reply in
+        api.clearGraphStore { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      clearGraphStoreChannel.setMessageHandler(nil)
+    }
+    let closeGraphStoreChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.closeGraphStore\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      closeGraphStoreChannel.setMessageHandler { _, reply in
+        api.closeGraphStore { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      closeGraphStoreChannel.setMessageHandler(nil)
+    }
+    let checkPermissionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.checkPermission\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      checkPermissionChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let typeArg = args[0] as! PermissionType
+        api.checkPermission(type: typeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      checkPermissionChannel.setMessageHandler(nil)
+    }
+    let requestPermissionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.requestPermission\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      requestPermissionChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let typeArg = args[0] as! PermissionType
+        api.requestPermission(type: typeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      requestPermissionChannel.setMessageHandler(nil)
+    }
+    let fetchContactsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchContacts\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      fetchContactsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sinceTimestampArg: Int64? = nilOrValue(args[0])
+        let limitArg: Int64? = nilOrValue(args[1])
+        api.fetchContacts(sinceTimestamp: sinceTimestampArg, limit: limitArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      fetchContactsChannel.setMessageHandler(nil)
+    }
+    let fetchCalendarEventsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchCalendarEvents\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      fetchCalendarEventsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sinceTimestampArg: Int64? = nilOrValue(args[0])
+        let startDateArg: Int64? = nilOrValue(args[1])
+        let endDateArg: Int64? = nilOrValue(args[2])
+        let limitArg: Int64? = nilOrValue(args[3])
+        api.fetchCalendarEvents(sinceTimestamp: sinceTimestampArg, startDate: startDateArg, endDate: endDateArg, limit: limitArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      fetchCalendarEventsChannel.setMessageHandler(nil)
     }
   }
 }

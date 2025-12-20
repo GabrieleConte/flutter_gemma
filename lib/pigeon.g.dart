@@ -25,6 +25,18 @@ enum PreferredBackend {
   tpu,
 }
 
+enum PermissionType {
+  contacts,
+  calendar,
+}
+
+enum PermissionStatus {
+  granted,
+  denied,
+  restricted,
+  notDetermined,
+}
+
 class RetrievalResult {
   RetrievalResult({
     required this.id,
@@ -87,6 +99,370 @@ class VectorStoreStats {
   }
 }
 
+class EntityResult {
+  EntityResult({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.description,
+    this.metadata,
+    required this.lastModified,
+  });
+
+  String id;
+
+  String name;
+
+  String type;
+
+  String? description;
+
+  String? metadata;
+
+  int lastModified;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      name,
+      type,
+      description,
+      metadata,
+      lastModified,
+    ];
+  }
+
+  static EntityResult decode(Object result) {
+    result as List<Object?>;
+    return EntityResult(
+      id: result[0]! as String,
+      name: result[1]! as String,
+      type: result[2]! as String,
+      description: result[3] as String?,
+      metadata: result[4] as String?,
+      lastModified: result[5]! as int,
+    );
+  }
+}
+
+class RelationshipResult {
+  RelationshipResult({
+    required this.id,
+    required this.sourceId,
+    required this.targetId,
+    required this.type,
+    required this.weight,
+    this.metadata,
+  });
+
+  String id;
+
+  String sourceId;
+
+  String targetId;
+
+  String type;
+
+  double weight;
+
+  String? metadata;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      sourceId,
+      targetId,
+      type,
+      weight,
+      metadata,
+    ];
+  }
+
+  static RelationshipResult decode(Object result) {
+    result as List<Object?>;
+    return RelationshipResult(
+      id: result[0]! as String,
+      sourceId: result[1]! as String,
+      targetId: result[2]! as String,
+      type: result[3]! as String,
+      weight: result[4]! as double,
+      metadata: result[5] as String?,
+    );
+  }
+}
+
+class CommunityResult {
+  CommunityResult({
+    required this.id,
+    required this.level,
+    required this.summary,
+    required this.entityIds,
+    this.metadata,
+  });
+
+  String id;
+
+  int level;
+
+  String summary;
+
+  List<String?> entityIds;
+
+  String? metadata;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      level,
+      summary,
+      entityIds,
+      metadata,
+    ];
+  }
+
+  static CommunityResult decode(Object result) {
+    result as List<Object?>;
+    return CommunityResult(
+      id: result[0]! as String,
+      level: result[1]! as int,
+      summary: result[2]! as String,
+      entityIds: (result[3] as List<Object?>?)!.cast<String?>(),
+      metadata: result[4] as String?,
+    );
+  }
+}
+
+class GraphStats {
+  GraphStats({
+    required this.entityCount,
+    required this.relationshipCount,
+    required this.communityCount,
+    required this.maxCommunityLevel,
+    required this.vectorDimension,
+  });
+
+  int entityCount;
+
+  int relationshipCount;
+
+  int communityCount;
+
+  int maxCommunityLevel;
+
+  int vectorDimension;
+
+  Object encode() {
+    return <Object?>[
+      entityCount,
+      relationshipCount,
+      communityCount,
+      maxCommunityLevel,
+      vectorDimension,
+    ];
+  }
+
+  static GraphStats decode(Object result) {
+    result as List<Object?>;
+    return GraphStats(
+      entityCount: result[0]! as int,
+      relationshipCount: result[1]! as int,
+      communityCount: result[2]! as int,
+      maxCommunityLevel: result[3]! as int,
+      vectorDimension: result[4]! as int,
+    );
+  }
+}
+
+class ContactResult {
+  ContactResult({
+    required this.id,
+    this.givenName,
+    this.familyName,
+    this.organizationName,
+    this.jobTitle,
+    required this.emailAddresses,
+    required this.phoneNumbers,
+    required this.lastModified,
+  });
+
+  String id;
+
+  String? givenName;
+
+  String? familyName;
+
+  String? organizationName;
+
+  String? jobTitle;
+
+  List<String?> emailAddresses;
+
+  List<String?> phoneNumbers;
+
+  int lastModified;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      givenName,
+      familyName,
+      organizationName,
+      jobTitle,
+      emailAddresses,
+      phoneNumbers,
+      lastModified,
+    ];
+  }
+
+  static ContactResult decode(Object result) {
+    result as List<Object?>;
+    return ContactResult(
+      id: result[0]! as String,
+      givenName: result[1] as String?,
+      familyName: result[2] as String?,
+      organizationName: result[3] as String?,
+      jobTitle: result[4] as String?,
+      emailAddresses: (result[5] as List<Object?>?)!.cast<String?>(),
+      phoneNumbers: (result[6] as List<Object?>?)!.cast<String?>(),
+      lastModified: result[7]! as int,
+    );
+  }
+}
+
+class CalendarEventResult {
+  CalendarEventResult({
+    required this.id,
+    required this.title,
+    this.location,
+    this.notes,
+    required this.startDate,
+    required this.endDate,
+    required this.attendees,
+    required this.lastModified,
+  });
+
+  String id;
+
+  String title;
+
+  String? location;
+
+  String? notes;
+
+  int startDate;
+
+  int endDate;
+
+  List<String?> attendees;
+
+  int lastModified;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      title,
+      location,
+      notes,
+      startDate,
+      endDate,
+      attendees,
+      lastModified,
+    ];
+  }
+
+  static CalendarEventResult decode(Object result) {
+    result as List<Object?>;
+    return CalendarEventResult(
+      id: result[0]! as String,
+      title: result[1]! as String,
+      location: result[2] as String?,
+      notes: result[3] as String?,
+      startDate: result[4]! as int,
+      endDate: result[5]! as int,
+      attendees: (result[6] as List<Object?>?)!.cast<String?>(),
+      lastModified: result[7]! as int,
+    );
+  }
+}
+
+class GraphQueryResult {
+  GraphQueryResult({
+    required this.entities,
+    required this.relationships,
+  });
+
+  List<EntityResult?> entities;
+
+  List<RelationshipResult?> relationships;
+
+  Object encode() {
+    return <Object?>[
+      entities,
+      relationships,
+    ];
+  }
+
+  static GraphQueryResult decode(Object result) {
+    result as List<Object?>;
+    return GraphQueryResult(
+      entities: (result[0] as List<Object?>?)!.cast<EntityResult?>(),
+      relationships: (result[1] as List<Object?>?)!.cast<RelationshipResult?>(),
+    );
+  }
+}
+
+class EntityWithScoreResult {
+  EntityWithScoreResult({
+    required this.entity,
+    required this.score,
+  });
+
+  EntityResult entity;
+
+  double score;
+
+  Object encode() {
+    return <Object?>[
+      entity,
+      score,
+    ];
+  }
+
+  static EntityWithScoreResult decode(Object result) {
+    result as List<Object?>;
+    return EntityWithScoreResult(
+      entity: result[0]! as EntityResult,
+      score: result[1]! as double,
+    );
+  }
+}
+
+class CommunityWithScoreResult {
+  CommunityWithScoreResult({
+    required this.community,
+    required this.score,
+  });
+
+  CommunityResult community;
+
+  double score;
+
+  Object encode() {
+    return <Object?>[
+      community,
+      score,
+    ];
+  }
+
+  static CommunityWithScoreResult decode(Object result) {
+    result as List<Object?>;
+    return CommunityWithScoreResult(
+      community: result[0]! as CommunityResult,
+      score: result[1]! as double,
+    );
+  }
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -98,11 +474,44 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is PreferredBackend) {
       buffer.putUint8(129);
       writeValue(buffer, value.index);
-    }    else if (value is RetrievalResult) {
+    }    else if (value is PermissionType) {
       buffer.putUint8(130);
+      writeValue(buffer, value.index);
+    }    else if (value is PermissionStatus) {
+      buffer.putUint8(131);
+      writeValue(buffer, value.index);
+    }    else if (value is RetrievalResult) {
+      buffer.putUint8(132);
       writeValue(buffer, value.encode());
     }    else if (value is VectorStoreStats) {
-      buffer.putUint8(131);
+      buffer.putUint8(133);
+      writeValue(buffer, value.encode());
+    }    else if (value is EntityResult) {
+      buffer.putUint8(134);
+      writeValue(buffer, value.encode());
+    }    else if (value is RelationshipResult) {
+      buffer.putUint8(135);
+      writeValue(buffer, value.encode());
+    }    else if (value is CommunityResult) {
+      buffer.putUint8(136);
+      writeValue(buffer, value.encode());
+    }    else if (value is GraphStats) {
+      buffer.putUint8(137);
+      writeValue(buffer, value.encode());
+    }    else if (value is ContactResult) {
+      buffer.putUint8(138);
+      writeValue(buffer, value.encode());
+    }    else if (value is CalendarEventResult) {
+      buffer.putUint8(139);
+      writeValue(buffer, value.encode());
+    }    else if (value is GraphQueryResult) {
+      buffer.putUint8(140);
+      writeValue(buffer, value.encode());
+    }    else if (value is EntityWithScoreResult) {
+      buffer.putUint8(141);
+      writeValue(buffer, value.encode());
+    }    else if (value is CommunityWithScoreResult) {
+      buffer.putUint8(142);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -116,9 +525,33 @@ class _PigeonCodec extends StandardMessageCodec {
         final int? value = readValue(buffer) as int?;
         return value == null ? null : PreferredBackend.values[value];
       case 130: 
-        return RetrievalResult.decode(readValue(buffer)!);
+        final int? value = readValue(buffer) as int?;
+        return value == null ? null : PermissionType.values[value];
       case 131: 
+        final int? value = readValue(buffer) as int?;
+        return value == null ? null : PermissionStatus.values[value];
+      case 132: 
+        return RetrievalResult.decode(readValue(buffer)!);
+      case 133: 
         return VectorStoreStats.decode(readValue(buffer)!);
+      case 134: 
+        return EntityResult.decode(readValue(buffer)!);
+      case 135: 
+        return RelationshipResult.decode(readValue(buffer)!);
+      case 136: 
+        return CommunityResult.decode(readValue(buffer)!);
+      case 137: 
+        return GraphStats.decode(readValue(buffer)!);
+      case 138: 
+        return ContactResult.decode(readValue(buffer)!);
+      case 139: 
+        return CalendarEventResult.decode(readValue(buffer)!);
+      case 140: 
+        return GraphQueryResult.decode(readValue(buffer)!);
+      case 141: 
+        return EntityWithScoreResult.decode(readValue(buffer)!);
+      case 142: 
+        return CommunityWithScoreResult.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -632,6 +1065,572 @@ class PlatformService {
       );
     } else {
       return;
+    }
+  }
+
+  Future<void> initializeGraphStore(String databasePath) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.initializeGraphStore$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[databasePath]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> addEntity({required String id, required String name, required String type, required List<double> embedding, String? description, String? metadata, required int lastModified, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.addEntity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id, name, type, embedding, description, metadata, lastModified]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> updateEntity({required String id, String? name, String? type, List<double>? embedding, String? description, String? metadata, int? lastModified, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.updateEntity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id, name, type, embedding, description, metadata, lastModified]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> deleteEntity(String id) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.deleteEntity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<EntityResult?> getEntity(String id) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getEntity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return (pigeonVar_replyList[0] as EntityResult?);
+    }
+  }
+
+  Future<List<EntityResult>> getEntitiesByType(String type) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesByType$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[type]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<EntityResult>();
+    }
+  }
+
+  Future<void> addRelationship({required String id, required String sourceId, required String targetId, required String type, double weight = 1.0, String? metadata, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.addRelationship$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id, sourceId, targetId, type, weight, metadata]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> deleteRelationship(String id) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.deleteRelationship$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<List<RelationshipResult>> getRelationships(String entityId) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getRelationships$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[entityId]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<RelationshipResult>();
+    }
+  }
+
+  Future<void> addCommunity({required String id, required int level, required String summary, required List<String> entityIds, required List<double> embedding, String? metadata, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.addCommunity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id, level, summary, entityIds, embedding, metadata]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> updateCommunitySummary({required String id, required String summary, required List<double> embedding, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.updateCommunitySummary$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[id, summary, embedding]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<List<CommunityResult>> getCommunitiesByLevel(int level) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getCommunitiesByLevel$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[level]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<CommunityResult>();
+    }
+  }
+
+  Future<List<EntityResult>> getEntityNeighbors({required String entityId, int depth = 1, String? relationshipType, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getEntityNeighbors$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[entityId, depth, relationshipType]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<EntityResult>();
+    }
+  }
+
+  Future<List<EntityWithScoreResult>> searchEntitiesBySimilarity({required List<double> queryEmbedding, required int topK, double threshold = 0.0, String? entityType, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.searchEntitiesBySimilarity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[queryEmbedding, topK, threshold, entityType]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<EntityWithScoreResult>();
+    }
+  }
+
+  Future<List<CommunityWithScoreResult>> searchCommunitiesBySimilarity({required List<double> queryEmbedding, required int topK, int? level, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.searchCommunitiesBySimilarity$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[queryEmbedding, topK, level]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<CommunityWithScoreResult>();
+    }
+  }
+
+  Future<GraphQueryResult> executeGraphQuery(String query) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.executeGraphQuery$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[query]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as GraphQueryResult?)!;
+    }
+  }
+
+  Future<GraphStats> getGraphStats() async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getGraphStats$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(null) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as GraphStats?)!;
+    }
+  }
+
+  Future<void> clearGraphStore() async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.clearGraphStore$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(null) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<void> closeGraphStore() async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.closeGraphStore$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(null) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
+
+  Future<PermissionStatus> checkPermission(PermissionType type) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.checkPermission$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[type]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as PermissionStatus?)!;
+    }
+  }
+
+  Future<PermissionStatus> requestPermission(PermissionType type) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.requestPermission$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[type]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as PermissionStatus?)!;
+    }
+  }
+
+  Future<List<ContactResult>> fetchContacts({int? sinceTimestamp, int? limit}) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.fetchContacts$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[sinceTimestamp, limit]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<ContactResult>();
+    }
+  }
+
+  Future<List<CalendarEventResult>> fetchCalendarEvents({int? sinceTimestamp, int? startDate, int? endDate, int? limit, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.fetchCalendarEvents$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[sinceTimestamp, startDate, endDate, limit]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<CalendarEventResult>();
     }
   }
 }
