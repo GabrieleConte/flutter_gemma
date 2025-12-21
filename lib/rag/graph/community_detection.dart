@@ -544,7 +544,13 @@ class CommunitySummarizer {
     );
     
     final summary = await llmCallback(prompt);
-    final embedding = await embeddingCallback(summary);
+    
+    // Truncate summary for embedding if too long
+    // EmbeddingGemma 256 has max ~256 tokens, roughly 4 chars per token = ~1024 chars
+    final summaryForEmbedding = summary.length > 800 
+        ? summary.substring(0, 800).trim() 
+        : summary;
+    final embedding = await embeddingCallback(summaryForEmbedding);
     
     return CommunitySummary(
       communityId: community.id,
