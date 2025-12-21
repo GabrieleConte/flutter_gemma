@@ -237,6 +237,33 @@ class GraphRAGService {
     return result;
   }
   
+  /// Execute a streaming global query with progress updates
+  /// 
+  /// This provides real-time feedback during the query:
+  /// - Shows which community is being processed
+  /// - Streams the final answer token by token
+  Stream<GlobalQueryProgress> globalQueryAutoStreaming(String query) {
+    _checkInitialized();
+    debugPrint('[GraphRAGService] Streaming global query: "$query"');
+    
+    // Create streaming LLM callback if chat supports it
+    Stream<String> llmStreamCallback(String prompt) async* {
+      await _chat!.clearHistory();
+      await _chat!.addQuery(Message(text: prompt));
+      
+      await for (final response in _chat!.generateChatResponseAsync()) {
+        if (response is TextResponse) {
+          yield response.token;
+        }
+      }
+    }
+    
+    return _graphRag!.globalQueryAutoStreaming(
+      query,
+      llmStreamCallback: llmStreamCallback,
+    );
+  }
+  
   /// Get context string for RAG augmentation
   Future<String> getContext(String query) async {
     _checkInitialized();

@@ -368,6 +368,35 @@ class GraphRAG {
     return await engine.queryWithAutoLevel(query);
   }
 
+  /// Execute a streaming global query with automatic level selection
+  /// 
+  /// This yields progress events during execution, providing real-time
+  /// feedback including:
+  /// - Community processing progress
+  /// - Streaming tokens for the final answer (if llmStreamCallback provided)
+  Stream<GlobalQueryProgress> globalQueryAutoStreaming(
+    String query, {
+    int maxCommunityAnswers = 10,
+    int minHelpfulnessScore = 20,
+    String responseType = 'multiple paragraphs',
+    Stream<String> Function(String prompt)? llmStreamCallback,
+  }) {
+    _checkInitialized();
+    
+    final engine = StreamingGlobalQueryEngine(
+      repository: _repository,
+      llmCallback: _llmCallback,
+      llmStreamCallback: llmStreamCallback,
+      config: GlobalQueryConfig(
+        maxCommunityAnswers: maxCommunityAnswers,
+        minHelpfulnessScore: minHelpfulnessScore,
+        responseType: responseType,
+      ),
+    );
+    
+    return engine.queryWithAutoLevelStreaming(query);
+  }
+
   /// Get context string for RAG augmentation
   Future<String> getContext(String query) async {
     _checkInitialized();

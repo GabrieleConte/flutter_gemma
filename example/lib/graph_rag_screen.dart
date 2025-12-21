@@ -32,6 +32,12 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
   bool _isQuerying = false;
   bool _useGlobalQuery = false;  // Toggle for GraphRAG paper's map-reduce approach
   
+  // Streaming global query state
+  String? _streamingProgress;
+  String _streamingAnswer = '';
+  int? _currentCommunity;
+  int? _totalCommunities;
+  
   // Indexing
   StreamSubscription<IndexingProgress>? _progressSubscription;
   IndexingProgress? _indexingProgress;
@@ -239,25 +245,64 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
     final query = _queryController.text.trim();
     if (query.isEmpty) return;
     
-    setState(() => _isQuerying = true);
+    setState(() {
+      _isQuerying = true;
+      _streamingProgress = null;
+      _streamingAnswer = '';
+      _currentCommunity = null;
+      _totalCommunities = null;
+    });
     
     try {
       if (_useGlobalQuery) {
-        // Use GraphRAG paper's map-reduce approach for global sensemaking queries
-        final result = await _service.globalQueryAuto(query);
+        // Use streaming global query for real-time feedback
+        int? usefulAnswers;
+        int? communityLevel;
+        Duration? mapPhaseDuration;
+        Duration? reducePhaseDuration;
+        Duration? totalDuration;
+        
+        await for (final progress in _service.globalQueryAutoStreaming(query)) {
+          setState(() {
+            _streamingProgress = progress.message;
+            _currentCommunity = progress.currentCommunity;
+            _totalCommunities = progress.totalCommunities;
+            
+            if (progress.token != null) {
+              _streamingAnswer += progress.token!;
+            }
+            if (progress.partialResponse != null && progress.phase == global.GlobalQueryPhase.completed) {
+              _streamingAnswer = progress.partialResponse!;
+            }
+            
+            usefulAnswers = progress.usefulAnswers ?? usefulAnswers;
+            communityLevel = progress.communityLevel ?? communityLevel;
+            mapPhaseDuration = progress.mapPhaseDuration ?? mapPhaseDuration;
+            reducePhaseDuration = progress.reducePhaseDuration ?? reducePhaseDuration;
+            totalDuration = progress.totalDuration ?? totalDuration;
+          });
+        }
         
         setState(() {
           _queryHistory.insert(0, _QueryResult(
             query: query,
-            entities: [], // Global query doesn't return entities directly
-            communities: [], // Communities are used internally
-            contextString: result.answer,
+            entities: [],
+            communities: [],
+            contextString: _streamingAnswer,
             timestamp: DateTime.now(),
             isGlobalQuery: true,
-            globalQueryMetadata: result.metadata,
-            communityAnswersUsed: result.communityAnswers.length,
+            globalQueryMetadata: global.QueryMetadata(
+              originalQuery: query,
+              communityLevel: communityLevel ?? 0,
+              mapPhaseDuration: mapPhaseDuration ?? Duration.zero,
+              reducePhaseDuration: reducePhaseDuration ?? Duration.zero,
+              totalDuration: totalDuration ?? Duration.zero,
+            ),
+            communityAnswersUsed: usefulAnswers ?? 0,
           ));
           _isQuerying = false;
+          _streamingProgress = null;
+          _streamingAnswer = '';
         });
       } else {
         // Standard local/hybrid query
@@ -277,7 +322,11 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       
       _queryController.clear();
     } catch (e) {
-      setState(() => _isQuerying = false);
+      setState(() {
+        _isQuerying = false;
+        _streamingProgress = null;
+        _streamingAnswer = '';
+      });
       _showSnackBar('Query error: $e', isError: true);
     }
   }
@@ -645,11 +694,11 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
                     ? const SizedBox(
                         width: 24, 
                         height: 24, 
-                        child: CircularProgressIndicator(strokeWidth: 2)
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
                       )
                     : Icon(
                         _useGlobalQuery ? Icons.public : Icons.search,
-                        color: _useGlobalQuery ? Colors.purple : null,
+                        color: Colors.white,  // Always white on colored background
                       ),
                 style: IconButton.styleFrom(
                   backgroundColor: _useGlobalQuery ? Colors.purple : Colors.blue,
@@ -664,6 +713,98 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
   }
   
   Widget _buildQueryResults() {
+    // Show streaming progress if global query is running
+    if (_isQuerying && _useGlobalQuery && (_streamingProgress != null || _streamingAnswer.isNotEmpty)) {
+      return Column(
+        children: [
+          // Streaming progress card - make it flexible to handle long responses
+          Expanded(
+            child: Card(
+              color: const Color(0xFF2d1a5c),
+              margin: const EdgeInsets.all(8),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 16, 
+                          height: 16, 
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.purple)
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _streamingProgress ?? 'Processing...',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_currentCommunity != null && _totalCommunities != null) ...[
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: _currentCommunity! / _totalCommunities!,
+                        backgroundColor: Colors.white24,
+                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.purple),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Community $_currentCommunity of $_totalCommunities',
+                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                    ],
+                    if (_streamingAnswer.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const Divider(color: Colors.white24),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Response:',
+                        style: TextStyle(
+                          color: Colors.purple,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _streamingAnswer,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      // Blinking cursor effect
+                      const Text(
+                        '▌',
+                        style: TextStyle(color: Colors.purple),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Show history below
+          Expanded(
+            child: _queryHistory.isEmpty
+                ? const SizedBox.shrink()
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: _queryHistory.length,
+                    itemBuilder: (context, index) {
+                      final result = _queryHistory[index];
+                      return _QueryResultCard(result: result);
+                    },
+                  ),
+          ),
+        ],
+      );
+    }
+    
     if (_queryHistory.isEmpty) {
       return const Center(
         child: Column(
@@ -879,7 +1020,8 @@ class _QueryResultCard extends StatelessWidget {
                 ],
               ),
             ),
-          if (result.contextString.isNotEmpty)
+          // Only show Context section for non-global queries (for global queries it's the same as the response)
+          if (!result.isGlobalQuery && result.contextString.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(

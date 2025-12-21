@@ -3,6 +3,72 @@ import 'dart:math';
 
 import 'graph_repository.dart';
 
+/// Progress event types for streaming global queries
+enum GlobalQueryPhase {
+  /// Starting the query, discovering levels
+  starting,
+  /// Processing community in map phase
+  mapPhase,
+  /// Filtering and sorting community answers
+  filtering,
+  /// Generating final answer in reduce phase
+  reducePhase,
+  /// Final answer token being streamed
+  streaming,
+  /// Query completed
+  completed,
+}
+
+/// Progress event for streaming global queries
+class GlobalQueryProgress {
+  /// Current phase of the query
+  final GlobalQueryPhase phase;
+  
+  /// Human-readable message about current progress
+  final String message;
+  
+  /// Current community being processed (map phase)
+  final int? currentCommunity;
+  
+  /// Total communities to process (map phase)
+  final int? totalCommunities;
+  
+  /// Streaming token (reduce phase)
+  final String? token;
+  
+  /// Full accumulated response so far
+  final String? partialResponse;
+  
+  /// Selected community level
+  final int? communityLevel;
+  
+  /// Number of useful community answers found
+  final int? usefulAnswers;
+  
+  /// Map phase duration (available after map phase completes)
+  final Duration? mapPhaseDuration;
+  
+  /// Reduce phase duration (available after completion)
+  final Duration? reducePhaseDuration;
+  
+  /// Total duration (available after completion)
+  final Duration? totalDuration;
+
+  GlobalQueryProgress({
+    required this.phase,
+    required this.message,
+    this.currentCommunity,
+    this.totalCommunities,
+    this.token,
+    this.partialResponse,
+    this.communityLevel,
+    this.usefulAnswers,
+    this.mapPhaseDuration,
+    this.reducePhaseDuration,
+    this.totalDuration,
+  });
+}
+
 /// Configuration for global query engine (GraphRAG paper approach)
 class GlobalQueryConfig {
   /// Community level to use for queries (0 = root, higher = more granular)
@@ -448,6 +514,348 @@ Response:''';
       'tell me about',
       'info on',
       'information about',
+    ];
+    return specificIndicators.any((indicator) => query.contains(indicator));
+  }
+}
+
+/// Streaming global query engine that emits progress events
+/// 
+/// This provides real-time feedback during global queries, which can take
+/// a while since they process multiple communities sequentially.
+class StreamingGlobalQueryEngine {
+  final GraphRepository repository;
+  final Future<String> Function(String prompt) llmCallback;
+  final Stream<String> Function(String prompt)? llmStreamCallback;
+  final GlobalQueryConfig config;
+
+  StreamingGlobalQueryEngine({
+    required this.repository,
+    required this.llmCallback,
+    this.llmStreamCallback,
+    GlobalQueryConfig? config,
+  }) : config = config ?? GlobalQueryConfig();
+
+  /// Execute a streaming global query with automatic level selection
+  /// 
+  /// Yields progress events during execution, including streaming tokens
+  /// for the final answer.
+  Stream<GlobalQueryProgress> queryWithAutoLevelStreaming(String userQuery) async* {
+    final totalStopwatch = Stopwatch()..start();
+    final mapStopwatch = Stopwatch();
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.starting,
+      message: 'Analyzing query...',
+    );
+    
+    final lowerQuery = userQuery.toLowerCase();
+    
+    // Discover available community levels
+    final availableLevels = <int>[];
+    for (var level = 0; level <= 5; level++) {
+      final communities = await repository.getCommunitiesByLevel(level);
+      if (communities.isNotEmpty) {
+        availableLevels.add(level);
+      } else if (availableLevels.isNotEmpty) {
+        break;
+      }
+    }
+    
+    if (availableLevels.isEmpty) {
+      yield GlobalQueryProgress(
+        phase: GlobalQueryPhase.completed,
+        message: 'No indexed data found',
+        partialResponse: "I don't have enough information to answer this question. The knowledge graph hasn't been indexed yet.",
+      );
+      return;
+    }
+    
+    final maxAvailableLevel = availableLevels.reduce(max);
+    
+    // Select level based on query type
+    int selectedLevel;
+    if (_isBroadQuery(lowerQuery)) {
+      selectedLevel = 0;
+    } else if (_isThematicQuery(lowerQuery)) {
+      selectedLevel = (maxAvailableLevel / 2).ceil();
+    } else if (_isSpecificQuery(lowerQuery)) {
+      selectedLevel = maxAvailableLevel;
+    } else {
+      selectedLevel = min(1, maxAvailableLevel);
+    }
+    selectedLevel = selectedLevel.clamp(0, maxAvailableLevel);
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.starting,
+      message: 'Using community level $selectedLevel',
+      communityLevel: selectedLevel,
+    );
+    
+    // Get communities at selected level
+    final communities = await repository.getCommunitiesByLevel(selectedLevel);
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.mapPhase,
+      message: 'Processing ${communities.length} communities...',
+      currentCommunity: 0,
+      totalCommunities: communities.length,
+      communityLevel: selectedLevel,
+    );
+    
+    // === MAP PHASE ===
+    mapStopwatch.start();
+    final communityAnswers = <CommunityAnswer>[];
+    
+    for (var i = 0; i < communities.length; i++) {
+      final community = communities[i];
+      
+      yield GlobalQueryProgress(
+        phase: GlobalQueryPhase.mapPhase,
+        message: 'Analyzing community ${i + 1}/${communities.length}...',
+        currentCommunity: i + 1,
+        totalCommunities: communities.length,
+        communityLevel: selectedLevel,
+      );
+      
+      final answer = await _generateCommunityAnswer(userQuery, community);
+      if (answer != null) {
+        communityAnswers.add(answer);
+      }
+    }
+    
+    // === FILTER PHASE ===
+    mapStopwatch.stop();
+    final reduceStopwatch = Stopwatch()..start();
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.filtering,
+      message: 'Found ${communityAnswers.length} relevant communities',
+      usefulAnswers: communityAnswers.length,
+      communityLevel: selectedLevel,
+      mapPhaseDuration: mapStopwatch.elapsed,
+    );
+    
+    // Filter by minimum helpfulness score
+    final filteredAnswers = communityAnswers
+        .where((a) => a.helpfulnessScore >= config.minHelpfulnessScore)
+        .toList();
+    
+    // Sort by helpfulness descending
+    filteredAnswers.sort((a, b) => b.helpfulnessScore.compareTo(a.helpfulnessScore));
+    
+    // Select top answers that fit in context window
+    final selectedAnswers = <CommunityAnswer>[];
+    var totalTokens = 0;
+    
+    for (final answer in filteredAnswers) {
+      if (selectedAnswers.length >= config.maxCommunityAnswers) break;
+      if (totalTokens + answer.approximateTokens > config.contextTokenLimit) break;
+      
+      selectedAnswers.add(answer);
+      totalTokens += answer.approximateTokens;
+    }
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.filtering,
+      message: 'Using ${selectedAnswers.length} community answers',
+      usefulAnswers: selectedAnswers.length,
+      communityLevel: selectedLevel,
+      mapPhaseDuration: mapStopwatch.elapsed,
+    );
+    
+    // === REDUCE PHASE ===
+    if (selectedAnswers.isEmpty) {
+      reduceStopwatch.stop();
+      totalStopwatch.stop();
+      yield GlobalQueryProgress(
+        phase: GlobalQueryPhase.completed,
+        message: 'Query completed',
+        partialResponse: "I don't have enough relevant information to answer this question based on the available data.",
+        communityLevel: selectedLevel,
+        usefulAnswers: 0,
+        mapPhaseDuration: mapStopwatch.elapsed,
+        reducePhaseDuration: reduceStopwatch.elapsed,
+        totalDuration: totalStopwatch.elapsed,
+      );
+      return;
+    }
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.reducePhase,
+      message: 'Synthesizing final answer...',
+      usefulAnswers: selectedAnswers.length,
+      communityLevel: selectedLevel,
+      mapPhaseDuration: mapStopwatch.elapsed,
+    );
+    
+    // Generate final answer - stream if callback available
+    final prompt = _buildReducePrompt(userQuery, selectedAnswers);
+    
+    if (llmStreamCallback != null) {
+      // Stream the final answer
+      final buffer = StringBuffer();
+      await for (final token in llmStreamCallback!(prompt)) {
+        buffer.write(token);
+        yield GlobalQueryProgress(
+          phase: GlobalQueryPhase.streaming,
+          message: 'Generating response...',
+          token: token,
+          partialResponse: buffer.toString(),
+          usefulAnswers: selectedAnswers.length,
+          communityLevel: selectedLevel,
+          mapPhaseDuration: mapStopwatch.elapsed,
+        );
+      }
+      
+      reduceStopwatch.stop();
+      totalStopwatch.stop();
+      yield GlobalQueryProgress(
+        phase: GlobalQueryPhase.completed,
+        message: 'Query completed',
+        partialResponse: buffer.toString(),
+        usefulAnswers: selectedAnswers.length,
+        communityLevel: selectedLevel,
+        mapPhaseDuration: mapStopwatch.elapsed,
+        reducePhaseDuration: reduceStopwatch.elapsed,
+        totalDuration: totalStopwatch.elapsed,
+      );
+    } else {
+      // Non-streaming fallback
+      final answer = await llmCallback(prompt);
+      
+      reduceStopwatch.stop();
+      totalStopwatch.stop();
+      yield GlobalQueryProgress(
+        phase: GlobalQueryPhase.completed,
+        message: 'Query completed',
+        partialResponse: answer,
+        usefulAnswers: selectedAnswers.length,
+        communityLevel: selectedLevel,
+        mapPhaseDuration: mapStopwatch.elapsed,
+        reducePhaseDuration: reduceStopwatch.elapsed,
+        totalDuration: totalStopwatch.elapsed,
+      );
+    }
+  }
+  
+  String _buildReducePrompt(String query, List<CommunityAnswer> communityAnswers) {
+    final answersContext = communityAnswers.asMap().entries.map((entry) {
+      final idx = entry.key + 1;
+      final answer = entry.value;
+      return '''--- Report $idx (Helpfulness: ${answer.helpfulnessScore}/100) ---
+${answer.answer}
+''';
+    }).join('\n');
+    
+    return '''---Role---
+You are a helpful assistant responding to questions about a dataset by synthesizing perspectives from multiple analyst reports.
+
+---Goal---
+Generate a response of ${config.responseType} that responds to the user's question, summarizing all the reports from multiple analysts who focused on different parts of the dataset.
+
+If you don't know the answer or the reports don't contain relevant information, say so. Do not make anything up.
+
+The final response should:
+1. Remove irrelevant information from the reports
+2. Merge the cleaned information into a comprehensive answer
+3. Provide explanations of key points and implications
+4. Reference the report numbers when citing specific information, e.g., [Report 1, 3]
+
+Do not mention "analysts" or "reports" in a way that's visible to the end user - just synthesize the information naturally.
+
+---Analyst Reports---
+$answersContext
+
+---Question---
+$query
+
+---Target Response Format---
+${config.responseType}
+
+Response:''';
+  }
+  
+  Future<CommunityAnswer?> _generateCommunityAnswer(
+    String query,
+    GraphCommunity community,
+  ) async {
+    if (community.summary.isEmpty) return null;
+    
+    final prompt = '''---Role---
+You are a helpful assistant responding to questions about data in the provided community summary.
+
+---Goal---
+Generate a response to the question based ONLY on the community summary provided below.
+Also provide a helpfulness score from 0-100 indicating how relevant and useful your answer is for the question.
+
+If the community summary does not contain information relevant to the question, respond with score 0.
+
+---Community Summary---
+${community.summary}
+
+---Question---
+$query
+
+---Response Format---
+First, output a helpfulness score on its own line: SCORE: <number from 0-100>
+Then provide your answer based on the community summary.
+
+Response:''';
+
+    try {
+      final response = await llmCallback(prompt);
+      
+      // Parse score and answer
+      final scoreMatch = RegExp(r'SCORE:\s*(\d+)').firstMatch(response);
+      final score = scoreMatch != null 
+          ? int.tryParse(scoreMatch.group(1) ?? '0') ?? 0
+          : 0;
+      
+      // Extract answer (everything after SCORE line)
+      var answer = response;
+      if (scoreMatch != null) {
+        answer = response.substring(scoreMatch.end).trim();
+      }
+      
+      // Clamp score to valid range
+      final clampedScore = score.clamp(0, 100);
+      
+      return CommunityAnswer(
+        communityId: community.id,
+        summary: community.summary,
+        answer: answer,
+        helpfulnessScore: clampedScore,
+        level: community.level,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  bool _isBroadQuery(String query) {
+    final broadIndicators = [
+      'main themes', 'overall', 'general', 'summary', 'overview',
+      'what are the', 'key trends', 'major', 'common patterns',
+      'most important', 'all ', 'everything', 'entire', 'whole',
+    ];
+    return broadIndicators.any((indicator) => query.contains(indicator));
+  }
+  
+  bool _isThematicQuery(String query) {
+    final thematicIndicators = [
+      'how do', 'why do', 'what causes', 'relationship between',
+      'connection', 'impact of', 'effect of', 'related to',
+      'associated with', 'theme', 'topic', 'category',
+    ];
+    return thematicIndicators.any((indicator) => query.contains(indicator));
+  }
+  
+  bool _isSpecificQuery(String query) {
+    final specificIndicators = [
+      'who is', 'what is', 'where is', 'when did', 'which ',
+      'specific', 'particular', 'exactly', 'details about',
+      'tell me about', 'info on', 'information about',
     ];
     return specificIndicators.any((indicator) => query.contains(indicator));
   }
