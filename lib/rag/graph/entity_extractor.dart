@@ -507,6 +507,9 @@ class LLMEntityExtractor implements EntityExtractor {
       final jsonEnd = text.indexOf('```', jsonStart + 7);
       if (jsonEnd > jsonStart) {
         text = text.substring(jsonStart + 7, jsonEnd).trim();
+      } else {
+        // No closing ```, take everything after ```json
+        text = text.substring(jsonStart + 7).trim();
       }
     } else if (text.contains('```')) {
       // Generic code block
@@ -514,18 +517,89 @@ class LLMEntityExtractor implements EntityExtractor {
       final codeEnd = text.indexOf('```', codeStart + 3);
       if (codeEnd > codeStart) {
         text = text.substring(codeStart + 3, codeEnd).trim();
+      } else {
+        // No closing ```, take everything after ```
+        text = text.substring(codeStart + 3).trim();
       }
     }
     
     // Find the first { and last }
     final start = text.indexOf('{');
-    final end = text.lastIndexOf('}');
+    var end = text.lastIndexOf('}');
     
-    if (start >= 0 && end > start) {
-      return text.substring(start, end + 1);
+    if (start >= 0) {
+      // If no closing brace, try to repair the JSON
+      if (end <= start) {
+        text = _repairTruncatedJson(text.substring(start));
+        end = text.lastIndexOf('}');
+        if (end > 0) {
+          return text.substring(0, end + 1);
+        }
+      } else {
+        return text.substring(start, end + 1);
+      }
     }
     
     throw const FormatException('No JSON found in response');
+  }
+  
+  /// Try to repair truncated JSON by adding missing closing brackets
+  String _repairTruncatedJson(String partialJson) {
+    var result = partialJson.trim();
+    
+    // Count open brackets
+    var openBraces = 0;
+    var openBrackets = 0;
+    var inString = false;
+    var escape = false;
+    
+    for (var i = 0; i < result.length; i++) {
+      final char = result[i];
+      
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      
+      if (char == '\\') {
+        escape = true;
+        continue;
+      }
+      
+      if (char == '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (inString) continue;
+      
+      if (char == '{') openBraces++;
+      if (char == '}') openBraces--;
+      if (char == '[') openBrackets++;
+      if (char == ']') openBrackets--;
+    }
+    
+    // If we're in a string, close it
+    if (inString) {
+      result += '"';
+    }
+    
+    // If last character is a comma or colon, remove it
+    result = result.trimRight();
+    if (result.endsWith(',') || result.endsWith(':')) {
+      result = result.substring(0, result.length - 1);
+    }
+    
+    // Add missing closing brackets
+    result += ']' * openBrackets;
+    result += '}' * openBraces;
+    
+    assert(() {
+      print('[EntityExtractor] Repaired JSON: added $openBrackets ] and $openBraces }');
+      return true;
+    }());
+    
+    return result;
   }
 
   /// Fallback parsing for non-JSON or malformed JSON responses
@@ -539,6 +613,9 @@ class LLMEntityExtractor implements EntityExtractor {
       caseSensitive: false,
     );
     
+    // Collect entity names for relationship validation
+    final entityNames = <String>{};
+    
     for (final match in entityPattern.allMatches(response)) {
       final name = match.group(1) ?? '';
       final type = match.group(2) ?? 'UNKNOWN';
@@ -548,10 +625,11 @@ class LLMEntityExtractor implements EntityExtractor {
           type: type.toUpperCase(),
           confidence: 0.7,
         ));
+        entityNames.add(name.toLowerCase());
       }
     }
     
-    // Try to extract relationships
+    // Try to extract relationships - only keep those referencing found entities
     final relPattern = RegExp(
       r'\{"source"\s*:\s*"([^"]+)"\s*,\s*"target"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"([^"]+)"',
       caseSensitive: false,
@@ -562,12 +640,24 @@ class LLMEntityExtractor implements EntityExtractor {
       final target = match.group(2) ?? '';
       final type = match.group(3) ?? 'RELATED_TO';
       if (source.isNotEmpty && target.isNotEmpty) {
-        relationships.add(ExtractedRelationship(
-          sourceEntity: source,
-          targetEntity: target,
-          type: type.toUpperCase().replaceAll(' ', '_'),
-          confidence: 0.7,
-        ));
+        // Only add relationship if BOTH entities were actually extracted
+        // This prevents orphan relationships from truncated JSON
+        final sourceFound = entityNames.contains(source.toLowerCase());
+        final targetFound = entityNames.contains(target.toLowerCase());
+        
+        if (sourceFound && targetFound) {
+          relationships.add(ExtractedRelationship(
+            sourceEntity: source,
+            targetEntity: target,
+            type: type.toUpperCase().replaceAll(' ', '_'),
+            confidence: 0.7,
+          ));
+        } else {
+          assert(() {
+            print('[EntityExtractor] Fallback: Skipping orphan relationship $source -> $target (source found: $sourceFound, target found: $targetFound)');
+            return true;
+          }());
+        }
       }
     }
     
