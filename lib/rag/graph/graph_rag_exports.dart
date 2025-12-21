@@ -129,6 +129,14 @@ export 'hybrid_query_engine.dart'
         HybridQueryBuilder,
         HybridQueryResultExtension;
 
+// Global query engine (GraphRAG paper map-reduce approach)
+export 'global_query_engine.dart'
+    show
+        GlobalQueryConfig,
+        CommunityAnswer,
+        GlobalQueryResult,
+        GlobalQueryEngine;
+
 // Background indexing
 export 'background_indexing.dart'
     show

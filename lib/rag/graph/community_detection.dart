@@ -277,7 +277,56 @@ class LouvainCommunityDetector {
       nodeToEntityIds: nextLevelNodeToEntityIds,
     );
     
+    // Update parent-child relationships between levels
+    if (nextLevels.isNotEmpty) {
+      final parentLevel = nextLevels.first;
+      _updateParentChildRelationships(validCommunities, parentLevel);
+    }
+    
     return [validCommunities, ...nextLevels];
+  }
+  
+  /// Update parent-child relationships between two levels of communities
+  void _updateParentChildRelationships(
+    List<DetectedCommunity> childLevel,
+    List<DetectedCommunity> parentLevel,
+  ) {
+    // For each parent community, find which child communities it contains
+    for (var i = 0; i < parentLevel.length; i++) {
+      final parent = parentLevel[i];
+      final childIds = <String>[];
+      
+      for (final child in childLevel) {
+        // Check if child's entities are subset of parent's entities
+        if (child.entityIds.every((e) => parent.entityIds.contains(e))) {
+          childIds.add(child.id);
+        }
+      }
+      
+      // Update parent with child IDs
+      parentLevel[i] = DetectedCommunity(
+        id: parent.id,
+        level: parent.level,
+        entityIds: parent.entityIds,
+        modularity: parent.modularity,
+        parentCommunityId: parent.parentCommunityId,
+        childCommunityIds: childIds,
+      );
+      
+      // Update children with parent ID
+      for (var j = 0; j < childLevel.length; j++) {
+        if (childIds.contains(childLevel[j].id)) {
+          childLevel[j] = DetectedCommunity(
+            id: childLevel[j].id,
+            level: childLevel[j].level,
+            entityIds: childLevel[j].entityIds,
+            modularity: childLevel[j].modularity,
+            parentCommunityId: parent.id,
+            childCommunityIds: childLevel[j].childCommunityIds,
+          );
+        }
+      }
+    }
   }
 
   /// Calculate modularity gain from moving a node to a new community
@@ -561,6 +610,52 @@ class CommunitySummarizer {
     );
   }
 
+  /// Generate a hierarchical summary for higher-level communities
+  /// This summarizes child community summaries instead of raw entities
+  /// Following the GraphRAG paper approach for multi-level summarization
+  Future<CommunitySummary> summarizeHierarchical(
+    DetectedCommunity community,
+    List<CommunitySummary> childSummaries,
+  ) async {
+    if (childSummaries.isEmpty) {
+      // No children, return empty summary
+      return CommunitySummary(
+        communityId: community.id,
+        summary: 'Empty community with no sub-communities.',
+        embedding: List.filled(768, 0.0),
+        entityCount: community.entityIds.length,
+        relationshipCount: 0,
+      );
+    }
+
+    final childSummaryTexts = childSummaries.map((s) => s.summary).toList();
+    
+    final prompt = ExtractionPrompts.hierarchicalCommunitySummaryPrompt(
+      childSummaryTexts,
+      community.level,
+    );
+    
+    final summary = await llmCallback(prompt);
+    
+    // Truncate summary for embedding if too long
+    final summaryForEmbedding = summary.length > 800 
+        ? summary.substring(0, 800).trim() 
+        : summary;
+    final embedding = await embeddingCallback(summaryForEmbedding);
+    
+    // Count entities and relationships from children
+    final totalEntities = childSummaries.fold(0, (sum, s) => sum + s.entityCount);
+    final totalRelationships = childSummaries.fold(0, (sum, s) => sum + s.relationshipCount);
+    
+    return CommunitySummary(
+      communityId: community.id,
+      summary: summary,
+      embedding: embedding,
+      entityCount: totalEntities,
+      relationshipCount: totalRelationships,
+    );
+  }
+
   /// Generate summaries for all communities
   Future<List<CommunitySummary>> summarizeAll(
     List<DetectedCommunity> communities,
@@ -578,6 +673,66 @@ class CommunitySummarizer {
       );
       summaries.add(summary);
       onProgress?.call(i + 1, communities.length);
+    }
+    
+    return summaries;
+  }
+
+  /// Generate hierarchical summaries for all communities level by level
+  /// Level 0 (leaf) communities are summarized from entities
+  /// Higher levels are summarized from their child community summaries
+  Future<List<CommunitySummary>> summarizeAllHierarchical(
+    List<DetectedCommunity> communities,
+    List<GraphEntity> entities,
+    List<GraphRelationship> relationships, {
+    void Function(int completed, int total)? onProgress,
+  }) async {
+    final summaries = <CommunitySummary>[];
+    final summaryById = <String, CommunitySummary>{};
+    
+    // Group communities by level
+    final communityByLevel = <int, List<DetectedCommunity>>{};
+    var maxLevel = 0;
+    for (final community in communities) {
+      communityByLevel.putIfAbsent(community.level, () => []).add(community);
+      if (community.level > maxLevel) maxLevel = community.level;
+    }
+    
+    var completed = 0;
+    final total = communities.length;
+    
+    // Process level by level, starting from lowest (most granular)
+    for (var level = maxLevel; level >= 0; level--) {
+      final levelCommunities = communityByLevel[level] ?? [];
+      
+      for (final community in levelCommunities) {
+        CommunitySummary summary;
+        
+        if (level == maxLevel) {
+          // Lowest level: summarize from entities
+          summary = await summarize(community, entities, relationships);
+        } else {
+          // Higher level: summarize from child summaries
+          final childIds = community.childCommunityIds ?? [];
+          final childSummaries = childIds
+              .map((id) => summaryById[id])
+              .whereType<CommunitySummary>()
+              .toList();
+          
+          if (childSummaries.isEmpty) {
+            // No child summaries found, fall back to entity-based summary
+            summary = await summarize(community, entities, relationships);
+          } else {
+            summary = await summarizeHierarchical(community, childSummaries);
+          }
+        }
+        
+        summaries.add(summary);
+        summaryById[community.id] = summary;
+        
+        completed++;
+        onProgress?.call(completed, total);
+      }
     }
     
     return summaries;

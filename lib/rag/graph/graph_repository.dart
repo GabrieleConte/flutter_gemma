@@ -86,6 +86,15 @@ class GraphCommunity {
   final List<String> entityIds;
   final List<double>? embedding;
   final Map<String, dynamic>? metadata;
+  
+  /// Child community IDs for hierarchical summarization
+  List<String>? get childCommunityIds {
+    final children = metadata?['childCommunityIds'];
+    if (children is List) {
+      return children.whereType<String>().toList();
+    }
+    return null;
+  }
 
   GraphCommunity({
     required this.id,

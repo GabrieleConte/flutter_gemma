@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
 import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel;
+import 'package:flutter_gemma/rag/graph/global_query_engine.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// Service for managing GraphRAG operations in the example app
@@ -196,6 +197,43 @@ class GraphRAGService {
     );
     
     debugPrint('[GraphRAGService] Query returned ${result.entities.length} entities, ${result.communities.length} communities');
+    return result;
+  }
+  
+  /// Execute a global query using the GraphRAG paper's map-reduce approach
+  /// 
+  /// This is recommended for broad "sensemaking" queries like:
+  /// - "What are the main themes in my contacts?"
+  /// - "Who are the most important people?"
+  /// - "How are my events connected?"
+  Future<GlobalQueryResult> globalQuery(
+    String query, {
+    int communityLevel = 1,
+    int maxCommunityAnswers = 10,
+    int minHelpfulnessScore = 20,
+  }) async {
+    _checkInitialized();
+    debugPrint('[GraphRAGService] Global query: "$query" (level: $communityLevel)');
+    
+    final result = await _graphRag!.globalQuery(
+      query,
+      communityLevel: communityLevel,
+      maxCommunityAnswers: maxCommunityAnswers,
+      minHelpfulnessScore: minHelpfulnessScore,
+    );
+    
+    debugPrint('[GraphRAGService] Global query completed: ${result.communityAnswers.length} community answers used');
+    return result;
+  }
+  
+  /// Execute a global query with automatic community level selection
+  Future<GlobalQueryResult> globalQueryAuto(String query) async {
+    _checkInitialized();
+    debugPrint('[GraphRAGService] Auto global query: "$query"');
+    
+    final result = await _graphRag!.globalQueryAuto(query);
+    
+    debugPrint('[GraphRAGService] Auto global query completed at level ${result.metadata.communityLevel}');
     return result;
   }
   

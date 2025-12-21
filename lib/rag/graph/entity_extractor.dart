@@ -317,6 +317,27 @@ Write a coherent summary (2-3 paragraphs) that:
 
 Summary:''';
   }
+
+  /// Prompt for hierarchical community summaries (higher-level communities)
+  /// Following the GraphRAG paper approach: summarize child community summaries
+  static String hierarchicalCommunitySummaryPrompt(
+    List<String> childSummaries,
+    int level,
+  ) {
+    return '''You are creating a summary of a high-level community that contains multiple sub-communities.
+
+This is a Level $level community. Synthesize the following sub-community summaries into a coherent high-level summary.
+
+Sub-community summaries:
+${childSummaries.asMap().entries.map((e) => '--- Sub-community ${e.key + 1} ---\n${e.value}').join('\n\n')}
+
+Write a unified summary (2-3 paragraphs) that:
+1. Identifies the overarching theme connecting all sub-communities
+2. Highlights the most important patterns and relationships at this higher level
+3. Provides a birds-eye view useful for understanding the entire group
+
+High-level Summary:''';
+  }
 }
 
 /// LLM-based entity extractor implementation
@@ -523,21 +544,15 @@ class LLMEntityExtractor implements EntityExtractor {
       }
     }
     
-    // Find the first { and last }
+    // Find the first {
     final start = text.indexOf('{');
-    var end = text.lastIndexOf('}');
     
     if (start >= 0) {
-      // If no closing brace, try to repair the JSON
-      if (end <= start) {
-        text = _repairTruncatedJson(text.substring(start));
-        end = text.lastIndexOf('}');
-        if (end > 0) {
-          return text.substring(0, end + 1);
-        }
-      } else {
-        return text.substring(start, end + 1);
-      }
+      // Extract from first { to end and always try to repair
+      // This handles truncated JSON where lastIndexOf('}') finds a nested }
+      final jsonPart = text.substring(start);
+      final repaired = _repairTruncatedJson(jsonPart);
+      return repaired;
     }
     
     throw const FormatException('No JSON found in response');
@@ -630,10 +645,13 @@ class LLMEntityExtractor implements EntityExtractor {
     }
     
     // Try to extract relationships - only keep those referencing found entities
+    // Also track seen relationships to avoid duplicates from hallucinated JSON
     final relPattern = RegExp(
       r'\{"source"\s*:\s*"([^"]+)"\s*,\s*"target"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"([^"]+)"',
       caseSensitive: false,
     );
+    
+    final seenRelationships = <String>{}; // Track unique relationships
     
     for (final match in relPattern.allMatches(response)) {
       final source = match.group(1) ?? '';
@@ -646,12 +664,17 @@ class LLMEntityExtractor implements EntityExtractor {
         final targetFound = entityNames.contains(target.toLowerCase());
         
         if (sourceFound && targetFound) {
-          relationships.add(ExtractedRelationship(
-            sourceEntity: source,
-            targetEntity: target,
-            type: type.toUpperCase().replaceAll(' ', '_'),
-            confidence: 0.7,
-          ));
+          // Create a unique key to detect duplicates
+          final relKey = '${source.toLowerCase()}|${target.toLowerCase()}|${type.toLowerCase()}';
+          if (!seenRelationships.contains(relKey)) {
+            seenRelationships.add(relKey);
+            relationships.add(ExtractedRelationship(
+              sourceEntity: source,
+              targetEntity: target,
+              type: type.toUpperCase().replaceAll(' ', '_'),
+              confidence: 0.7,
+            ));
+          }
         } else {
           assert(() {
             print('[EntityExtractor] Fallback: Skipping orphan relationship $source -> $target (source found: $sourceFound, target found: $targetFound)');

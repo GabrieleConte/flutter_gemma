@@ -560,13 +560,24 @@ class BackgroundIndexingService {
         print('[BackgroundIndexing] Community ${community.id} filtered from ${community.entityIds.length} to ${validCommunityEntityIds.length} entity IDs');
       }
       
+      // Include child community IDs in metadata for hierarchical summarization
+      final metadata = <String, dynamic>{
+        'modularity': community.modularity,
+      };
+      if (community.childCommunityIds != null && community.childCommunityIds!.isNotEmpty) {
+        metadata['childCommunityIds'] = community.childCommunityIds;
+      }
+      if (community.parentCommunityId != null) {
+        metadata['parentCommunityId'] = community.parentCommunityId;
+      }
+      
       final graphCommunity = GraphCommunity(
         id: community.id,
         level: community.level,
         summary: '', // Will be generated in next phase
         entityIds: validCommunityEntityIds,
         embedding: null,
-        metadata: {'modularity': community.modularity},
+        metadata: metadata,
       );
 
       try {
@@ -584,7 +595,11 @@ class BackgroundIndexingService {
     ));
   }
 
-  /// Phase 3: Generate community summaries
+  /// Phase 3: Generate community summaries (hierarchical approach from GraphRAG paper)
+  /// 
+  /// Following the paper methodology:
+  /// - Lowest level (most granular): summarize from entities and relationships
+  /// - Higher levels: summarize from child community summaries
   Future<void> _generateSummariesPhase() async {
     if (_summarizer == null) return;
 
@@ -592,7 +607,7 @@ class BackgroundIndexingService {
       currentPhase: 'Generating community summaries',
     ));
 
-    // Get all entities for reference
+    // Get all entities and relationships for reference
     final entities = <GraphEntity>[];
     final relationships = <GraphRelationship>[];
     
@@ -604,11 +619,25 @@ class BackgroundIndexingService {
       relationships.addAll(await repository.getRelationships(entity.id));
     }
 
-    // Generate summaries for each level
+    // Find the maximum level (most granular)
+    var maxLevel = 0;
     for (var level = 0; level <= config.maxCommunityDepth; level++) {
+      final communities = await repository.getCommunitiesByLevel(level);
+      if (communities.isNotEmpty) {
+        maxLevel = level;
+      }
+    }
+
+    // Store generated summaries for hierarchical aggregation
+    final summaryByCommId = <String, CommunitySummary>{};
+
+    // Generate summaries level by level, from most granular to root
+    // This allows higher levels to aggregate from child summaries
+    for (var level = maxLevel; level >= 0; level--) {
       if (_cancelRequested) return;
 
       final communities = await repository.getCommunitiesByLevel(level);
+      print('[BackgroundIndexing] Generating summaries for level $level (${communities.length} communities)');
 
       for (final community in communities) {
         if (_cancelRequested) return;
@@ -618,13 +647,45 @@ class BackgroundIndexingService {
           level: community.level,
           entityIds: community.entityIds.toSet(),
           modularity: 0.0,
+          childCommunityIds: community.childCommunityIds,
         );
 
-        final summary = await _summarizer.summarize(
-          detectedCommunity,
-          entities,
-          relationships,
-        );
+        CommunitySummary summary;
+        
+        if (level == maxLevel) {
+          // Most granular level: summarize from entities
+          summary = await _summarizer.summarize(
+            detectedCommunity,
+            entities,
+            relationships,
+          );
+        } else {
+          // Higher level: try to aggregate from child summaries
+          final childIds = community.childCommunityIds ?? [];
+          final childSummaries = childIds
+              .map((id) => summaryByCommId[id])
+              .whereType<CommunitySummary>()
+              .toList();
+          
+          if (childSummaries.isNotEmpty) {
+            // Use hierarchical summarization
+            summary = await _summarizer.summarizeHierarchical(
+              detectedCommunity,
+              childSummaries,
+            );
+            print('[BackgroundIndexing] Generated hierarchical summary for ${community.id} from ${childSummaries.length} children');
+          } else {
+            // Fallback to entity-based summary
+            summary = await _summarizer.summarize(
+              detectedCommunity,
+              entities,
+              relationships,
+            );
+          }
+        }
+
+        // Store for potential use by parent communities
+        summaryByCommId[community.id] = summary;
 
         await repository.updateCommunitySummary(
           community.id,
@@ -633,6 +694,8 @@ class BackgroundIndexingService {
         );
       }
     }
+    
+    print('[BackgroundIndexing] Generated summaries for ${summaryByCommId.length} communities');
   }
 
   /// Convert item to map for extraction

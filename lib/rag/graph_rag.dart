@@ -8,6 +8,7 @@ import 'graph/entity_extractor.dart';
 import 'graph/community_detection.dart';
 import 'graph/cypher_parser.dart';
 import 'graph/hybrid_query_engine.dart';
+import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
 
 /// Configuration for GraphRAG
@@ -303,6 +304,68 @@ class GraphRAG {
       topK: topK,
       level: level,
     );
+  }
+
+  /// Execute a global query using the GraphRAG paper's map-reduce approach
+  /// 
+  /// This is the recommended method for "sensemaking" queries that require
+  /// understanding across the entire dataset, such as:
+  /// - "What are the main themes in my contacts?"
+  /// - "How are my events connected?"
+  /// - "Who are the most important people in my network?"
+  /// 
+  /// The method works by:
+  /// 1. MAP: Each community summary generates a partial answer with helpfulness score
+  /// 2. REDUCE: Top-scored answers are combined into a final comprehensive answer
+  Future<GlobalQueryResult> globalQuery(
+    String query, {
+    int communityLevel = 1,
+    int maxCommunityAnswers = 10,
+    int minHelpfulnessScore = 20,
+    String responseType = 'multiple paragraphs',
+  }) async {
+    _checkInitialized();
+    
+    final engine = GlobalQueryEngine(
+      repository: _repository,
+      llmCallback: _llmCallback,
+      config: GlobalQueryConfig(
+        communityLevel: communityLevel,
+        maxCommunityAnswers: maxCommunityAnswers,
+        minHelpfulnessScore: minHelpfulnessScore,
+        responseType: responseType,
+      ),
+    );
+    
+    return await engine.query(query);
+  }
+  
+  /// Execute a global query with automatic community level selection
+  /// 
+  /// This automatically selects the appropriate community level based on
+  /// the query type:
+  /// - Broad/overview questions → root communities (level 0)
+  /// - Thematic questions → intermediate level (level 1)
+  /// - Specific questions → lower levels (level 2+)
+  Future<GlobalQueryResult> globalQueryAuto(
+    String query, {
+    int maxCommunityAnswers = 10,
+    int minHelpfulnessScore = 20,
+    String responseType = 'multiple paragraphs',
+  }) async {
+    _checkInitialized();
+    
+    final engine = GlobalQueryEngine(
+      repository: _repository,
+      llmCallback: _llmCallback,
+      config: GlobalQueryConfig(
+        maxCommunityAnswers: maxCommunityAnswers,
+        minHelpfulnessScore: minHelpfulnessScore,
+        responseType: responseType,
+      ),
+    );
+    
+    return await engine.queryWithAutoLevel(query);
   }
 
   /// Get context string for RAG augmentation

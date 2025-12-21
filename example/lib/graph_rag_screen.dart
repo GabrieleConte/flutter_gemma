@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
+import 'package:flutter_gemma/rag/graph/global_query_engine.dart' as global;
 import 'package:flutter_gemma_example/services/graph_rag_service.dart';
 import 'package:flutter_gemma_example/services/auth_token_service.dart';
 import 'package:flutter_gemma_example/models/model.dart';
@@ -29,6 +30,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
   // Query results
   final List<_QueryResult> _queryHistory = [];
   bool _isQuerying = false;
+  bool _useGlobalQuery = false;  // Toggle for GraphRAG paper's map-reduce approach
   
   // Indexing
   StreamSubscription<IndexingProgress>? _progressSubscription;
@@ -103,7 +105,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       _showSnackBar('Installing embedding model...');
       
       // Use EmbeddingGemma (2048D embeddings)
-      const embeddingModelDef = app_models.EmbeddingModel.embeddingGemma2048;
+      const embeddingModelDef = app_models.EmbeddingModel.embeddingGemma512;
       final embeddingInstaller = FlutterGemma.installEmbedder();
       String? embeddingToken;
       if (embeddingModelDef.needsAuth) {
@@ -240,18 +242,38 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
     setState(() => _isQuerying = true);
     
     try {
-      final result = await _service.query(query);
-      
-      setState(() {
-        _queryHistory.insert(0, _QueryResult(
-          query: query,
-          entities: result.entities,
-          communities: result.communities,
-          contextString: result.contextString,
-          timestamp: DateTime.now(),
-        ));
-        _isQuerying = false;
-      });
+      if (_useGlobalQuery) {
+        // Use GraphRAG paper's map-reduce approach for global sensemaking queries
+        final result = await _service.globalQueryAuto(query);
+        
+        setState(() {
+          _queryHistory.insert(0, _QueryResult(
+            query: query,
+            entities: [], // Global query doesn't return entities directly
+            communities: [], // Communities are used internally
+            contextString: result.answer,
+            timestamp: DateTime.now(),
+            isGlobalQuery: true,
+            globalQueryMetadata: result.metadata,
+            communityAnswersUsed: result.communityAnswers.length,
+          ));
+          _isQuerying = false;
+        });
+      } else {
+        // Standard local/hybrid query
+        final result = await _service.query(query);
+        
+        setState(() {
+          _queryHistory.insert(0, _QueryResult(
+            query: query,
+            entities: result.entities,
+            communities: result.communities,
+            contextString: result.contextString,
+            timestamp: DateTime.now(),
+          ));
+          _isQuerying = false;
+        });
+      }
       
       _queryController.clear();
     } catch (e) {
@@ -566,40 +588,75 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
   Widget _buildQuerySection() {
     return Padding(
       padding: const EdgeInsets.all(8.0),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: TextField(
-              controller: _queryController,
-              decoration: InputDecoration(
-                hintText: 'Ask about your contacts or events...',
-                hintStyle: const TextStyle(color: Colors.white54),
-                filled: true,
-                fillColor: const Color(0xFF1a3a5c),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          // Global Query Toggle
+          Row(
+            children: [
+              Switch(
+                value: _useGlobalQuery,
+                onChanged: (value) => setState(() => _useGlobalQuery = value),
+                activeColor: Colors.purple,
               ),
-              style: const TextStyle(color: Colors.white),
-              onSubmitted: (_) => _executeQuery(),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _useGlobalQuery 
+                      ? '🌐 Global Query (Map-Reduce over communities)'
+                      : '🔍 Local Query (Entity similarity search)',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _useGlobalQuery ? Colors.purple[200] : Colors.white70,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: _isQuerying ? null : _executeQuery,
-            icon: _isQuerying 
-                ? const SizedBox(
-                    width: 24, 
-                    height: 24, 
-                    child: CircularProgressIndicator(strokeWidth: 2)
-                  )
-                : const Icon(Icons.search),
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-            ),
+          const SizedBox(height: 8),
+          // Query Input Row
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _queryController,
+                  decoration: InputDecoration(
+                    hintText: _useGlobalQuery 
+                        ? 'Ask broad questions like "What are the main themes?"...'
+                        : 'Ask about your contacts or events...',
+                    hintStyle: const TextStyle(color: Colors.white54),
+                    filled: true,
+                    fillColor: _useGlobalQuery 
+                        ? const Color(0xFF2d1a5c) 
+                        : const Color(0xFF1a3a5c),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                  onSubmitted: (_) => _executeQuery(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _isQuerying ? null : _executeQuery,
+                icon: _isQuerying 
+                    ? const SizedBox(
+                        width: 24, 
+                        height: 24, 
+                        child: CircularProgressIndicator(strokeWidth: 2)
+                      )
+                    : Icon(
+                        _useGlobalQuery ? Icons.public : Icons.search,
+                        color: _useGlobalQuery ? Colors.purple : null,
+                      ),
+                style: IconButton.styleFrom(
+                  backgroundColor: _useGlobalQuery ? Colors.purple : Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -704,6 +761,9 @@ class _QueryResult {
   final List<ScoredQueryCommunity> communities;
   final String contextString;
   final DateTime timestamp;
+  final bool isGlobalQuery;
+  final global.QueryMetadata? globalQueryMetadata;
+  final int communityAnswersUsed;
   
   _QueryResult({
     required this.query,
@@ -711,6 +771,9 @@ class _QueryResult {
     required this.communities,
     required this.contextString,
     required this.timestamp,
+    this.isGlobalQuery = false,
+    this.globalQueryMetadata,
+    this.communityAnswersUsed = 0,
   });
 }
 
@@ -722,19 +785,58 @@ class _QueryResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: const Color(0xFF1a3a5c),
+      color: result.isGlobalQuery ? const Color(0xFF2d1a5c) : const Color(0xFF1a3a5c),
       margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
-        title: Text(
-          result.query,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        title: Row(
+          children: [
+            if (result.isGlobalQuery) ...[
+              const Icon(Icons.public, size: 16, color: Colors.purple),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                result.query,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
         ),
         subtitle: Text(
-          '${result.entities.length} entities, ${result.communities.length} communities',
+          result.isGlobalQuery
+              ? 'Global Query (Level ${result.globalQueryMetadata?.communityLevel ?? 0}, ${result.communityAnswersUsed} communities used)'
+              : '${result.entities.length} entities, ${result.communities.length} communities',
           style: const TextStyle(fontSize: 12, color: Colors.white70),
         ),
         children: [
-          if (result.entities.isNotEmpty)
+          if (result.isGlobalQuery && result.contextString.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Global Answer:',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    result.contextString,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  if (result.globalQueryMetadata != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Map phase: ${result.globalQueryMetadata!.mapPhaseDuration.inMilliseconds}ms | '
+                      'Reduce phase: ${result.globalQueryMetadata!.reducePhaseDuration.inMilliseconds}ms | '
+                      'Total: ${result.globalQueryMetadata!.totalDuration.inMilliseconds}ms',
+                      style: const TextStyle(fontSize: 10, color: Colors.white54),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          if (!result.isGlobalQuery && result.entities.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
