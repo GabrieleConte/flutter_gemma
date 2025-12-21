@@ -311,6 +311,43 @@ class GraphRAGService {
     debugPrint('[GraphRAGService] Graph cleared');
   }
   
+  /// Get all entities for visualization
+  /// Fetches entities of all known types
+  Future<List<GraphEntity>> getAllEntities() async {
+    _checkInitialized();
+    final entityTypes = ['PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION'];
+    final entities = <GraphEntity>[];
+    
+    for (final type in entityTypes) {
+      final typeEntities = await _graphRag!.getEntitiesByType(type);
+      entities.addAll(typeEntities);
+    }
+    
+    debugPrint('[GraphRAGService] Retrieved ${entities.length} total entities');
+    return entities;
+  }
+  
+  /// Get all relationships for a list of entities
+  /// Used for graph visualization
+  Future<List<GraphRelationship>> getAllRelationships(List<GraphEntity> entities) async {
+    _checkInitialized();
+    final relationships = <GraphRelationship>[];
+    final seenIds = <String>{};
+    
+    for (final entity in entities) {
+      final entityRelationships = await _graphRag!.getRelationships(entity.id);
+      for (final rel in entityRelationships) {
+        if (!seenIds.contains(rel.id)) {
+          seenIds.add(rel.id);
+          relationships.add(rel);
+        }
+      }
+    }
+    
+    debugPrint('[GraphRAGService] Retrieved ${relationships.length} relationships');
+    return relationships;
+  }
+  
   /// Dispose resources
   Future<void> dispose() async {
     if (_graphRag != null) {

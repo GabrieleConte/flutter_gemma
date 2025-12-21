@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma_example/model_selection_screen.dart';
 import 'package:flutter_gemma_example/embedding_models_screen.dart';
-import 'package:flutter_gemma_example/graph_rag_screen.dart';
+import 'package:flutter_gemma_example/graph_rag_navigator.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -80,7 +80,7 @@ class HomeScreen extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (context) => const GraphRAGScreen(),
+                    builder: (context) => const GraphRAGNavigator(),
                   ),
                 );
               },
