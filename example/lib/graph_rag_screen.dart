@@ -92,7 +92,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       );
       
       final chat = await model.createChat(
-        temperature: inferenceModel.temperature,
+        temperature: 0.1,
         randomSeed: 1,
         topK: inferenceModel.topK,
       );
@@ -102,8 +102,8 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       // Step 2: Initialize embedding model
       _showSnackBar('Installing embedding model...');
       
-      // Use EmbeddingGemma (768D embeddings)
-      const embeddingModelDef = app_models.EmbeddingModel.embeddingGemma256;
+      // Use EmbeddingGemma (2048D embeddings)
+      const embeddingModelDef = app_models.EmbeddingModel.embeddingGemma2048;
       final embeddingInstaller = FlutterGemma.installEmbedder();
       String? embeddingToken;
       if (embeddingModelDef.needsAuth) {
