@@ -91,14 +91,23 @@ class GraphRAGService {
       throw StateError('Chat model not initialized');
     }
     
-    debugPrint('[GraphRAGService] Generating LLM response for prompt (${prompt.length} chars)');
+    // Truncate prompt if too long (rough estimate: ~4 chars per token, leave room for output)
+    // With maxTokens=1024, reserve ~300 tokens for output, so ~724 tokens * 4 = ~2900 chars
+    const maxPromptChars = 2900;
+    String truncatedPrompt = prompt;
+    if (prompt.length > maxPromptChars) {
+      truncatedPrompt = '${prompt.substring(0, maxPromptChars)}...[truncated]';
+      debugPrint('[GraphRAGService] Truncated prompt from ${prompt.length} to $maxPromptChars chars');
+    }
+    
+    debugPrint('[GraphRAGService] Generating LLM response for prompt (${truncatedPrompt.length} chars)');
     
     // Clear history before each extraction to avoid context window overflow
     // Entity extraction should be stateless - each prompt is independent
     await _chat!.clearHistory();
     
     // Add prompt and generate response
-    await _chat!.addQuery(Message(text: prompt));
+    await _chat!.addQuery(Message(text: truncatedPrompt));
     final response = await _chat!.generateChatResponse();
     
     // Extract text from ModelResponse

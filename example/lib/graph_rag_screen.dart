@@ -77,7 +77,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       // Step 1: Initialize inference model
       _showSnackBar('Installing inference model...');
       
-      const inferenceModel = Model.gemma3_1B;
+      const inferenceModel = Model.qwen25_1_5B_InstructCpu;
       final installer = FlutterGemma.installModel(
         modelType: inferenceModel.modelType,
         fileType: inferenceModel.fileType,
@@ -645,7 +645,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
               Switch(
                 value: _useGlobalQuery,
                 onChanged: (value) => setState(() => _useGlobalQuery = value),
-                activeColor: Colors.purple,
+                activeThumbColor: Colors.purple,
               ),
               const SizedBox(width: 8),
               Expanded(
