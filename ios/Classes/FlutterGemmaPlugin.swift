@@ -1405,6 +1405,106 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
         }
     }
 
+    func fetchPhotos(
+        sinceTimestamp: Int64?,
+        limit: Int64?,
+        includeLocation: Bool?,
+        completion: @escaping (Result<[PhotoResult], Error>) -> Void
+    ) {
+        print("[PLUGIN] Fetching photos (since: \(String(describing: sinceTimestamp)), limit: \(String(describing: limit)))")
+
+        if systemDataConnector == nil {
+            systemDataConnector = SystemDataConnector()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let photos = try self.systemDataConnector!.fetchPhotos(
+                    sinceTimestamp: sinceTimestamp != nil ? Int(sinceTimestamp!) : nil,
+                    limit: limit != nil ? Int(limit!) : nil,
+                    includeLocation: includeLocation
+                )
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Fetched \(photos.count) photos")
+                    completion(.success(photos))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to fetch photos: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "FetchPhotosFailed",
+                        message: "Failed to fetch photos: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
+    func fetchCallLog(
+        sinceTimestamp: Int64?,
+        limit: Int64?,
+        completion: @escaping (Result<[CallLogResult], Error>) -> Void
+    ) {
+        print("[PLUGIN] Fetching call log - Note: iOS does not provide access to system call history")
+
+        if systemDataConnector == nil {
+            systemDataConnector = SystemDataConnector()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let calls = try self.systemDataConnector!.fetchCallLog(
+                    sinceTimestamp: sinceTimestamp != nil ? Int(sinceTimestamp!) : nil,
+                    limit: limit != nil ? Int(limit!) : nil
+                )
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Fetched \(calls.count) call log entries (iOS: always empty)")
+                    completion(.success(calls))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to fetch call log: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "FetchCallLogFailed",
+                        message: "Failed to fetch call log: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
+    func analyzePhoto(
+        photoId: String,
+        imageBytes: FlutterStandardTypedData,
+        detectFaces: Bool?,
+        detectObjects: Bool?,
+        detectText: Bool?,
+        completion: @escaping (Result<PhotoAnalysisResult, Error>) -> Void
+    ) {
+        print("[PLUGIN] Analyzing photo: \(photoId)")
+
+        // iOS implementation would use Vision framework for face/object detection
+        // For now, return empty analysis result
+        // TODO: Implement Vision framework integration
+        
+        let result = PhotoAnalysisResult(
+            photoId: photoId,
+            faces: [],
+            objects: [],
+            texts: [],
+            labels: [],
+            dominantColors: nil,
+            isScreenshot: false,
+            hasText: false
+        )
+        
+        completion(.success(result))
+    }
+
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
         self.eventSink = events
         return nil

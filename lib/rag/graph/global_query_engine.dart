@@ -184,21 +184,26 @@ class GlobalQueryEngine {
   /// require understanding across the entire corpus.
   Future<GlobalQueryResult> query(String userQuery) async {
     final totalStopwatch = Stopwatch()..start();
-    final mapStopwatch = Stopwatch();
     
     // Get all communities at the configured level
     final communities = await repository.getCommunitiesByLevel(config.communityLevel);
+    
+    // Debug: log community info
+    print('[GlobalQueryEngine] Querying with level ${config.communityLevel}');
+    print('[GlobalQueryEngine] Found ${communities.length} communities at level ${config.communityLevel}');
     
     if (communities.isEmpty) {
       // Try lower levels if configured level is empty
       for (var level = config.communityLevel - 1; level >= 0; level--) {
         final lowerCommunities = await repository.getCommunitiesByLevel(level);
+        print('[GlobalQueryEngine] Found ${lowerCommunities.length} communities at level $level');
         if (lowerCommunities.isNotEmpty) {
           return _executeQuery(userQuery, lowerCommunities, level, totalStopwatch);
         }
       }
       
       // No communities at any level
+      print('[GlobalQueryEngine] No communities found at any level - indexing may not have been run');
       return GlobalQueryResult(
         answer: "I don't have enough information to answer this question. The knowledge graph hasn't been indexed yet.",
         communityAnswers: [],
@@ -231,19 +236,37 @@ class GlobalQueryEngine {
     // doesn't support concurrent inference calls - parallel calls cause crashes
     final communityAnswers = <CommunityAnswer>[];
     
-    for (final community in communities) {
+    print('[GlobalQueryEngine] Starting map phase with ${communities.length} communities');
+    var skippedEmpty = 0;
+    var failedCommunities = 0;
+    
+    for (var i = 0; i < communities.length; i++) {
+      final community = communities[i];
+      if (community.summary.isEmpty) {
+        skippedEmpty++;
+        continue;
+      }
+      
       final answer = await _generateCommunityAnswer(userQuery, community);
       if (answer != null) {
         communityAnswers.add(answer);
+        print('[GlobalQueryEngine] Community ${i + 1}/${communities.length}: score=${answer.helpfulnessScore}');
+      } else {
+        failedCommunities++;
+        print('[GlobalQueryEngine] Community ${i + 1}/${communities.length}: failed to generate answer');
       }
     }
     
     mapStopwatch.stop();
     
+    print('[GlobalQueryEngine] Map phase complete: ${communityAnswers.length} answers, $skippedEmpty empty, $failedCommunities failed');
+    
     // Filter by minimum helpfulness score
     final filteredAnswers = communityAnswers
         .where((a) => a.helpfulnessScore >= config.minHelpfulnessScore)
         .toList();
+    
+    print('[GlobalQueryEngine] After filtering (min score ${config.minHelpfulnessScore}): ${filteredAnswers.length} answers');
     
     // Sort by helpfulness descending
     filteredAnswers.sort((a, b) => b.helpfulnessScore.compareTo(a.helpfulnessScore));

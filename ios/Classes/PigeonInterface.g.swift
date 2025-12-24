@@ -78,6 +78,8 @@ enum PermissionType: Int {
   case contacts = 0
   case calendar = 1
   case notifications = 2
+  case photos = 3
+  case callLog = 4
 }
 
 enum PermissionStatus: Int {
@@ -85,6 +87,16 @@ enum PermissionStatus: Int {
   case denied = 1
   case restricted = 2
   case notDetermined = 3
+}
+
+enum CallType: Int {
+  case incoming = 0
+  case outgoing = 1
+  case missed = 2
+  case rejected = 3
+  case blocked = 4
+  case voicemail = 5
+  case unknown = 6
 }
 
 /// Generated class from Pigeon that represents data sent in messages.
@@ -463,6 +475,294 @@ struct CommunityWithScoreResult {
   }
 }
 
+/// Generated class from Pigeon that represents data sent in messages.
+struct PhotoResult {
+  var id: String
+  var filename: String? = nil
+  var width: Int64
+  var height: Int64
+  var creationDate: Int64
+  var modificationDate: Int64
+  var latitude: Double? = nil
+  var longitude: Double? = nil
+  var locationName: String? = nil
+  var duration: Int64? = nil
+  var mediaType: String
+  var mimeType: String? = nil
+  var fileSize: Int64? = nil
+  var thumbnailBytes: FlutterStandardTypedData? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> PhotoResult? {
+    let id = pigeonVar_list[0] as! String
+    let filename: String? = nilOrValue(pigeonVar_list[1])
+    let width = pigeonVar_list[2] as! Int64
+    let height = pigeonVar_list[3] as! Int64
+    let creationDate = pigeonVar_list[4] as! Int64
+    let modificationDate = pigeonVar_list[5] as! Int64
+    let latitude: Double? = nilOrValue(pigeonVar_list[6])
+    let longitude: Double? = nilOrValue(pigeonVar_list[7])
+    let locationName: String? = nilOrValue(pigeonVar_list[8])
+    let duration: Int64? = nilOrValue(pigeonVar_list[9])
+    let mediaType = pigeonVar_list[10] as! String
+    let mimeType: String? = nilOrValue(pigeonVar_list[11])
+    let fileSize: Int64? = nilOrValue(pigeonVar_list[12])
+    let thumbnailBytes: FlutterStandardTypedData? = nilOrValue(pigeonVar_list[13])
+
+    return PhotoResult(
+      id: id,
+      filename: filename,
+      width: width,
+      height: height,
+      creationDate: creationDate,
+      modificationDate: modificationDate,
+      latitude: latitude,
+      longitude: longitude,
+      locationName: locationName,
+      duration: duration,
+      mediaType: mediaType,
+      mimeType: mimeType,
+      fileSize: fileSize,
+      thumbnailBytes: thumbnailBytes
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      filename,
+      width,
+      height,
+      creationDate,
+      modificationDate,
+      latitude,
+      longitude,
+      locationName,
+      duration,
+      mediaType,
+      mimeType,
+      fileSize,
+      thumbnailBytes,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct CallLogResult {
+  var id: String
+  var name: String? = nil
+  var phoneNumber: String
+  var callType: CallType
+  var timestamp: Int64
+  var duration: Int64
+  var isRead: Bool
+  var geocodedLocation: String? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CallLogResult? {
+    let id = pigeonVar_list[0] as! String
+    let name: String? = nilOrValue(pigeonVar_list[1])
+    let phoneNumber = pigeonVar_list[2] as! String
+    let callType = pigeonVar_list[3] as! CallType
+    let timestamp = pigeonVar_list[4] as! Int64
+    let duration = pigeonVar_list[5] as! Int64
+    let isRead = pigeonVar_list[6] as! Bool
+    let geocodedLocation: String? = nilOrValue(pigeonVar_list[7])
+
+    return CallLogResult(
+      id: id,
+      name: name,
+      phoneNumber: phoneNumber,
+      callType: callType,
+      timestamp: timestamp,
+      duration: duration,
+      isRead: isRead,
+      geocodedLocation: geocodedLocation
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      name,
+      phoneNumber,
+      callType,
+      timestamp,
+      duration,
+      isRead,
+      geocodedLocation,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct DetectedFace {
+  var x: Double
+  var y: Double
+  var width: Double
+  var height: Double
+  var confidence: Double
+  var recognizedPerson: String? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> DetectedFace? {
+    let x = pigeonVar_list[0] as! Double
+    let y = pigeonVar_list[1] as! Double
+    let width = pigeonVar_list[2] as! Double
+    let height = pigeonVar_list[3] as! Double
+    let confidence = pigeonVar_list[4] as! Double
+    let recognizedPerson: String? = nilOrValue(pigeonVar_list[5])
+
+    return DetectedFace(
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      confidence: confidence,
+      recognizedPerson: recognizedPerson
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      x,
+      y,
+      width,
+      height,
+      confidence,
+      recognizedPerson,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct DetectedObject {
+  var label: String
+  var confidence: Double
+  var x: Double
+  var y: Double
+  var width: Double
+  var height: Double
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> DetectedObject? {
+    let label = pigeonVar_list[0] as! String
+    let confidence = pigeonVar_list[1] as! Double
+    let x = pigeonVar_list[2] as! Double
+    let y = pigeonVar_list[3] as! Double
+    let width = pigeonVar_list[4] as! Double
+    let height = pigeonVar_list[5] as! Double
+
+    return DetectedObject(
+      label: label,
+      confidence: confidence,
+      x: x,
+      y: y,
+      width: width,
+      height: height
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      label,
+      confidence,
+      x,
+      y,
+      width,
+      height,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct DetectedText {
+  var text: String
+  var confidence: Double
+  var x: Double
+  var y: Double
+  var width: Double
+  var height: Double
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> DetectedText? {
+    let text = pigeonVar_list[0] as! String
+    let confidence = pigeonVar_list[1] as! Double
+    let x = pigeonVar_list[2] as! Double
+    let y = pigeonVar_list[3] as! Double
+    let width = pigeonVar_list[4] as! Double
+    let height = pigeonVar_list[5] as! Double
+
+    return DetectedText(
+      text: text,
+      confidence: confidence,
+      x: x,
+      y: y,
+      width: width,
+      height: height
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      text,
+      confidence,
+      x,
+      y,
+      width,
+      height,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
+struct PhotoAnalysisResult {
+  var photoId: String
+  var faces: [DetectedFace?]
+  var objects: [DetectedObject?]
+  var texts: [DetectedText?]
+  var labels: [String?]
+  var dominantColors: String? = nil
+  var isScreenshot: Bool
+  var hasText: Bool
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> PhotoAnalysisResult? {
+    let photoId = pigeonVar_list[0] as! String
+    let faces = pigeonVar_list[1] as! [DetectedFace?]
+    let objects = pigeonVar_list[2] as! [DetectedObject?]
+    let texts = pigeonVar_list[3] as! [DetectedText?]
+    let labels = pigeonVar_list[4] as! [String?]
+    let dominantColors: String? = nilOrValue(pigeonVar_list[5])
+    let isScreenshot = pigeonVar_list[6] as! Bool
+    let hasText = pigeonVar_list[7] as! Bool
+
+    return PhotoAnalysisResult(
+      photoId: photoId,
+      faces: faces,
+      objects: objects,
+      texts: texts,
+      labels: labels,
+      dominantColors: dominantColors,
+      isScreenshot: isScreenshot,
+      hasText: hasText
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      photoId,
+      faces,
+      objects,
+      texts,
+      labels,
+      dominantColors,
+      isScreenshot,
+      hasText,
+    ]
+  }
+}
+
 private class PigeonInterfacePigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -485,27 +785,45 @@ private class PigeonInterfacePigeonCodecReader: FlutterStandardReader {
       }
       return nil
     case 132:
-      return RetrievalResult.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return CallType(rawValue: enumResultAsInt)
+      }
+      return nil
     case 133:
-      return VectorStoreStats.fromList(self.readValue() as! [Any?])
+      return RetrievalResult.fromList(self.readValue() as! [Any?])
     case 134:
-      return EntityResult.fromList(self.readValue() as! [Any?])
+      return VectorStoreStats.fromList(self.readValue() as! [Any?])
     case 135:
-      return RelationshipResult.fromList(self.readValue() as! [Any?])
+      return EntityResult.fromList(self.readValue() as! [Any?])
     case 136:
-      return CommunityResult.fromList(self.readValue() as! [Any?])
+      return RelationshipResult.fromList(self.readValue() as! [Any?])
     case 137:
-      return GraphStats.fromList(self.readValue() as! [Any?])
+      return CommunityResult.fromList(self.readValue() as! [Any?])
     case 138:
-      return ContactResult.fromList(self.readValue() as! [Any?])
+      return GraphStats.fromList(self.readValue() as! [Any?])
     case 139:
-      return CalendarEventResult.fromList(self.readValue() as! [Any?])
+      return ContactResult.fromList(self.readValue() as! [Any?])
     case 140:
-      return GraphQueryResult.fromList(self.readValue() as! [Any?])
+      return CalendarEventResult.fromList(self.readValue() as! [Any?])
     case 141:
-      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
+      return GraphQueryResult.fromList(self.readValue() as! [Any?])
     case 142:
+      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
+    case 143:
       return CommunityWithScoreResult.fromList(self.readValue() as! [Any?])
+    case 144:
+      return PhotoResult.fromList(self.readValue() as! [Any?])
+    case 145:
+      return CallLogResult.fromList(self.readValue() as! [Any?])
+    case 146:
+      return DetectedFace.fromList(self.readValue() as! [Any?])
+    case 147:
+      return DetectedObject.fromList(self.readValue() as! [Any?])
+    case 148:
+      return DetectedText.fromList(self.readValue() as! [Any?])
+    case 149:
+      return PhotoAnalysisResult.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -523,38 +841,59 @@ private class PigeonInterfacePigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? PermissionStatus {
       super.writeByte(131)
       super.writeValue(value.rawValue)
-    } else if let value = value as? RetrievalResult {
+    } else if let value = value as? CallType {
       super.writeByte(132)
-      super.writeValue(value.toList())
-    } else if let value = value as? VectorStoreStats {
+      super.writeValue(value.rawValue)
+    } else if let value = value as? RetrievalResult {
       super.writeByte(133)
       super.writeValue(value.toList())
-    } else if let value = value as? EntityResult {
+    } else if let value = value as? VectorStoreStats {
       super.writeByte(134)
       super.writeValue(value.toList())
-    } else if let value = value as? RelationshipResult {
+    } else if let value = value as? EntityResult {
       super.writeByte(135)
       super.writeValue(value.toList())
-    } else if let value = value as? CommunityResult {
+    } else if let value = value as? RelationshipResult {
       super.writeByte(136)
       super.writeValue(value.toList())
-    } else if let value = value as? GraphStats {
+    } else if let value = value as? CommunityResult {
       super.writeByte(137)
       super.writeValue(value.toList())
-    } else if let value = value as? ContactResult {
+    } else if let value = value as? GraphStats {
       super.writeByte(138)
       super.writeValue(value.toList())
-    } else if let value = value as? CalendarEventResult {
+    } else if let value = value as? ContactResult {
       super.writeByte(139)
       super.writeValue(value.toList())
-    } else if let value = value as? GraphQueryResult {
+    } else if let value = value as? CalendarEventResult {
       super.writeByte(140)
       super.writeValue(value.toList())
-    } else if let value = value as? EntityWithScoreResult {
+    } else if let value = value as? GraphQueryResult {
       super.writeByte(141)
       super.writeValue(value.toList())
-    } else if let value = value as? CommunityWithScoreResult {
+    } else if let value = value as? EntityWithScoreResult {
       super.writeByte(142)
+      super.writeValue(value.toList())
+    } else if let value = value as? CommunityWithScoreResult {
+      super.writeByte(143)
+      super.writeValue(value.toList())
+    } else if let value = value as? PhotoResult {
+      super.writeByte(144)
+      super.writeValue(value.toList())
+    } else if let value = value as? CallLogResult {
+      super.writeByte(145)
+      super.writeValue(value.toList())
+    } else if let value = value as? DetectedFace {
+      super.writeByte(146)
+      super.writeValue(value.toList())
+    } else if let value = value as? DetectedObject {
+      super.writeByte(147)
+      super.writeValue(value.toList())
+    } else if let value = value as? DetectedText {
+      super.writeByte(148)
+      super.writeValue(value.toList())
+    } else if let value = value as? PhotoAnalysisResult {
+      super.writeByte(149)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -623,6 +962,9 @@ protocol PlatformService {
   func requestPermission(type: PermissionType, completion: @escaping (Result<PermissionStatus, Error>) -> Void)
   func fetchContacts(sinceTimestamp: Int64?, limit: Int64?, completion: @escaping (Result<[ContactResult], Error>) -> Void)
   func fetchCalendarEvents(sinceTimestamp: Int64?, startDate: Int64?, endDate: Int64?, limit: Int64?, completion: @escaping (Result<[CalendarEventResult], Error>) -> Void)
+  func fetchPhotos(sinceTimestamp: Int64?, limit: Int64?, includeLocation: Bool?, completion: @escaping (Result<[PhotoResult], Error>) -> Void)
+  func fetchCallLog(sinceTimestamp: Int64?, limit: Int64?, completion: @escaping (Result<[CallLogResult], Error>) -> Void)
+  func analyzePhoto(photoId: String, imageBytes: FlutterStandardTypedData, detectFaces: Bool?, detectObjects: Bool?, detectText: Bool?, completion: @escaping (Result<PhotoAnalysisResult, Error>) -> Void)
   func startIndexingForegroundService(completion: @escaping (Result<Void, Error>) -> Void)
   func stopIndexingForegroundService(completion: @escaping (Result<Void, Error>) -> Void)
   func updateIndexingProgress(progress: Double, phase: String, entities: Int64, relationships: Int64, completion: @escaping (Result<Void, Error>) -> Void)
@@ -1407,6 +1749,64 @@ class PlatformServiceSetup {
       }
     } else {
       fetchCalendarEventsChannel.setMessageHandler(nil)
+    }
+    let fetchPhotosChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchPhotos\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      fetchPhotosChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sinceTimestampArg: Int64? = nilOrValue(args[0])
+        let limitArg: Int64? = nilOrValue(args[1])
+        let includeLocationArg: Bool? = nilOrValue(args[2])
+        api.fetchPhotos(sinceTimestamp: sinceTimestampArg, limit: limitArg, includeLocation: includeLocationArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      fetchPhotosChannel.setMessageHandler(nil)
+    }
+    let fetchCallLogChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchCallLog\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      fetchCallLogChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sinceTimestampArg: Int64? = nilOrValue(args[0])
+        let limitArg: Int64? = nilOrValue(args[1])
+        api.fetchCallLog(sinceTimestamp: sinceTimestampArg, limit: limitArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      fetchCallLogChannel.setMessageHandler(nil)
+    }
+    let analyzePhotoChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.analyzePhoto\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      analyzePhotoChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let photoIdArg = args[0] as! String
+        let imageBytesArg = args[1] as! FlutterStandardTypedData
+        let detectFacesArg: Bool? = nilOrValue(args[2])
+        let detectObjectsArg: Bool? = nilOrValue(args[3])
+        let detectTextArg: Bool? = nilOrValue(args[4])
+        api.analyzePhoto(photoId: photoIdArg, imageBytes: imageBytesArg, detectFaces: detectFacesArg, detectObjects: detectObjectsArg, detectText: detectTextArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      analyzePhotoChannel.setMessageHandler(nil)
     }
     let startIndexingForegroundServiceChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.startIndexingForegroundService\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

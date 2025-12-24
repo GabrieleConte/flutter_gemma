@@ -91,13 +91,35 @@ class GraphRAGService {
       throw StateError('Chat model not initialized');
     }
     
-    // Truncate prompt if too long (rough estimate: ~4 chars per token, leave room for output)
-    // With maxTokens=1024, reserve ~300 tokens for output, so ~724 tokens * 4 = ~2900 chars
-    const maxPromptChars = 2900;
+    // Truncate prompt if too long
+    // The Qwen model supports larger context windows - increase limit significantly
+    // Reserve ~200 tokens for output, allow ~800 tokens for input = ~3200 chars
+    // For global queries with community summaries, we need more space
+    // Using 6000 chars allows for richer context while staying within model limits
+    const maxPromptChars = 6000;
     String truncatedPrompt = prompt;
     if (prompt.length > maxPromptChars) {
-      truncatedPrompt = '${prompt.substring(0, maxPromptChars)}...[truncated]';
-      debugPrint('[GraphRAGService] Truncated prompt from ${prompt.length} to $maxPromptChars chars');
+      // Smart truncation: try to preserve the question part at the end
+      // Most prompts have context first, question last
+      final questionMarkers = ['Question:', 'Query:', 'User question:', '\n\nQuestion'];
+      String? preservedEnd;
+      for (final marker in questionMarkers) {
+        final markerIndex = prompt.lastIndexOf(marker);
+        if (markerIndex > 0 && markerIndex > prompt.length - 1000) {
+          // Found question marker near the end, preserve it
+          preservedEnd = prompt.substring(markerIndex);
+          break;
+        }
+      }
+      
+      if (preservedEnd != null) {
+        // Keep beginning context and question, truncate middle
+        final availableForContext = maxPromptChars - preservedEnd.length - 50; // 50 for truncation notice
+        truncatedPrompt = '${prompt.substring(0, availableForContext)}\n...[context truncated]...\n$preservedEnd';
+      } else {
+        truncatedPrompt = '${prompt.substring(0, maxPromptChars)}...[truncated]';
+      }
+      debugPrint('[GraphRAGService] Truncated prompt from ${prompt.length} to ${truncatedPrompt.length} chars');
     }
     
     debugPrint('[GraphRAGService] Generating LLM response for prompt (${truncatedPrompt.length} chars)');
@@ -145,17 +167,36 @@ class GraphRAGService {
     return result;
   }
   
-  /// Request permissions for contacts and calendar (sequentially to avoid conflicts)
+  /// Request permissions for all data connectors (sequentially to avoid conflicts)
   Future<Map<DataPermissionType, DataPermissionStatus>> requestPermissions() async {
     _checkInitialized();
     // Request permissions sequentially to avoid "Can request only one set at a time" error
-    final contactsResult = await _graphRag!.requestPermissions('contacts');
-    // Small delay to allow system to process
-    await Future.delayed(const Duration(milliseconds: 500));
-    final calendarResult = await _graphRag!.requestPermissions('calendar');
+    final results = <DataPermissionType, DataPermissionStatus>{};
     
-    // Merge results
-    return {...contactsResult, ...calendarResult};
+    // Contacts
+    final contactsResult = await _graphRag!.requestPermissions('contacts');
+    results.addAll(contactsResult);
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    // Calendar
+    final calendarResult = await _graphRag!.requestPermissions('calendar');
+    results.addAll(calendarResult);
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    // Photos
+    final photosResult = await _graphRag!.requestPermissions('photos');
+    results.addAll(photosResult);
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    // Call Log (note: may be restricted on iOS)
+    try {
+      final callLogResult = await _graphRag!.requestPermissions('callLog');
+      results.addAll(callLogResult);
+    } catch (e) {
+      debugPrint('[GraphRAGService] Call log permission request failed: $e');
+    }
+    
+    return results;
   }
   
   /// Start indexing system data
@@ -321,18 +362,28 @@ class GraphRAGService {
   }
   
   /// Get all entities for visualization
-  /// Fetches entities of all known types
+  /// Fetches entities of all known types including the "You" central node
   Future<List<GraphEntity>> getAllEntities() async {
     _checkInitialized();
-    final entityTypes = ['PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION'];
+    // Include SELF type for the "You" central node, plus PHOTO and PHONE_CALL
+    final entityTypes = ['SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION', 'PHOTO', 'PHONE_CALL'];
     final entities = <GraphEntity>[];
     
     for (final type in entityTypes) {
       final typeEntities = await _graphRag!.getEntitiesByType(type);
+      debugPrint('[GraphRAGService] Type "$type": ${typeEntities.length} entities');
       entities.addAll(typeEntities);
     }
     
-    debugPrint('[GraphRAGService] Retrieved ${entities.length} total entities');
+    debugPrint('[GraphRAGService] Retrieved ${entities.length} total entities across ${entityTypes.length} types');
+    
+    // Log entity breakdown for debugging
+    final typeCounts = <String, int>{};
+    for (final entity in entities) {
+      typeCounts[entity.type] = (typeCounts[entity.type] ?? 0) + 1;
+    }
+    debugPrint('[GraphRAGService] Entity breakdown: $typeCounts');
+    
     return entities;
   }
   

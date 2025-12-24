@@ -825,6 +825,75 @@ private class PlatformServiceImpl(
     }
   }
 
+  override fun fetchPhotos(
+    sinceTimestamp: Long?,
+    limit: Long?,
+    includeLocation: Boolean?,
+    callback: (Result<List<PhotoResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val photos = systemDataConnector!!.fetchPhotos(sinceTimestamp, limit, includeLocation)
+        callback(Result.success(photos))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun fetchCallLog(
+    sinceTimestamp: Long?,
+    limit: Long?,
+    callback: (Result<List<CallLogResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val calls = systemDataConnector!!.fetchCallLog(sinceTimestamp, limit)
+        callback(Result.success(calls))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  // MediaPipe photo analysis
+  private var mediaPipeAnalyzer: MediaPipeAnalyzer? = null
+
+  override fun analyzePhoto(
+    photoId: String,
+    imageBytes: ByteArray,
+    detectFaces: Boolean?,
+    detectObjects: Boolean?,
+    detectText: Boolean?,
+    callback: (Result<PhotoAnalysisResult>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        if (mediaPipeAnalyzer == null) {
+          mediaPipeAnalyzer = MediaPipeAnalyzer(context)
+          mediaPipeAnalyzer!!.initialize()
+        }
+        
+        val result = mediaPipeAnalyzer!!.analyzePhoto(
+          photoId = photoId,
+          imageBytes = imageBytes,
+          detectFaces = detectFaces ?: true,
+          detectObjects = detectObjects ?: true,
+          detectText = detectText ?: false
+        )
+        callback(Result.success(result))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
   // === Foreground Service Methods ===
 
   override fun startIndexingForegroundService(callback: (Result<Unit>) -> Unit) {

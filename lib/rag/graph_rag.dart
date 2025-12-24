@@ -130,6 +130,12 @@ class GraphRAG {
     _connectorManager.registerConnector(
       CalendarConnector(_platform),
     );
+    _connectorManager.registerConnector(
+      PhotosConnector(_platform),
+    );
+    _connectorManager.registerConnector(
+      CallLogConnector(_platform),
+    );
 
     // Setup entity extractor
     _extractor = LLMEntityExtractor(

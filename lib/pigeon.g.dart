@@ -29,6 +29,8 @@ enum PermissionType {
   contacts,
   calendar,
   notifications,
+  photos,
+  callLog,
 }
 
 enum PermissionStatus {
@@ -36,6 +38,16 @@ enum PermissionStatus {
   denied,
   restricted,
   notDetermined,
+}
+
+enum CallType {
+  incoming,
+  outgoing,
+  missed,
+  rejected,
+  blocked,
+  voicemail,
+  unknown,
 }
 
 class RetrievalResult {
@@ -464,6 +476,342 @@ class CommunityWithScoreResult {
   }
 }
 
+class PhotoResult {
+  PhotoResult({
+    required this.id,
+    this.filename,
+    required this.width,
+    required this.height,
+    required this.creationDate,
+    required this.modificationDate,
+    this.latitude,
+    this.longitude,
+    this.locationName,
+    this.duration,
+    required this.mediaType,
+    this.mimeType,
+    this.fileSize,
+    this.thumbnailBytes,
+  });
+
+  String id;
+
+  String? filename;
+
+  int width;
+
+  int height;
+
+  int creationDate;
+
+  int modificationDate;
+
+  double? latitude;
+
+  double? longitude;
+
+  String? locationName;
+
+  int? duration;
+
+  String mediaType;
+
+  String? mimeType;
+
+  int? fileSize;
+
+  Uint8List? thumbnailBytes;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      filename,
+      width,
+      height,
+      creationDate,
+      modificationDate,
+      latitude,
+      longitude,
+      locationName,
+      duration,
+      mediaType,
+      mimeType,
+      fileSize,
+      thumbnailBytes,
+    ];
+  }
+
+  static PhotoResult decode(Object result) {
+    result as List<Object?>;
+    return PhotoResult(
+      id: result[0]! as String,
+      filename: result[1] as String?,
+      width: result[2]! as int,
+      height: result[3]! as int,
+      creationDate: result[4]! as int,
+      modificationDate: result[5]! as int,
+      latitude: result[6] as double?,
+      longitude: result[7] as double?,
+      locationName: result[8] as String?,
+      duration: result[9] as int?,
+      mediaType: result[10]! as String,
+      mimeType: result[11] as String?,
+      fileSize: result[12] as int?,
+      thumbnailBytes: result[13] as Uint8List?,
+    );
+  }
+}
+
+class CallLogResult {
+  CallLogResult({
+    required this.id,
+    this.name,
+    required this.phoneNumber,
+    required this.callType,
+    required this.timestamp,
+    required this.duration,
+    required this.isRead,
+    this.geocodedLocation,
+  });
+
+  String id;
+
+  String? name;
+
+  String phoneNumber;
+
+  CallType callType;
+
+  int timestamp;
+
+  int duration;
+
+  bool isRead;
+
+  String? geocodedLocation;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      name,
+      phoneNumber,
+      callType,
+      timestamp,
+      duration,
+      isRead,
+      geocodedLocation,
+    ];
+  }
+
+  static CallLogResult decode(Object result) {
+    result as List<Object?>;
+    return CallLogResult(
+      id: result[0]! as String,
+      name: result[1] as String?,
+      phoneNumber: result[2]! as String,
+      callType: result[3]! as CallType,
+      timestamp: result[4]! as int,
+      duration: result[5]! as int,
+      isRead: result[6]! as bool,
+      geocodedLocation: result[7] as String?,
+    );
+  }
+}
+
+class DetectedFace {
+  DetectedFace({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.confidence,
+    this.recognizedPerson,
+  });
+
+  double x;
+
+  double y;
+
+  double width;
+
+  double height;
+
+  double confidence;
+
+  String? recognizedPerson;
+
+  Object encode() {
+    return <Object?>[
+      x,
+      y,
+      width,
+      height,
+      confidence,
+      recognizedPerson,
+    ];
+  }
+
+  static DetectedFace decode(Object result) {
+    result as List<Object?>;
+    return DetectedFace(
+      x: result[0]! as double,
+      y: result[1]! as double,
+      width: result[2]! as double,
+      height: result[3]! as double,
+      confidence: result[4]! as double,
+      recognizedPerson: result[5] as String?,
+    );
+  }
+}
+
+class DetectedObject {
+  DetectedObject({
+    required this.label,
+    required this.confidence,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  String label;
+
+  double confidence;
+
+  double x;
+
+  double y;
+
+  double width;
+
+  double height;
+
+  Object encode() {
+    return <Object?>[
+      label,
+      confidence,
+      x,
+      y,
+      width,
+      height,
+    ];
+  }
+
+  static DetectedObject decode(Object result) {
+    result as List<Object?>;
+    return DetectedObject(
+      label: result[0]! as String,
+      confidence: result[1]! as double,
+      x: result[2]! as double,
+      y: result[3]! as double,
+      width: result[4]! as double,
+      height: result[5]! as double,
+    );
+  }
+}
+
+class DetectedText {
+  DetectedText({
+    required this.text,
+    required this.confidence,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  String text;
+
+  double confidence;
+
+  double x;
+
+  double y;
+
+  double width;
+
+  double height;
+
+  Object encode() {
+    return <Object?>[
+      text,
+      confidence,
+      x,
+      y,
+      width,
+      height,
+    ];
+  }
+
+  static DetectedText decode(Object result) {
+    result as List<Object?>;
+    return DetectedText(
+      text: result[0]! as String,
+      confidence: result[1]! as double,
+      x: result[2]! as double,
+      y: result[3]! as double,
+      width: result[4]! as double,
+      height: result[5]! as double,
+    );
+  }
+}
+
+class PhotoAnalysisResult {
+  PhotoAnalysisResult({
+    required this.photoId,
+    required this.faces,
+    required this.objects,
+    required this.texts,
+    required this.labels,
+    this.dominantColors,
+    required this.isScreenshot,
+    required this.hasText,
+  });
+
+  String photoId;
+
+  List<DetectedFace?> faces;
+
+  List<DetectedObject?> objects;
+
+  List<DetectedText?> texts;
+
+  List<String?> labels;
+
+  String? dominantColors;
+
+  bool isScreenshot;
+
+  bool hasText;
+
+  Object encode() {
+    return <Object?>[
+      photoId,
+      faces,
+      objects,
+      texts,
+      labels,
+      dominantColors,
+      isScreenshot,
+      hasText,
+    ];
+  }
+
+  static PhotoAnalysisResult decode(Object result) {
+    result as List<Object?>;
+    return PhotoAnalysisResult(
+      photoId: result[0]! as String,
+      faces: (result[1] as List<Object?>?)!.cast<DetectedFace?>(),
+      objects: (result[2] as List<Object?>?)!.cast<DetectedObject?>(),
+      texts: (result[3] as List<Object?>?)!.cast<DetectedText?>(),
+      labels: (result[4] as List<Object?>?)!.cast<String?>(),
+      dominantColors: result[5] as String?,
+      isScreenshot: result[6]! as bool,
+      hasText: result[7]! as bool,
+    );
+  }
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -481,38 +829,59 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is PermissionStatus) {
       buffer.putUint8(131);
       writeValue(buffer, value.index);
-    }    else if (value is RetrievalResult) {
+    }    else if (value is CallType) {
       buffer.putUint8(132);
-      writeValue(buffer, value.encode());
-    }    else if (value is VectorStoreStats) {
+      writeValue(buffer, value.index);
+    }    else if (value is RetrievalResult) {
       buffer.putUint8(133);
       writeValue(buffer, value.encode());
-    }    else if (value is EntityResult) {
+    }    else if (value is VectorStoreStats) {
       buffer.putUint8(134);
       writeValue(buffer, value.encode());
-    }    else if (value is RelationshipResult) {
+    }    else if (value is EntityResult) {
       buffer.putUint8(135);
       writeValue(buffer, value.encode());
-    }    else if (value is CommunityResult) {
+    }    else if (value is RelationshipResult) {
       buffer.putUint8(136);
       writeValue(buffer, value.encode());
-    }    else if (value is GraphStats) {
+    }    else if (value is CommunityResult) {
       buffer.putUint8(137);
       writeValue(buffer, value.encode());
-    }    else if (value is ContactResult) {
+    }    else if (value is GraphStats) {
       buffer.putUint8(138);
       writeValue(buffer, value.encode());
-    }    else if (value is CalendarEventResult) {
+    }    else if (value is ContactResult) {
       buffer.putUint8(139);
       writeValue(buffer, value.encode());
-    }    else if (value is GraphQueryResult) {
+    }    else if (value is CalendarEventResult) {
       buffer.putUint8(140);
       writeValue(buffer, value.encode());
-    }    else if (value is EntityWithScoreResult) {
+    }    else if (value is GraphQueryResult) {
       buffer.putUint8(141);
       writeValue(buffer, value.encode());
-    }    else if (value is CommunityWithScoreResult) {
+    }    else if (value is EntityWithScoreResult) {
       buffer.putUint8(142);
+      writeValue(buffer, value.encode());
+    }    else if (value is CommunityWithScoreResult) {
+      buffer.putUint8(143);
+      writeValue(buffer, value.encode());
+    }    else if (value is PhotoResult) {
+      buffer.putUint8(144);
+      writeValue(buffer, value.encode());
+    }    else if (value is CallLogResult) {
+      buffer.putUint8(145);
+      writeValue(buffer, value.encode());
+    }    else if (value is DetectedFace) {
+      buffer.putUint8(146);
+      writeValue(buffer, value.encode());
+    }    else if (value is DetectedObject) {
+      buffer.putUint8(147);
+      writeValue(buffer, value.encode());
+    }    else if (value is DetectedText) {
+      buffer.putUint8(148);
+      writeValue(buffer, value.encode());
+    }    else if (value is PhotoAnalysisResult) {
+      buffer.putUint8(149);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -532,27 +901,42 @@ class _PigeonCodec extends StandardMessageCodec {
         final int? value = readValue(buffer) as int?;
         return value == null ? null : PermissionStatus.values[value];
       case 132: 
-        return RetrievalResult.decode(readValue(buffer)!);
+        final int? value = readValue(buffer) as int?;
+        return value == null ? null : CallType.values[value];
       case 133: 
-        return VectorStoreStats.decode(readValue(buffer)!);
+        return RetrievalResult.decode(readValue(buffer)!);
       case 134: 
-        return EntityResult.decode(readValue(buffer)!);
+        return VectorStoreStats.decode(readValue(buffer)!);
       case 135: 
-        return RelationshipResult.decode(readValue(buffer)!);
+        return EntityResult.decode(readValue(buffer)!);
       case 136: 
-        return CommunityResult.decode(readValue(buffer)!);
+        return RelationshipResult.decode(readValue(buffer)!);
       case 137: 
-        return GraphStats.decode(readValue(buffer)!);
+        return CommunityResult.decode(readValue(buffer)!);
       case 138: 
-        return ContactResult.decode(readValue(buffer)!);
+        return GraphStats.decode(readValue(buffer)!);
       case 139: 
-        return CalendarEventResult.decode(readValue(buffer)!);
+        return ContactResult.decode(readValue(buffer)!);
       case 140: 
-        return GraphQueryResult.decode(readValue(buffer)!);
+        return CalendarEventResult.decode(readValue(buffer)!);
       case 141: 
-        return EntityWithScoreResult.decode(readValue(buffer)!);
+        return GraphQueryResult.decode(readValue(buffer)!);
       case 142: 
+        return EntityWithScoreResult.decode(readValue(buffer)!);
+      case 143: 
         return CommunityWithScoreResult.decode(readValue(buffer)!);
+      case 144: 
+        return PhotoResult.decode(readValue(buffer)!);
+      case 145: 
+        return CallLogResult.decode(readValue(buffer)!);
+      case 146: 
+        return DetectedFace.decode(readValue(buffer)!);
+      case 147: 
+        return DetectedObject.decode(readValue(buffer)!);
+      case 148: 
+        return DetectedText.decode(readValue(buffer)!);
+      case 149: 
+        return PhotoAnalysisResult.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -1632,6 +2016,87 @@ class PlatformService {
       );
     } else {
       return (pigeonVar_replyList[0] as List<Object?>?)!.cast<CalendarEventResult>();
+    }
+  }
+
+  Future<List<PhotoResult>> fetchPhotos({int? sinceTimestamp, int? limit, bool? includeLocation, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.fetchPhotos$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[sinceTimestamp, limit, includeLocation]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<PhotoResult>();
+    }
+  }
+
+  Future<List<CallLogResult>> fetchCallLog({int? sinceTimestamp, int? limit}) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.fetchCallLog$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[sinceTimestamp, limit]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<CallLogResult>();
+    }
+  }
+
+  Future<PhotoAnalysisResult> analyzePhoto({required String photoId, required Uint8List imageBytes, bool? detectFaces, bool? detectObjects, bool? detectText, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.analyzePhoto$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[photoId, imageBytes, detectFaces, detectObjects, detectText]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as PhotoAnalysisResult?)!;
     }
   }
 

@@ -18,6 +18,8 @@ enum DataPermissionStatus {
 enum DataPermissionType {
   contacts,
   calendar,
+  photos,
+  callLog,
 }
 
 /// Represents a contact from the system
@@ -108,6 +110,271 @@ class CalendarEvent {
   @override
   String toString() =>
       'CalendarEvent(id: $id, title: $title, start: $startDate)';
+}
+
+/// Represents a phone call from the system call log
+class PhoneCall {
+  final String id;
+  final String? contactName;
+  final String phoneNumber;
+  final PhoneCallType callType;
+  final DateTime timestamp;
+  final Duration duration;
+  final bool isRead;
+  final String? location;
+
+  PhoneCall({
+    required this.id,
+    this.contactName,
+    required this.phoneNumber,
+    required this.callType,
+    required this.timestamp,
+    required this.duration,
+    this.isRead = false,
+    this.location,
+  });
+
+  factory PhoneCall.fromCallLogResult(CallLogResult result) {
+    return PhoneCall(
+      id: result.id,
+      contactName: result.name,
+      phoneNumber: result.phoneNumber,
+      callType: _mapCallType(result.callType),
+      timestamp: DateTime.fromMillisecondsSinceEpoch(result.timestamp),
+      duration: Duration(seconds: result.duration),
+      isRead: result.isRead,
+      location: result.geocodedLocation,
+    );
+  }
+
+  @override
+  String toString() =>
+      'PhoneCall(id: $id, number: $phoneNumber, type: $callType, duration: ${duration.inMinutes}m)';
+}
+
+/// Phone call type
+enum PhoneCallType {
+  incoming,
+  outgoing,
+  missed,
+  rejected,
+  blocked,
+  voicemail,
+  unknown,
+}
+
+PhoneCallType _mapCallType(CallType type) {
+  switch (type) {
+    case CallType.incoming:
+      return PhoneCallType.incoming;
+    case CallType.outgoing:
+      return PhoneCallType.outgoing;
+    case CallType.missed:
+      return PhoneCallType.missed;
+    case CallType.rejected:
+      return PhoneCallType.rejected;
+    case CallType.blocked:
+      return PhoneCallType.blocked;
+    case CallType.voicemail:
+      return PhoneCallType.voicemail;
+    case CallType.unknown:
+      return PhoneCallType.unknown;
+  }
+}
+
+/// Represents a photo from the system photo library
+class Photo {
+  final String id;
+  final String? filename;
+  final int width;
+  final int height;
+  final DateTime creationDate;
+  final DateTime modificationDate;
+  final double? latitude;
+  final double? longitude;
+  final String? locationName;
+  final Duration? duration; // For videos
+  final String mediaType;
+  final String? mimeType;
+  final int? fileSize;
+
+  Photo({
+    required this.id,
+    this.filename,
+    required this.width,
+    required this.height,
+    required this.creationDate,
+    required this.modificationDate,
+    this.latitude,
+    this.longitude,
+    this.locationName,
+    this.duration,
+    required this.mediaType,
+    this.mimeType,
+    this.fileSize,
+  });
+
+  bool get hasLocation => latitude != null && longitude != null;
+  bool get isVideo => mediaType == 'video';
+
+  factory Photo.fromPhotoResult(PhotoResult result) {
+    return Photo(
+      id: result.id,
+      filename: result.filename,
+      width: result.width.toInt(),
+      height: result.height.toInt(),
+      creationDate: DateTime.fromMillisecondsSinceEpoch(result.creationDate),
+      modificationDate:
+          DateTime.fromMillisecondsSinceEpoch(result.modificationDate),
+      latitude: result.latitude,
+      longitude: result.longitude,
+      locationName: result.locationName,
+      duration:
+          result.duration != null ? Duration(milliseconds: result.duration!) : null,
+      mediaType: result.mediaType,
+      mimeType: result.mimeType,
+      fileSize: result.fileSize?.toInt(),
+    );
+  }
+
+  @override
+  String toString() =>
+      'Photo(id: $id, filename: $filename, ${width}x$height, date: $creationDate)';
+}
+
+/// Represents analyzed photo metadata from MediaPipe
+class PhotoAnalysis {
+  final String photoId;
+  final List<FaceInfo> faces;
+  final List<ObjectInfo> objects;
+  final List<TextInfo> texts;
+  final List<String> labels;
+  final String? dominantColors;
+  final bool isScreenshot;
+  final bool hasText;
+
+  PhotoAnalysis({
+    required this.photoId,
+    this.faces = const [],
+    this.objects = const [],
+    this.texts = const [],
+    this.labels = const [],
+    this.dominantColors,
+    this.isScreenshot = false,
+    this.hasText = false,
+  });
+
+  factory PhotoAnalysis.fromPhotoAnalysisResult(PhotoAnalysisResult result) {
+    return PhotoAnalysis(
+      photoId: result.photoId,
+      faces: result.faces
+          .whereType<DetectedFace>()
+          .map((f) => FaceInfo.fromDetectedFace(f))
+          .toList(),
+      objects: result.objects
+          .whereType<DetectedObject>()
+          .map((o) => ObjectInfo.fromDetectedObject(o))
+          .toList(),
+      texts: result.texts
+          .whereType<DetectedText>()
+          .map((t) => TextInfo.fromDetectedText(t))
+          .toList(),
+      labels: result.labels.whereType<String>().toList(),
+      dominantColors: result.dominantColors,
+      isScreenshot: result.isScreenshot,
+      hasText: result.hasText,
+    );
+  }
+}
+
+/// Face detection info
+class FaceInfo {
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final double confidence;
+  final String? recognizedPerson;
+
+  FaceInfo({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.confidence,
+    this.recognizedPerson,
+  });
+
+  factory FaceInfo.fromDetectedFace(DetectedFace face) {
+    return FaceInfo(
+      x: face.x,
+      y: face.y,
+      width: face.width,
+      height: face.height,
+      confidence: face.confidence,
+      recognizedPerson: face.recognizedPerson,
+    );
+  }
+}
+
+/// Object detection info
+class ObjectInfo {
+  final String label;
+  final double confidence;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+
+  ObjectInfo({
+    required this.label,
+    required this.confidence,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  factory ObjectInfo.fromDetectedObject(DetectedObject obj) {
+    return ObjectInfo(
+      label: obj.label,
+      confidence: obj.confidence,
+      x: obj.x,
+      y: obj.y,
+      width: obj.width,
+      height: obj.height,
+    );
+  }
+}
+
+/// Text detection info
+class TextInfo {
+  final String text;
+  final double confidence;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+
+  TextInfo({
+    required this.text,
+    required this.confidence,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  factory TextInfo.fromDetectedText(DetectedText text) {
+    return TextInfo(
+      text: text.text,
+      confidence: text.confidence,
+      x: text.x,
+      y: text.y,
+      width: text.width,
+      height: text.height,
+    );
+  }
 }
 
 /// Configuration for a data connector
@@ -283,6 +550,141 @@ class CalendarConnector implements DataConnector {
     config.onProgress?.call(1.0, 'Fetched ${results.length} calendar events');
     
     return results.map((r) => CalendarEvent.fromCalendarEventResult(r)).toList();
+  }
+
+  @override
+  DateTime? get lastSyncTime => _lastSyncTime;
+}
+
+/// Native photos connector
+class PhotosConnector implements DataConnector {
+  final PlatformService _platform;
+  DateTime? _lastSyncTime;
+
+  @override
+  final String dataType = 'photos';
+
+  @override
+  final List<DataPermissionType> requiredPermissions = [
+    DataPermissionType.photos
+  ];
+
+  @override
+  final ConnectorConfig config;
+
+  /// Whether to include location metadata
+  final bool includeLocation;
+
+  PhotosConnector(
+    this._platform, {
+    ConnectorConfig? config,
+    this.includeLocation = true,
+  }) : config = config ?? ConnectorConfig(batchSize: 500);
+
+  @override
+  Future<Map<DataPermissionType, DataPermissionStatus>> checkPermissions() async {
+    final status = await _platform.checkPermission(PermissionType.photos);
+    return {
+      DataPermissionType.photos: _mapPermissionStatus(status),
+    };
+  }
+
+  @override
+  Future<Map<DataPermissionType, DataPermissionStatus>> requestPermissions() async {
+    final status = await _platform.requestPermission(PermissionType.photos);
+    return {
+      DataPermissionType.photos: _mapPermissionStatus(status),
+    };
+  }
+
+  @override
+  Future<bool> hasRequiredPermissions() async {
+    final perms = await checkPermissions();
+    return perms[DataPermissionType.photos] == DataPermissionStatus.granted;
+  }
+
+  @override
+  Future<List<Photo>> fetch({DateTime? since, int? limit}) async {
+    final sinceTimestamp = since?.millisecondsSinceEpoch;
+    final results = await _platform.fetchPhotos(
+      sinceTimestamp: sinceTimestamp,
+      limit: limit ?? config.batchSize,
+      includeLocation: includeLocation,
+    );
+
+    _lastSyncTime = DateTime.now();
+    config.onProgress?.call(1.0, 'Fetched ${results.length} photos');
+
+    return results.map((r) => Photo.fromPhotoResult(r)).toList();
+  }
+
+  @override
+  DateTime? get lastSyncTime => _lastSyncTime;
+}
+
+/// Native call log connector
+class CallLogConnector implements DataConnector {
+  final PlatformService _platform;
+  DateTime? _lastSyncTime;
+
+  @override
+  final String dataType = 'callLog';
+
+  @override
+  final List<DataPermissionType> requiredPermissions = [
+    DataPermissionType.callLog
+  ];
+
+  @override
+  final ConnectorConfig config;
+
+  CallLogConnector(this._platform, {ConnectorConfig? config})
+      : config = config ?? ConnectorConfig(batchSize: 200);
+
+  @override
+  Future<Map<DataPermissionType, DataPermissionStatus>> checkPermissions() async {
+    final status = await _platform.checkPermission(PermissionType.callLog);
+    return {
+      DataPermissionType.callLog: _mapPermissionStatus(status),
+    };
+  }
+
+  @override
+  Future<Map<DataPermissionType, DataPermissionStatus>> requestPermissions() async {
+    final status = await _platform.requestPermission(PermissionType.callLog);
+    return {
+      DataPermissionType.callLog: _mapPermissionStatus(status),
+    };
+  }
+
+  @override
+  Future<bool> hasRequiredPermissions() async {
+    final perms = await checkPermissions();
+    // On iOS, call log is always restricted
+    final status = perms[DataPermissionType.callLog];
+    return status == DataPermissionStatus.granted;
+  }
+
+  @override
+  Future<List<PhoneCall>> fetch({DateTime? since, int? limit}) async {
+    final sinceTimestamp = since?.millisecondsSinceEpoch;
+    final results = await _platform.fetchCallLog(
+      sinceTimestamp: sinceTimestamp,
+      limit: limit ?? config.batchSize,
+    );
+
+    _lastSyncTime = DateTime.now();
+    config.onProgress?.call(1.0, 'Fetched ${results.length} call log entries');
+
+    return results.map((r) => PhoneCall.fromCallLogResult(r)).toList();
+  }
+
+  /// Check if call log is available on this platform
+  /// iOS does not provide access to system call history
+  Future<bool> isAvailable() async {
+    final status = await _platform.checkPermission(PermissionType.callLog);
+    // If restricted, it means the platform doesn't support this feature
+    return status != PermissionStatus.restricted;
   }
 
   @override

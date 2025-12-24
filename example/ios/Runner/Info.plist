@@ -40,6 +40,14 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>NSContactsUsageDescription</key>
+	<string>This app needs access to your contacts to build your personal knowledge graph.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>This app needs access to your calendar to include events in your personal knowledge graph.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app needs access to your photos to analyze and include them in your personal knowledge graph.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app uses location data from your photos to enhance your knowledge graph.</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

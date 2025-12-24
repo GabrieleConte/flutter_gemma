@@ -1,8 +1,10 @@
 import Foundation
 import Contacts
 import EventKit
+import Photos
+import CallKit
 
-/// iOS System Data Connector for accessing user's contacts and calendar
+/// iOS System Data Connector for accessing user's contacts, calendar, photos, and call logs
 class SystemDataConnector {
 
     // MARK: - Properties
@@ -19,6 +21,12 @@ class SystemDataConnector {
             return checkContactsPermission()
         case .calendar:
             return checkCalendarPermission()
+        case .photos:
+            return checkPhotosPermission()
+        case .callLog:
+            return checkCallLogPermission()
+        case .notifications:
+            return .notDetermined // Not implemented yet
         }
     }
 
@@ -29,6 +37,12 @@ class SystemDataConnector {
             requestContactsPermission(completion: completion)
         case .calendar:
             requestCalendarPermission(completion: completion)
+        case .photos:
+            requestPhotosPermission(completion: completion)
+        case .callLog:
+            requestCallLogPermission(completion: completion)
+        case .notifications:
+            completion(.denied) // Not implemented yet
         }
     }
 
@@ -254,6 +268,139 @@ class SystemDataConnector {
                 lastModified: Int64(lastModified)
             )
         }
+    }
+
+    // MARK: - Photos Permission
+
+    private func checkPhotosPermission() -> PermissionStatus {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        return mapPhotosAuthStatus(status)
+    }
+
+    private func requestPhotosPermission(completion: @escaping (PermissionStatus) -> Void) {
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+            DispatchQueue.main.async {
+                completion(self.mapPhotosAuthStatus(status))
+            }
+        }
+    }
+
+    private func mapPhotosAuthStatus(_ status: PHAuthorizationStatus) -> PermissionStatus {
+        switch status {
+        case .authorized:
+            return .granted
+        case .limited:
+            return .granted // Limited access is still usable
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .notDetermined
+        }
+    }
+
+    /// Fetch photos from the photo library
+    func fetchPhotos(sinceTimestamp: Int?, limit: Int?, includeLocation: Bool?) throws -> [PhotoResult] {
+        // Check permission first
+        guard checkPhotosPermission() == .granted else {
+            throw SystemDataError.permissionDenied("Photos permission not granted")
+        }
+
+        var results: [PhotoResult] = []
+        let maxCount = limit ?? 500 // Default limit to prevent memory issues
+
+        // Create fetch options
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+
+        // Filter by date if sinceTimestamp provided
+        if let timestamp = sinceTimestamp {
+            let sinceDate = Date(timeIntervalSince1970: Double(timestamp))
+            fetchOptions.predicate = NSPredicate(format: "creationDate > %@", sinceDate as NSDate)
+        }
+
+        fetchOptions.fetchLimit = maxCount
+
+        // Fetch assets
+        let assets = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+
+        // Process assets
+        assets.enumerateObjects { (asset, index, stop) in
+            if results.count >= maxCount {
+                stop.pointee = true
+                return
+            }
+
+            // Get location if requested
+            var latitude: Double?
+            var longitude: Double?
+            var locationName: String?
+
+            if includeLocation == true, let location = asset.location {
+                latitude = location.coordinate.latitude
+                longitude = location.coordinate.longitude
+                // Note: Reverse geocoding would need to be done asynchronously
+            }
+
+            let result = PhotoResult(
+                id: asset.localIdentifier,
+                filename: asset.value(forKey: "filename") as? String,
+                width: Int64(asset.pixelWidth),
+                height: Int64(asset.pixelHeight),
+                creationDate: Int64(asset.creationDate?.timeIntervalSince1970 ?? 0),
+                modificationDate: Int64(asset.modificationDate?.timeIntervalSince1970 ?? 0),
+                latitude: latitude,
+                longitude: longitude,
+                locationName: locationName,
+                duration: asset.mediaType == .video ? Int64(asset.duration * 1000) : nil,
+                mediaType: asset.mediaType == .image ? "image" : "video",
+                mimeType: self.getMimeType(for: asset),
+                fileSize: nil, // Requires async resource request
+                thumbnailBytes: nil // Can be loaded on demand
+            )
+
+            results.append(result)
+        }
+
+        return results
+    }
+
+    private func getMimeType(for asset: PHAsset) -> String? {
+        guard let resource = PHAssetResource.assetResources(for: asset).first else {
+            return nil
+        }
+        return resource.uniformTypeIdentifier
+    }
+
+    // MARK: - Call Log Permission
+    
+    /// iOS has very limited call log access - only via CallKit for VoIP apps
+    /// Regular call history is not accessible on iOS for privacy reasons
+    
+    private func checkCallLogPermission() -> PermissionStatus {
+        // iOS doesn't provide access to the system call log
+        // CallKit only works for VoIP apps
+        // Return restricted to indicate this is a platform limitation
+        return .restricted
+    }
+
+    private func requestCallLogPermission(completion: @escaping (PermissionStatus) -> Void) {
+        // iOS doesn't allow access to call history
+        // This is a platform limitation, not a permission issue
+        completion(.restricted)
+    }
+
+    /// Fetch call log - iOS does not provide access to system call history
+    /// This returns an empty array and logs a warning
+    func fetchCallLog(sinceTimestamp: Int?, limit: Int?) throws -> [CallLogResult] {
+        // iOS does not provide API access to the system call log
+        // Only CallKit-enabled VoIP apps can track their own calls
+        // Regular telephony call history is not accessible for privacy reasons
+        print("⚠️ Call log is not accessible on iOS due to platform restrictions")
+        return []
     }
 }
 

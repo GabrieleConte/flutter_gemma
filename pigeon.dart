@@ -17,6 +17,8 @@ enum PermissionType {
   contacts,
   calendar,
   notifications,
+  photos,
+  callLog,
 }
 
 enum PermissionStatus {
@@ -260,6 +262,30 @@ abstract class PlatformService {
     int? limit,
   });
 
+  @async
+  List<PhotoResult> fetchPhotos({
+    int? sinceTimestamp,
+    int? limit,
+    bool? includeLocation,
+  });
+
+  @async
+  List<CallLogResult> fetchCallLog({
+    int? sinceTimestamp,
+    int? limit,
+  });
+
+  // === MediaPipe Analysis Methods ===
+
+  @async
+  PhotoAnalysisResult analyzePhoto({
+    required String photoId,
+    required Uint8List imageBytes,
+    bool? detectFaces,
+    bool? detectObjects,
+    bool? detectText,
+  });
+
   // === Foreground Service Methods ===
   
   @async
@@ -447,5 +473,151 @@ class CommunityWithScoreResult {
   CommunityWithScoreResult({
     required this.community,
     required this.score,
+  });
+}
+// === Photos & Call Log Data Classes ===
+
+class PhotoResult {
+  final String id;
+  final String? filename;
+  final int width;
+  final int height;
+  final int creationDate;
+  final int modificationDate;
+  final double? latitude;
+  final double? longitude;
+  final String? locationName;
+  final int? duration; // For videos, in milliseconds
+  final String mediaType; // 'image' or 'video'
+  final String? mimeType;
+  final int? fileSize;
+  // Thumbnail bytes for analysis (optional, for efficiency)
+  final Uint8List? thumbnailBytes;
+
+  PhotoResult({
+    required this.id,
+    this.filename,
+    required this.width,
+    required this.height,
+    required this.creationDate,
+    required this.modificationDate,
+    this.latitude,
+    this.longitude,
+    this.locationName,
+    this.duration,
+    required this.mediaType,
+    this.mimeType,
+    this.fileSize,
+    this.thumbnailBytes,
+  });
+}
+
+enum CallType {
+  incoming,
+  outgoing,
+  missed,
+  rejected,
+  blocked,
+  voicemail,
+  unknown,
+}
+
+class CallLogResult {
+  final String id;
+  final String? name; // Contact name if available
+  final String phoneNumber;
+  final CallType callType;
+  final int timestamp; // When the call occurred
+  final int duration; // In seconds
+  final bool isRead;
+  final String? geocodedLocation;
+
+  CallLogResult({
+    required this.id,
+    this.name,
+    required this.phoneNumber,
+    required this.callType,
+    required this.timestamp,
+    required this.duration,
+    required this.isRead,
+    this.geocodedLocation,
+  });
+}
+
+// === MediaPipe Analysis Results ===
+
+class DetectedFace {
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final double confidence;
+  final String? recognizedPerson; // If matched with contacts
+
+  DetectedFace({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.confidence,
+    this.recognizedPerson,
+  });
+}
+
+class DetectedObject {
+  final String label;
+  final double confidence;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+
+  DetectedObject({
+    required this.label,
+    required this.confidence,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+}
+
+class DetectedText {
+  final String text;
+  final double confidence;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+
+  DetectedText({
+    required this.text,
+    required this.confidence,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+}
+
+class PhotoAnalysisResult {
+  final String photoId;
+  final List<DetectedFace?> faces;
+  final List<DetectedObject?> objects;
+  final List<DetectedText?> texts;
+  final List<String?> labels; // Image classification labels
+  final String? dominantColors;
+  final bool isScreenshot;
+  final bool hasText;
+
+  PhotoAnalysisResult({
+    required this.photoId,
+    required this.faces,
+    required this.objects,
+    required this.texts,
+    required this.labels,
+    this.dominantColors,
+    required this.isScreenshot,
+    required this.hasText,
   });
 }

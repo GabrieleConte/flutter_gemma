@@ -345,6 +345,12 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         DataPermissionStatus.granted;
     final calendarGranted = _permissions?[DataPermissionType.calendar] ==
         DataPermissionStatus.granted;
+    final photosGranted = _permissions?[DataPermissionType.photos] ==
+        DataPermissionStatus.granted;
+    final callLogGranted = _permissions?[DataPermissionType.callLog] ==
+        DataPermissionStatus.granted;
+    final callLogRestricted = _permissions?[DataPermissionType.callLog] ==
+        DataPermissionStatus.restricted;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -354,30 +360,52 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Permissions',
-              style:
-                  TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            Row(
+              children: [
+                const Text(
+                  'Permissions',
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _requestPermissions,
+                  child: const Text('Request All'),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _PermissionChip(
                   label: 'Contacts',
                   granted: contactsGranted,
                 ),
-                const SizedBox(width: 8),
                 _PermissionChip(
                   label: 'Calendar',
                   granted: calendarGranted,
                 ),
-                const Spacer(),
-                TextButton(
-                  onPressed: _requestPermissions,
-                  child: const Text('Request'),
+                _PermissionChip(
+                  label: 'Photos',
+                  granted: photosGranted,
+                ),
+                _PermissionChip(
+                  label: 'Call Log',
+                  granted: callLogGranted,
+                  restricted: callLogRestricted,
                 ),
               ],
             ),
+            if (callLogRestricted)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Note: Call log is not available on iOS',
+                  style: TextStyle(fontSize: 11, color: Colors.white54, fontStyle: FontStyle.italic),
+                ),
+              ),
           ],
         ),
       ),
@@ -606,6 +634,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
 
   Color _getTypeColor(String type) {
     switch (type.toUpperCase()) {
+      case 'SELF':
+        return Colors.amber; // Golden color for "You" node
       case 'PERSON':
         return Colors.blue;
       case 'ORGANIZATION':
@@ -614,6 +644,10 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return Colors.orange;
       case 'LOCATION':
         return Colors.purple;
+      case 'PHOTO':
+        return Colors.pink;
+      case 'PHONE_CALL':
+        return Colors.teal;
       default:
         return Colors.grey;
     }
@@ -660,19 +694,31 @@ class _PermissionChip extends StatelessWidget {
   const _PermissionChip({
     required this.label,
     required this.granted,
+    this.restricted = false,
   });
 
   final String label;
   final bool granted;
+  final bool restricted;
 
   @override
   Widget build(BuildContext context) {
+    final IconData icon;
+    final Color color;
+    
+    if (restricted) {
+      icon = Icons.block;
+      color = Colors.grey;
+    } else if (granted) {
+      icon = Icons.check_circle;
+      color = Colors.green;
+    } else {
+      icon = Icons.cancel;
+      color = Colors.red;
+    }
+    
     return Chip(
-      avatar: Icon(
-        granted ? Icons.check_circle : Icons.cancel,
-        color: granted ? Colors.green : Colors.red,
-        size: 18,
-      ),
+      avatar: Icon(icon, color: color, size: 18),
       label: Text(label),
       backgroundColor: const Color(0xFF0b2351),
     );

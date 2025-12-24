@@ -21,6 +21,8 @@ class GraphNode {
 
   Color get color {
     switch (type.toUpperCase()) {
+      case 'SELF':
+        return Colors.amber; // "You" central node
       case 'PERSON':
         return Colors.blue;
       case 'ORGANIZATION':
@@ -29,6 +31,10 @@ class GraphNode {
         return Colors.orange;
       case 'LOCATION':
         return Colors.purple;
+      case 'PHOTO':
+        return Colors.pink;
+      case 'PHONE_CALL':
+        return Colors.teal;
       default:
         return Colors.grey;
     }
@@ -36,6 +42,8 @@ class GraphNode {
 
   IconData get icon {
     switch (type.toUpperCase()) {
+      case 'SELF':
+        return Icons.account_circle; // "You" central node
       case 'PERSON':
         return Icons.person;
       case 'ORGANIZATION':
@@ -44,6 +52,10 @@ class GraphNode {
         return Icons.event;
       case 'LOCATION':
         return Icons.location_on;
+      case 'PHOTO':
+        return Icons.photo;
+      case 'PHONE_CALL':
+        return Icons.phone;
       default:
         return Icons.circle;
     }
