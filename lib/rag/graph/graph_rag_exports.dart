@@ -144,3 +144,13 @@ export 'background_indexing.dart'
         IndexingProgress,
         IndexingConfig,
         BackgroundIndexingService;
+// Link prediction
+export 'link_prediction.dart'
+    show
+        DataSourceTypes,
+        YouEntity,
+        YouRelationshipTypes,
+        LinkPredictionConfig,
+        PredictedLink,
+        LinkPredictor,
+        LinkPredictorBatch;

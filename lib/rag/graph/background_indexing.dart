@@ -5,6 +5,7 @@ import '../connectors/data_connector.dart';
 import 'graph_repository.dart';
 import 'entity_extractor.dart';
 import 'community_detection.dart';
+import 'link_prediction.dart';
 
 /// Indexing job status
 enum IndexingStatus {
@@ -24,6 +25,7 @@ class IndexingProgress {
   final int totalItems;
   final int extractedEntities;
   final int extractedRelationships;
+  final int predictedLinks;
   final int detectedCommunities;
   final DateTime? startTime;
   final DateTime? endTime;
@@ -36,6 +38,7 @@ class IndexingProgress {
     this.totalItems = 0,
     this.extractedEntities = 0,
     this.extractedRelationships = 0,
+    this.predictedLinks = 0,
     this.detectedCommunities = 0,
     this.startTime,
     this.endTime,
@@ -55,6 +58,7 @@ class IndexingProgress {
     int? totalItems,
     int? extractedEntities,
     int? extractedRelationships,
+    int? predictedLinks,
     int? detectedCommunities,
     DateTime? startTime,
     DateTime? endTime,
@@ -67,6 +71,7 @@ class IndexingProgress {
       totalItems: totalItems ?? this.totalItems,
       extractedEntities: extractedEntities ?? this.extractedEntities,
       extractedRelationships: extractedRelationships ?? this.extractedRelationships,
+      predictedLinks: predictedLinks ?? this.predictedLinks,
       detectedCommunities: detectedCommunities ?? this.detectedCommunities,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
@@ -97,6 +102,12 @@ class IndexingConfig {
   
   /// Interval for periodic re-indexing
   final Duration? reindexInterval;
+  
+  /// Whether to enable link prediction (template-based + co-mention)
+  final bool enableLinkPrediction;
+  
+  /// Link prediction configuration
+  final LinkPredictionConfig? linkPredictionConfig;
 
   IndexingConfig({
     this.batchSize = 10,
@@ -106,6 +117,8 @@ class IndexingConfig {
     this.generateSummaries = true,
     this.incrementalIndexing = true,
     this.reindexInterval,
+    this.enableLinkPrediction = true,
+    this.linkPredictionConfig,
   });
 }
 
@@ -118,6 +131,8 @@ class BackgroundIndexingService {
   
   late final LouvainCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
+  late final LinkPredictor? _linkPredictor;
+  late final Future<List<double>> Function(String text) _embeddingCallback;
   final PlatformService _platform = PlatformService();
   
   IndexingProgress _progress = IndexingProgress(
@@ -130,6 +145,9 @@ class BackgroundIndexingService {
   bool _cancelRequested = false;
   Completer<void>? _currentJob;
   bool _useForegroundService = true;
+  
+  // Accumulate extractions for co-mention detection
+  final List<ExtractionResult> _batchExtractions = [];
 
   BackgroundIndexingService({
     required this.repository,
@@ -139,6 +157,8 @@ class BackgroundIndexingService {
     required Future<List<double>> Function(String text) embeddingCallback,
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
+    _embeddingCallback = embeddingCallback;
+    
     _communityDetector = LouvainCommunityDetector(
       config: CommunityDetectionConfig(maxDepth: this.config.maxCommunityDepth),
     );
@@ -147,6 +167,14 @@ class BackgroundIndexingService {
       _summarizer = CommunitySummarizer(
         llmCallback: llmCallback,
         embeddingCallback: embeddingCallback,
+      );
+    }
+    
+    // Initialize link predictor if enabled
+    if (this.config.enableLinkPrediction) {
+      _linkPredictor = LinkPredictor(
+        repository: repository,
+        config: this.config.linkPredictionConfig,
       );
     }
     
@@ -198,13 +226,29 @@ class BackgroundIndexingService {
         totalItems: 0,
         extractedEntities: 0,
         extractedRelationships: 0,
+        predictedLinks: 0,
         detectedCommunities: 0,
         errorMessage: null,
       ));
+      
+      // Clear batch extractions for new indexing run
+      _batchExtractions.clear();
+
+      // Phase 0: Initialize "You" central node
+      if (config.enableLinkPrediction && _linkPredictor != null) {
+        await _initializeYouNodePhase();
+        if (_cancelRequested) return;
+      }
 
       // Phase 1: Fetch data from connectors
       await _fetchDataPhase(fullReindex);
       if (_cancelRequested) return;
+      
+      // Phase 1.5: Link prediction (after entity extraction)
+      if (config.enableLinkPrediction && _linkPredictor != null) {
+        await _linkPredictionPhase();
+        if (_cancelRequested) return;
+      }
 
       // Phase 2: Detect communities
       if (config.detectCommunities) {
@@ -490,6 +534,19 @@ class BackgroundIndexingService {
           extractedEntities: _progress.extractedEntities + extraction.entities.length,
           extractedRelationships: _progress.extractedRelationships + extraction.relationships.length,
         ));
+        
+        // Accumulate extraction for co-mention detection
+        if (config.enableLinkPrediction) {
+          _batchExtractions.add(extraction);
+        }
+        
+        // Create "You" links for primary entity of this item
+        if (config.enableLinkPrediction && _linkPredictor != null) {
+          await _createYouLinksForItem(itemMap, dataType, extraction);
+          
+          // Also run template-based inference for this item
+          await _applyTemplateInference(itemMap, dataType);
+        }
       } catch (e) {
         // Log error but continue processing - errors are silently ignored
         // to allow batch processing to continue
@@ -500,6 +557,213 @@ class BackgroundIndexingService {
         }());
       }
     }
+  }
+  
+  /// Phase 0: Initialize the "You" central node
+  Future<void> _initializeYouNodePhase() async {
+    _updateProgress(_progress.copyWith(
+      currentPhase: 'Creating central node',
+    ));
+    
+    print('[BackgroundIndexing] Creating "You" central node');
+    await _linkPredictor!.ensureYouEntityExists(
+      embeddingCallback: _embeddingCallback,
+    );
+  }
+  
+  /// Create links from "You" to the primary entity of an item
+  Future<void> _createYouLinksForItem(
+    Map<String, dynamic> itemMap,
+    String dataType,
+    ExtractionResult extraction,
+  ) async {
+    if (_linkPredictor == null) return;
+    
+    // Determine the primary entity based on data type
+    String? primaryEntityId;
+    
+    switch (dataType.toUpperCase()) {
+      case 'CONTACT':
+      case 'CONTACTS':
+        // Link "You" -> Person
+        final name = itemMap['fullName'] ?? itemMap['name'];
+        if (name != null && name.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(name.toString(), 'PERSON');
+        }
+        break;
+        
+      case 'CALENDAR':
+      case 'CALENDAR_EVENT':
+      case 'EVENT':
+        // Link "You" -> Event
+        final title = itemMap['title'] ?? itemMap['summary'];
+        if (title != null && title.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(title.toString(), 'EVENT');
+        }
+        break;
+        
+      case 'DOCUMENT':
+      case 'DOCUMENTS':
+      case 'DRIVE':
+        // Link "You" -> Document
+        final name = itemMap['name'] ?? itemMap['title'];
+        if (name != null && name.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(name.toString(), 'DOCUMENT');
+        }
+        break;
+        
+      case 'PHOTO':
+      case 'PHOTOS':
+        // Link "You" -> Photo
+        final id = itemMap['id'] ?? itemMap['name'];
+        if (id != null && id.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(id.toString(), 'PHOTO');
+        }
+        break;
+        
+      case 'PHONE_CALL':
+      case 'PHONE_CALLS':
+      case 'CALL':
+      case 'CALLS':
+        // Link "You" -> the person called (not the call itself)
+        final contactName = itemMap['contactName'] ?? itemMap['name'];
+        if (contactName != null && contactName.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(contactName.toString(), 'PERSON');
+        }
+        break;
+        
+      case 'NOTE':
+      case 'NOTES':
+        // Link "You" -> Note
+        final title = itemMap['title'] ?? itemMap['name'];
+        if (title != null && title.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(title.toString(), 'NOTE');
+        }
+        break;
+    }
+    
+    // Create the "You" link if we have a primary entity
+    if (primaryEntityId != null) {
+      final youLink = await _linkPredictor.linkToYou(
+        entityId: primaryEntityId,
+        dataSourceType: dataType,
+      );
+      
+      if (youLink != null) {
+        try {
+          await repository.addRelationship(youLink.toRelationship());
+          _updateProgress(_progress.copyWith(
+            predictedLinks: _progress.predictedLinks + 1,
+          ));
+          assert(() {
+            print('[BackgroundIndexing] Added "You" link to $primaryEntityId');
+            return true;
+          }());
+        } catch (e) {
+          // Link might already exist
+          assert(() {
+            print('[BackgroundIndexing] "You" link error: $e');
+            return true;
+          }());
+        }
+      }
+    }
+  }
+  
+  /// Apply template-based inference for an item
+  /// Creates deterministic links based on structured data fields
+  Future<void> _applyTemplateInference(
+    Map<String, dynamic> itemMap,
+    String dataType,
+  ) async {
+    if (_linkPredictor == null) return;
+    
+    final templateLinks = _linkPredictor.inferFromStructured(itemMap, dataType);
+    
+    if (templateLinks.isEmpty) return;
+    
+    var stored = 0;
+    for (final link in templateLinks) {
+      try {
+        // Check if both entities exist before creating the relationship
+        final source = await repository.getEntity(link.sourceEntityId);
+        final target = await repository.getEntity(link.targetEntityId);
+        
+        if (source != null && target != null) {
+          await repository.addRelationship(link.toRelationship());
+          stored++;
+        }
+      } catch (e) {
+        // Link might already exist, ignore
+      }
+    }
+    
+    if (stored > 0) {
+      _updateProgress(_progress.copyWith(
+        predictedLinks: _progress.predictedLinks + stored,
+      ));
+      assert(() {
+        print('[BackgroundIndexing] Applied $stored template-based links for $dataType');
+        return true;
+      }());
+    }
+  }
+  
+  /// Phase 1.5: Link prediction (template-based + co-mention)
+  Future<void> _linkPredictionPhase() async {
+    if (_linkPredictor == null) return;
+    
+    _updateProgress(_progress.copyWith(
+      currentPhase: 'Predicting links',
+    ));
+    
+    print('[BackgroundIndexing] Starting link prediction phase');
+    print('[BackgroundIndexing] Processing ${_batchExtractions.length} extractions for co-mention detection');
+    
+    // 1. Detect co-mentions across all extractions
+    final coMentionLinks = await _linkPredictor.detectCoMentions(
+      extractions: _batchExtractions,
+    );
+    print('[BackgroundIndexing] Detected ${coMentionLinks.length} co-mention links');
+    
+    // 2. Store co-mention links
+    var storedCoMentions = 0;
+    for (final link in coMentionLinks) {
+      try {
+        // Check if both entities exist
+        final source = await repository.getEntity(link.sourceEntityId);
+        final target = await repository.getEntity(link.targetEntityId);
+        
+        if (source != null && target != null) {
+          await repository.addRelationship(link.toRelationship());
+          storedCoMentions++;
+        }
+      } catch (e) {
+        // Link might already exist
+      }
+    }
+    print('[BackgroundIndexing] Stored $storedCoMentions co-mention links');
+    
+    // 3. Infer colleague relationships from shared organizations
+    final colleagueLinks = await _linkPredictor.inferColleagueRelationships();
+    print('[BackgroundIndexing] Inferred ${colleagueLinks.length} colleague relationships');
+    
+    var storedColleagues = 0;
+    for (final link in colleagueLinks) {
+      try {
+        await repository.addRelationship(link.toRelationship());
+        storedColleagues++;
+      } catch (e) {
+        // Link might already exist
+      }
+    }
+    print('[BackgroundIndexing] Stored $storedColleagues colleague links');
+    
+    _updateProgress(_progress.copyWith(
+      predictedLinks: _progress.predictedLinks + storedCoMentions + storedColleagues,
+    ));
+    
+    print('[BackgroundIndexing] Link prediction phase complete');
   }
 
   /// Phase 2: Detect communities
@@ -515,10 +779,13 @@ class BackgroundIndexingService {
     final relationships = <GraphRelationship>[];
 
     // Load all entities (simplified - in production, use pagination)
-    for (final type in ['PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION']) {
+    // Include SELF type for the "You" central node, plus all data types
+    for (final type in ['SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION', 'DOCUMENT', 'PHOTO', 'NOTE', 'TOPIC', 'PROJECT']) {
       final typeEntities = await repository.getEntitiesByType(type);
       entities.addAll(typeEntities);
-      print('[BackgroundIndexing] Loaded ${typeEntities.length} $type entities');
+      if (typeEntities.isNotEmpty) {
+        print('[BackgroundIndexing] Loaded ${typeEntities.length} $type entities');
+      }
     }
     
     print('[BackgroundIndexing] Total entities for community detection: ${entities.length}');
