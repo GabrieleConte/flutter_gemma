@@ -195,6 +195,52 @@ struct EntityResult {
   }
 }
 
+/// Entity result with embedding included (for similarity calculations)
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct EntityWithEmbedding {
+  var id: String
+  var name: String
+  var type: String
+  var description: String? = nil
+  var metadata: String? = nil
+  var lastModified: Int64
+  var embedding: [Double]
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> EntityWithEmbedding? {
+    let id = pigeonVar_list[0] as! String
+    let name = pigeonVar_list[1] as! String
+    let type = pigeonVar_list[2] as! String
+    let description: String? = nilOrValue(pigeonVar_list[3])
+    let metadata: String? = nilOrValue(pigeonVar_list[4])
+    let lastModified = pigeonVar_list[5] as! Int64
+    let embedding = pigeonVar_list[6] as! [Double]
+
+    return EntityWithEmbedding(
+      id: id,
+      name: name,
+      type: type,
+      description: description,
+      metadata: metadata,
+      lastModified: lastModified,
+      embedding: embedding
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      name,
+      type,
+      description,
+      metadata,
+      lastModified,
+      embedding,
+    ]
+  }
+}
+
 /// Generated class from Pigeon that represents data sent in messages.
 struct RelationshipResult {
   var id: String
@@ -797,32 +843,34 @@ private class PigeonInterfacePigeonCodecReader: FlutterStandardReader {
     case 135:
       return EntityResult.fromList(self.readValue() as! [Any?])
     case 136:
-      return RelationshipResult.fromList(self.readValue() as! [Any?])
+      return EntityWithEmbedding.fromList(self.readValue() as! [Any?])
     case 137:
-      return CommunityResult.fromList(self.readValue() as! [Any?])
+      return RelationshipResult.fromList(self.readValue() as! [Any?])
     case 138:
-      return GraphStats.fromList(self.readValue() as! [Any?])
+      return CommunityResult.fromList(self.readValue() as! [Any?])
     case 139:
-      return ContactResult.fromList(self.readValue() as! [Any?])
+      return GraphStats.fromList(self.readValue() as! [Any?])
     case 140:
-      return CalendarEventResult.fromList(self.readValue() as! [Any?])
+      return ContactResult.fromList(self.readValue() as! [Any?])
     case 141:
-      return GraphQueryResult.fromList(self.readValue() as! [Any?])
+      return CalendarEventResult.fromList(self.readValue() as! [Any?])
     case 142:
-      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
+      return GraphQueryResult.fromList(self.readValue() as! [Any?])
     case 143:
-      return CommunityWithScoreResult.fromList(self.readValue() as! [Any?])
+      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
     case 144:
-      return PhotoResult.fromList(self.readValue() as! [Any?])
+      return CommunityWithScoreResult.fromList(self.readValue() as! [Any?])
     case 145:
-      return CallLogResult.fromList(self.readValue() as! [Any?])
+      return PhotoResult.fromList(self.readValue() as! [Any?])
     case 146:
-      return DetectedFace.fromList(self.readValue() as! [Any?])
+      return CallLogResult.fromList(self.readValue() as! [Any?])
     case 147:
-      return DetectedObject.fromList(self.readValue() as! [Any?])
+      return DetectedFace.fromList(self.readValue() as! [Any?])
     case 148:
-      return DetectedText.fromList(self.readValue() as! [Any?])
+      return DetectedObject.fromList(self.readValue() as! [Any?])
     case 149:
+      return DetectedText.fromList(self.readValue() as! [Any?])
+    case 150:
       return PhotoAnalysisResult.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -853,47 +901,50 @@ private class PigeonInterfacePigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? EntityResult {
       super.writeByte(135)
       super.writeValue(value.toList())
-    } else if let value = value as? RelationshipResult {
+    } else if let value = value as? EntityWithEmbedding {
       super.writeByte(136)
       super.writeValue(value.toList())
-    } else if let value = value as? CommunityResult {
+    } else if let value = value as? RelationshipResult {
       super.writeByte(137)
       super.writeValue(value.toList())
-    } else if let value = value as? GraphStats {
+    } else if let value = value as? CommunityResult {
       super.writeByte(138)
       super.writeValue(value.toList())
-    } else if let value = value as? ContactResult {
+    } else if let value = value as? GraphStats {
       super.writeByte(139)
       super.writeValue(value.toList())
-    } else if let value = value as? CalendarEventResult {
+    } else if let value = value as? ContactResult {
       super.writeByte(140)
       super.writeValue(value.toList())
-    } else if let value = value as? GraphQueryResult {
+    } else if let value = value as? CalendarEventResult {
       super.writeByte(141)
       super.writeValue(value.toList())
-    } else if let value = value as? EntityWithScoreResult {
+    } else if let value = value as? GraphQueryResult {
       super.writeByte(142)
       super.writeValue(value.toList())
-    } else if let value = value as? CommunityWithScoreResult {
+    } else if let value = value as? EntityWithScoreResult {
       super.writeByte(143)
       super.writeValue(value.toList())
-    } else if let value = value as? PhotoResult {
+    } else if let value = value as? CommunityWithScoreResult {
       super.writeByte(144)
       super.writeValue(value.toList())
-    } else if let value = value as? CallLogResult {
+    } else if let value = value as? PhotoResult {
       super.writeByte(145)
       super.writeValue(value.toList())
-    } else if let value = value as? DetectedFace {
+    } else if let value = value as? CallLogResult {
       super.writeByte(146)
       super.writeValue(value.toList())
-    } else if let value = value as? DetectedObject {
+    } else if let value = value as? DetectedFace {
       super.writeByte(147)
       super.writeValue(value.toList())
-    } else if let value = value as? DetectedText {
+    } else if let value = value as? DetectedObject {
       super.writeByte(148)
       super.writeValue(value.toList())
-    } else if let value = value as? PhotoAnalysisResult {
+    } else if let value = value as? DetectedText {
       super.writeByte(149)
+      super.writeValue(value.toList())
+    } else if let value = value as? PhotoAnalysisResult {
+      super.writeByte(150)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -945,6 +996,7 @@ protocol PlatformService {
   func deleteEntity(id: String, completion: @escaping (Result<Void, Error>) -> Void)
   func getEntity(id: String, completion: @escaping (Result<EntityResult?, Error>) -> Void)
   func getEntitiesByType(type: String, completion: @escaping (Result<[EntityResult], Error>) -> Void)
+  func getEntitiesWithEmbeddingsByType(type: String, completion: @escaping (Result<[EntityWithEmbedding], Error>) -> Void)
   func addRelationship(id: String, sourceId: String, targetId: String, type: String, weight: Double, metadata: String?, completion: @escaping (Result<Void, Error>) -> Void)
   func deleteRelationship(id: String, completion: @escaping (Result<Void, Error>) -> Void)
   func getRelationships(entityId: String, completion: @escaping (Result<[RelationshipResult], Error>) -> Void)
@@ -1443,6 +1495,23 @@ class PlatformServiceSetup {
       }
     } else {
       getEntitiesByTypeChannel.setMessageHandler(nil)
+    }
+    let getEntitiesWithEmbeddingsByTypeChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesWithEmbeddingsByType\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getEntitiesWithEmbeddingsByTypeChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let typeArg = args[0] as! String
+        api.getEntitiesWithEmbeddingsByType(type: typeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getEntitiesWithEmbeddingsByTypeChannel.setMessageHandler(nil)
     }
     let addRelationshipChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.addRelationship\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

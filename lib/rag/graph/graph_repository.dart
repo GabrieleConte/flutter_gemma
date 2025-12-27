@@ -37,6 +37,21 @@ class GraphEntity {
     );
   }
 
+  /// Create from EntityWithEmbedding - includes embedding from native layer
+  factory GraphEntity.fromEntityWithEmbedding(EntityWithEmbedding result) {
+    return GraphEntity(
+      id: result.id,
+      name: result.name,
+      type: result.type,
+      embedding: result.embedding,
+      description: result.description,
+      metadata: result.metadata != null
+          ? _parseMetadataJson(result.metadata!)
+          : null,
+      lastModified: DateTime.fromMillisecondsSinceEpoch(result.lastModified),
+    );
+  }
+
   @override
   String toString() =>
       'GraphEntity(id: $id, name: $name, type: $type, description: $description)';
@@ -201,6 +216,8 @@ abstract class GraphRepository {
   Future<void> deleteEntity(String id);
   Future<GraphEntity?> getEntity(String id);
   Future<List<GraphEntity>> getEntitiesByType(String type);
+  /// Get entities with embeddings (for similarity calculations)
+  Future<List<GraphEntity>> getEntitiesWithEmbeddingsByType(String type);
 
   // Relationship operations
   Future<void> addRelationship(GraphRelationship relationship);
@@ -319,6 +336,13 @@ class NativeGraphRepository implements GraphRepository {
     _checkInitialized();
     final results = await _platform.getEntitiesByType(type);
     return results.map((r) => GraphEntity.fromEntityResult(r)).toList();
+  }
+
+  @override
+  Future<List<GraphEntity>> getEntitiesWithEmbeddingsByType(String type) async {
+    _checkInitialized();
+    final results = await _platform.getEntitiesWithEmbeddingsByType(type);
+    return results.map((r) => GraphEntity.fromEntityWithEmbedding(r)).toList();
   }
 
   @override

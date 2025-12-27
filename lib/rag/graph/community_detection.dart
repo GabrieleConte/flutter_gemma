@@ -551,6 +551,12 @@ class CommunitySummarizer {
     required this.embeddingCallback,
   });
 
+  /// Maximum entities to include in a summary prompt to avoid token overflow
+  static const int _maxEntitiesInPrompt = 20;
+  
+  /// Maximum relationships to include in a summary prompt
+  static const int _maxRelationshipsInPrompt = 30;
+
   /// Generate summary for a community
   Future<CommunitySummary> summarize(
     DetectedCommunity community,
@@ -558,16 +564,27 @@ class CommunitySummarizer {
     List<GraphRelationship> relationships,
   ) async {
     // Get entities in this community
-    final communityEntities = entities
+    var communityEntities = entities
         .where((e) => community.entityIds.contains(e.id))
         .toList();
     
     // Get relationships between entities in this community
-    final communityRelationships = relationships
+    var communityRelationships = relationships
         .where((r) => 
             community.entityIds.contains(r.sourceId) &&
             community.entityIds.contains(r.targetId))
         .toList();
+    
+    // Limit entities and relationships to prevent token overflow
+    // The LLM has limited context (1024 tokens), so we truncate large communities
+    if (communityEntities.length > _maxEntitiesInPrompt) {
+      print('[CommunitySummarizer] Truncating ${communityEntities.length} entities to $_maxEntitiesInPrompt');
+      communityEntities = communityEntities.take(_maxEntitiesInPrompt).toList();
+    }
+    if (communityRelationships.length > _maxRelationshipsInPrompt) {
+      print('[CommunitySummarizer] Truncating ${communityRelationships.length} relationships to $_maxRelationshipsInPrompt');
+      communityRelationships = communityRelationships.take(_maxRelationshipsInPrompt).toList();
+    }
     
     // Build prompt
     final entityNames = communityEntities.map((e) => e.name).toList();

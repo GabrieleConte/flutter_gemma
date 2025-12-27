@@ -186,6 +186,46 @@ data class EntityResult (
   }
 }
 
+/**
+ * Entity result with embedding included (for similarity calculations)
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class EntityWithEmbedding (
+  val id: String,
+  val name: String,
+  val type: String,
+  val description: String? = null,
+  val metadata: String? = null,
+  val lastModified: Long,
+  val embedding: List<Double>
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): EntityWithEmbedding {
+      val id = pigeonVar_list[0] as String
+      val name = pigeonVar_list[1] as String
+      val type = pigeonVar_list[2] as String
+      val description = pigeonVar_list[3] as String?
+      val metadata = pigeonVar_list[4] as String?
+      val lastModified = pigeonVar_list[5] as Long
+      val embedding = pigeonVar_list[6] as List<Double>
+      return EntityWithEmbedding(id, name, type, description, metadata, lastModified, embedding)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      name,
+      type,
+      description,
+      metadata,
+      lastModified,
+      embedding,
+    )
+  }
+}
+
 /** Generated class from Pigeon that represents data sent in messages. */
 data class RelationshipResult (
   val id: String,
@@ -693,70 +733,75 @@ private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
       }
       136.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          RelationshipResult.fromList(it)
+          EntityWithEmbedding.fromList(it)
         }
       }
       137.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CommunityResult.fromList(it)
+          RelationshipResult.fromList(it)
         }
       }
       138.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          GraphStats.fromList(it)
+          CommunityResult.fromList(it)
         }
       }
       139.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          ContactResult.fromList(it)
+          GraphStats.fromList(it)
         }
       }
       140.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CalendarEventResult.fromList(it)
+          ContactResult.fromList(it)
         }
       }
       141.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          GraphQueryResult.fromList(it)
+          CalendarEventResult.fromList(it)
         }
       }
       142.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          EntityWithScoreResult.fromList(it)
+          GraphQueryResult.fromList(it)
         }
       }
       143.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CommunityWithScoreResult.fromList(it)
+          EntityWithScoreResult.fromList(it)
         }
       }
       144.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          PhotoResult.fromList(it)
+          CommunityWithScoreResult.fromList(it)
         }
       }
       145.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CallLogResult.fromList(it)
+          PhotoResult.fromList(it)
         }
       }
       146.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          DetectedFace.fromList(it)
+          CallLogResult.fromList(it)
         }
       }
       147.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          DetectedObject.fromList(it)
+          DetectedFace.fromList(it)
         }
       }
       148.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          DetectedText.fromList(it)
+          DetectedObject.fromList(it)
         }
       }
       149.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          DetectedText.fromList(it)
+        }
+      }
+      150.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           PhotoAnalysisResult.fromList(it)
         }
@@ -794,60 +839,64 @@ private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
         stream.write(135)
         writeValue(stream, value.toList())
       }
-      is RelationshipResult -> {
+      is EntityWithEmbedding -> {
         stream.write(136)
         writeValue(stream, value.toList())
       }
-      is CommunityResult -> {
+      is RelationshipResult -> {
         stream.write(137)
         writeValue(stream, value.toList())
       }
-      is GraphStats -> {
+      is CommunityResult -> {
         stream.write(138)
         writeValue(stream, value.toList())
       }
-      is ContactResult -> {
+      is GraphStats -> {
         stream.write(139)
         writeValue(stream, value.toList())
       }
-      is CalendarEventResult -> {
+      is ContactResult -> {
         stream.write(140)
         writeValue(stream, value.toList())
       }
-      is GraphQueryResult -> {
+      is CalendarEventResult -> {
         stream.write(141)
         writeValue(stream, value.toList())
       }
-      is EntityWithScoreResult -> {
+      is GraphQueryResult -> {
         stream.write(142)
         writeValue(stream, value.toList())
       }
-      is CommunityWithScoreResult -> {
+      is EntityWithScoreResult -> {
         stream.write(143)
         writeValue(stream, value.toList())
       }
-      is PhotoResult -> {
+      is CommunityWithScoreResult -> {
         stream.write(144)
         writeValue(stream, value.toList())
       }
-      is CallLogResult -> {
+      is PhotoResult -> {
         stream.write(145)
         writeValue(stream, value.toList())
       }
-      is DetectedFace -> {
+      is CallLogResult -> {
         stream.write(146)
         writeValue(stream, value.toList())
       }
-      is DetectedObject -> {
+      is DetectedFace -> {
         stream.write(147)
         writeValue(stream, value.toList())
       }
-      is DetectedText -> {
+      is DetectedObject -> {
         stream.write(148)
         writeValue(stream, value.toList())
       }
-      is PhotoAnalysisResult -> {
+      is DetectedText -> {
         stream.write(149)
+        writeValue(stream, value.toList())
+      }
+      is PhotoAnalysisResult -> {
+        stream.write(150)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -885,6 +934,7 @@ interface PlatformService {
   fun deleteEntity(id: String, callback: (Result<Unit>) -> Unit)
   fun getEntity(id: String, callback: (Result<EntityResult?>) -> Unit)
   fun getEntitiesByType(type: String, callback: (Result<List<EntityResult>>) -> Unit)
+  fun getEntitiesWithEmbeddingsByType(type: String, callback: (Result<List<EntityWithEmbedding>>) -> Unit)
   fun addRelationship(id: String, sourceId: String, targetId: String, type: String, weight: Double, metadata: String?, callback: (Result<Unit>) -> Unit)
   fun deleteRelationship(id: String, callback: (Result<Unit>) -> Unit)
   fun getRelationships(entityId: String, callback: (Result<List<RelationshipResult>>) -> Unit)
@@ -1436,6 +1486,26 @@ interface PlatformService {
             val args = message as List<Any?>
             val typeArg = args[0] as String
             api.getEntitiesByType(typeArg) { result: Result<List<EntityResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesWithEmbeddingsByType$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val typeArg = args[0] as String
+            api.getEntitiesWithEmbeddingsByType(typeArg) { result: Result<List<EntityWithEmbedding>> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

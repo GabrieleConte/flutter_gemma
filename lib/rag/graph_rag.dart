@@ -464,9 +464,12 @@ class GraphRAG {
   }
 
   /// Clear the entire graph
+  /// Also resets connector sync times so next indexing fetches all data
   Future<void> clearGraph() async {
     _checkInitialized();
     await _repository.clear();
+    // Reset connector sync times so next "Start" fetches all data
+    await _connectorManager.resetSyncState();
   }
 
   // === Entity Extraction ===

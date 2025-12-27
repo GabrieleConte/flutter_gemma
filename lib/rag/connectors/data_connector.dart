@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../pigeon.g.dart';
 
 /// Permission status for data access
@@ -695,10 +697,48 @@ class CallLogConnector implements DataConnector {
 class ConnectorManager {
   final Map<String, DataConnector> _connectors = {};
   final Map<String, DateTime?> _lastSyncTimes = {};
+  SharedPreferences? _prefs;
+  bool _initialized = false;
+  static const String _syncTimePrefix = 'flutter_gemma_sync_';
+
+  /// Initialize the manager and load persisted sync times
+  Future<void> initialize() async {
+    if (_initialized) return;
+    _prefs = await SharedPreferences.getInstance();
+    await _loadSyncTimes();
+    _initialized = true;
+  }
+
+  /// Load sync times from persistent storage
+  Future<void> _loadSyncTimes() async {
+    if (_prefs == null) return;
+    for (final key in _connectors.keys) {
+      final timestamp = _prefs!.getInt('$_syncTimePrefix$key');
+      if (timestamp != null) {
+        _lastSyncTimes[key] = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      }
+    }
+  }
+
+  /// Save sync time to persistent storage
+  Future<void> _saveSyncTime(String dataType, DateTime time) async {
+    _lastSyncTimes[dataType] = time;
+    await _prefs?.setInt(
+      '$_syncTimePrefix$dataType',
+      time.millisecondsSinceEpoch,
+    );
+  }
 
   /// Register a data connector
   void registerConnector(DataConnector connector) {
     _connectors[connector.dataType] = connector;
+    // Load persisted sync time for this connector if already initialized
+    if (_prefs != null) {
+      final timestamp = _prefs!.getInt('$_syncTimePrefix${connector.dataType}');
+      if (timestamp != null) {
+        _lastSyncTimes[connector.dataType] = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      }
+    }
   }
 
   /// Get a registered connector by type
@@ -734,6 +774,9 @@ class ConnectorManager {
     bool incrementalSync = true,
     int? limit,
   }) async {
+    // Ensure initialized before fetching
+    await initialize();
+    
     final connector = _connectors[dataType];
     if (connector == null) {
       throw ArgumentError('Unknown connector type: $dataType');
@@ -752,7 +795,8 @@ class ConnectorManager {
       limit: limit ?? connector.config.batchSize,
     );
     
-    _lastSyncTimes[dataType] = DateTime.now();
+    // Persist sync time
+    await _saveSyncTime(dataType, DateTime.now());
     return data;
   }
 
@@ -784,11 +828,23 @@ class ConnectorManager {
   DateTime? getLastSyncTime(String dataType) => _lastSyncTimes[dataType];
 
   /// Reset sync state for incremental sync
-  void resetSyncState([String? dataType]) {
+  /// If [dataType] is provided, only that connector's state is reset
+  /// Otherwise, all sync states are reset
+  Future<void> resetSyncState([String? dataType]) async {
     if (dataType != null) {
       _lastSyncTimes.remove(dataType);
+      await _prefs?.remove('$_syncTimePrefix$dataType');
     } else {
       _lastSyncTimes.clear();
+      // Clear all persisted sync times
+      if (_prefs != null) {
+        final keys = _prefs!.getKeys()
+            .where((k) => k.startsWith(_syncTimePrefix))
+            .toList();
+        for (final key in keys) {
+          await _prefs!.remove(key);
+        }
+      }
     }
   }
 }

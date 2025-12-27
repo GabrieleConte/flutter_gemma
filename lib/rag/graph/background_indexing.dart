@@ -387,8 +387,23 @@ class BackgroundIndexingService {
       currentPhase: 'Fetching data',
     ));
 
+    // Check if we should force full fetch:
+    // If doing incremental sync but graph is empty (or only has "You" node), 
+    // force a full fetch since there's nothing to increment from
+    var effectiveFullReindex = fullReindex;
+    if (!fullReindex && config.incrementalIndexing) {
+      final stats = await repository.getStats();
+      // If only 0 or 1 entity (just "You" node), force full reindex
+      if (stats.entityCount <= 1) {
+        print('[BackgroundIndexing] Graph is empty, forcing full fetch instead of incremental');
+        effectiveFullReindex = true;
+        // Reset sync times so all data is fetched
+        await connectorManager.resetSyncState();
+      }
+    }
+
     final allData = await connectorManager.fetchAllAvailable(
-      incrementalSync: !fullReindex && config.incrementalIndexing,
+      incrementalSync: !effectiveFullReindex && config.incrementalIndexing,
     );
 
     // Calculate total items
@@ -438,6 +453,23 @@ class BackgroundIndexingService {
         // Convert item to map for extraction
         final itemMap = _itemToMap(item, dataType);
         final sourceId = _getItemId(item, dataType);
+
+        // Skip if primary entity already exists (incremental indexing optimization)
+        // This avoids re-extracting and re-processing unchanged items
+        // Since iOS doesn't provide modification timestamps for contacts,
+        // we check if the entity exists and skip if so
+        final primaryEntityId = _getPrimaryEntityId(itemMap, dataType);
+        if (primaryEntityId != null) {
+          final existing = await repository.getEntity(primaryEntityId);
+          if (existing != null) {
+            // Entity already indexed, skip processing
+            assert(() {
+              print('[BackgroundIndexing] Skipping already indexed: $primaryEntityId');
+              return true;
+            }());
+            continue;
+          }
+        }
 
         // Choose extraction method based on data type
         // Use direct extraction for structured data (fast, no LLM)
@@ -1115,6 +1147,56 @@ class BackgroundIndexingService {
     final normalized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
     final typePrefix = type.isNotEmpty ? '${type.toLowerCase()}_' : '';
     return '$typePrefix$normalized';
+  }
+
+  /// Get the primary entity ID for an item based on its data type
+  /// Used for incremental indexing to skip already-indexed items
+  String? _getPrimaryEntityId(Map<String, dynamic> itemMap, String dataType) {
+    switch (dataType.toUpperCase()) {
+      case 'CONTACT':
+      case 'CONTACTS':
+        final name = itemMap['fullName'] ?? itemMap['name'];
+        if (name != null && name.toString().isNotEmpty) {
+          return _generateEntityId(name.toString(), 'PERSON');
+        }
+        break;
+      case 'CALENDAR':
+      case 'CALENDAR_EVENT':
+        final title = itemMap['title'];
+        if (title != null && title.toString().isNotEmpty) {
+          return _generateEntityId(title.toString(), 'EVENT');
+        }
+        break;
+      case 'PHOTO':
+      case 'PHOTOS':
+        final id = itemMap['id'] ?? itemMap['localIdentifier'];
+        if (id != null) {
+          return _generateEntityId('photo_$id', 'PHOTO');
+        }
+        break;
+      case 'PHONE_CALL':
+      case 'PHONE_CALLS':
+        final contactName = itemMap['contactName'] ?? itemMap['phoneNumber'];
+        if (contactName != null && contactName.toString().isNotEmpty) {
+          return _generateEntityId(contactName.toString(), 'PHONE_CALL');
+        }
+        break;
+      case 'NOTE':
+      case 'NOTES':
+        final title = itemMap['title'];
+        if (title != null && title.toString().isNotEmpty) {
+          return _generateEntityId(title.toString(), 'NOTE');
+        }
+        break;
+      case 'DOCUMENT':
+      case 'DOCUMENTS':
+        final name = itemMap['name'] ?? itemMap['title'];
+        if (name != null && name.toString().isNotEmpty) {
+          return _generateEntityId(name.toString(), 'DOCUMENT');
+        }
+        break;
+    }
+    return null;
   }
 
   /// Update progress and notify listeners

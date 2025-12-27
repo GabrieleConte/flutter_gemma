@@ -275,6 +275,36 @@ class GraphStore(
         return results
     }
 
+    fun getEntitiesWithEmbeddingsByType(type: String): List<EntityWithEmbedding> {
+        val db = database ?: throw IllegalStateException("Database not initialized")
+
+        val cursor = db.query(
+            TABLE_ENTITIES,
+            arrayOf(COLUMN_ID, COLUMN_NAME, COLUMN_TYPE, COLUMN_DESCRIPTION, COLUMN_METADATA, COLUMN_LAST_MODIFIED, COLUMN_EMBEDDING),
+            "$COLUMN_TYPE = ?",
+            arrayOf(type),
+            null, null, null
+        )
+
+        val results = mutableListOf<EntityWithEmbedding>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val embeddingBlob = it.getBlob(6)
+                val embedding = blobToEmbedding(embeddingBlob)
+                results.add(EntityWithEmbedding(
+                    id = it.getString(0),
+                    name = it.getString(1),
+                    type = it.getString(2),
+                    description = it.getString(3),
+                    metadata = it.getString(4),
+                    lastModified = it.getLong(5),
+                    embedding = embedding
+                ))
+            }
+        }
+        return results
+    }
+
     // MARK: - Relationship Methods
 
     fun addRelationship(

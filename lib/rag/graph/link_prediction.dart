@@ -129,6 +129,11 @@ class LinkPredictionConfig {
   /// Minimum cosine similarity threshold for embedding-based linking (0.0-1.0)
   final double embeddingSimilarityThreshold;
   
+  /// Minimum cosine similarity threshold for same-type entity pairs (0.0-1.0)
+  /// Lower threshold to discover more relationships between entities of the same type
+  /// (e.g., PERSON-PERSON family members, LOCATION-LOCATION nearby places)
+  final double sameTypeSimilarityThreshold;
+  
   /// Maximum number of candidate pairs to evaluate with LLM
   final int maxEmbeddingCandidates;
 
@@ -142,6 +147,7 @@ class LinkPredictionConfig {
     this.enableTemplateLinks = true,
     this.enableEmbeddingSimilarityLinks = true,
     this.embeddingSimilarityThreshold = 0.75,
+    this.sameTypeSimilarityThreshold = 0.55,
     this.maxEmbeddingCandidates = 100,
   });
 }
@@ -894,45 +900,92 @@ class EmbeddingSimilarityLinkPredictor {
   Future<List<EmbeddingCandidate>> findCandidates({
     List<GraphEntity>? entities,
   }) async {
-    if (!config.enableEmbeddingSimilarityLinks) return [];
+    if (!config.enableEmbeddingSimilarityLinks) {
+      print('[EmbeddingSimilarityLinkPredictor] Embedding similarity links disabled');
+      return [];
+    }
 
     // Get all entities with embeddings
     final allEntities = entities ?? await _getAllEntitiesWithEmbeddings();
+    print('[EmbeddingSimilarityLinkPredictor] Total entities fetched: ${allEntities.length}');
     
     // Filter to only entities that have embeddings
     final entitiesWithEmbeddings = allEntities
         .where((e) => e.embedding != null && e.embedding!.isNotEmpty)
         .toList();
     
-    if (entitiesWithEmbeddings.length < 2) return [];
+    print('[EmbeddingSimilarityLinkPredictor] Entities with embeddings: ${entitiesWithEmbeddings.length}');
+    
+    if (entitiesWithEmbeddings.length < 2) {
+      print('[EmbeddingSimilarityLinkPredictor] Not enough entities with embeddings (need at least 2)');
+      return [];
+    }
     
     print('[EmbeddingSimilarityLinkPredictor] Comparing ${entitiesWithEmbeddings.length} entities with embeddings');
+    print('[EmbeddingSimilarityLinkPredictor] Thresholds: same-type=${config.sameTypeSimilarityThreshold}, different-type=${config.embeddingSimilarityThreshold}');
 
     final candidates = <EmbeddingCandidate>[];
     
     // Calculate pairwise similarities
+    var totalComparisons = 0;
+    var skippedYouNode = 0;
+    var belowThreshold = 0;
+    var skippedGenericTypes = 0;
+    var maxSimilarity = 0.0;
+    String? maxPairA, maxPairB;
+    
+    // Skip same-type pairs for these types - they have generic embeddings that make them all appear similar
+    final skipSameTypeForTypes = {'EVENT', 'DATE', 'CALENDAR'};
+    
     for (var i = 0; i < entitiesWithEmbeddings.length; i++) {
       for (var j = i + 1; j < entitiesWithEmbeddings.length; j++) {
         final entityA = entitiesWithEmbeddings[i];
         final entityB = entitiesWithEmbeddings[j];
+        totalComparisons++;
         
-        // Skip if same type (usually less interesting relationships)
-        // and skip if one is the "You" node
+        // Skip if one is the "You" node
         if (entityA.id == 'you_central_node' || entityB.id == 'you_central_node') {
+          skippedYouNode++;
+          continue;
+        }
+        
+        // Skip same-type pairs for EVENT/DATE/CALENDAR - they all look similar but aren't meaningful
+        if (entityA.type == entityB.type && 
+            skipSameTypeForTypes.contains(entityA.type.toUpperCase())) {
+          skippedGenericTypes++;
           continue;
         }
         
         final similarity = MathUtils.cosineSimilarity(entityA.embedding!, entityB.embedding!);
         
-        if (similarity >= config.embeddingSimilarityThreshold) {
+        // Track max similarity for debugging
+        if (similarity > maxSimilarity) {
+          maxSimilarity = similarity;
+          maxPairA = entityA.name;
+          maxPairB = entityB.name;
+        }
+        
+        // Use lower threshold for same-type entity pairs
+        // This helps discover relationships like family members (PERSON-PERSON)
+        final threshold = (entityA.type == entityB.type)
+            ? config.sameTypeSimilarityThreshold
+            : config.embeddingSimilarityThreshold;
+        
+        if (similarity >= threshold) {
+          print('[EmbeddingSimilarityLinkPredictor] Candidate: ${entityA.name} <-> ${entityB.name} (similarity: ${similarity.toStringAsFixed(3)}, threshold: ${threshold})');
           candidates.add(EmbeddingCandidate(
             entityA: entityA,
             entityB: entityB,
             similarity: similarity,
           ));
+        } else {
+          belowThreshold++;
         }
       }
     }
+    
+    print('[EmbeddingSimilarityLinkPredictor] Stats: $totalComparisons comparisons, $skippedYouNode skipped (You node), $skippedGenericTypes skipped (EVENT/DATE), $belowThreshold below threshold');
+    print('[EmbeddingSimilarityLinkPredictor] Max similarity found: ${maxSimilarity.toStringAsFixed(3)} between "$maxPairA" and "$maxPairB"');
     
     // Sort by similarity descending and limit
     candidates.sort((a, b) => b.similarity.compareTo(a.similarity));
@@ -952,20 +1005,72 @@ class EmbeddingSimilarityLinkPredictor {
   ) async {
     final validLinks = <PredictedLink>[];
     
-    for (final candidate in candidates) {
+    print('[EmbeddingSimilarityLinkPredictor] Starting validation for ${candidates.length} candidates');
+    
+    // Separate same-type and cross-type candidates
+    final sameTypeCandidates = candidates.where((c) => c.entityA.type == c.entityB.type).toList();
+    final crossTypeCandidates = candidates.where((c) => c.entityA.type != c.entityB.type).toList();
+    
+    print('[EmbeddingSimilarityLinkPredictor] Same-type candidates: ${sameTypeCandidates.length}, Cross-type: ${crossTypeCandidates.length}');
+    
+    // Process same-type candidates WITHOUT LLM (use embedding similarity as evidence)
+    // This prevents LLM memory exhaustion when there are many same-type pairs
+    // Note: EVENT/DATE/CALENDAR pairs are already filtered out during candidate collection
+    
+    for (final candidate in sameTypeCandidates) {
+      // Check if relationship already exists
+      final existingRels = await repository.getRelationships(candidate.entityA.id);
+      final alreadyLinked = existingRels.any(
+        (r) => r.targetId == candidate.entityB.id || r.sourceId == candidate.entityB.id,
+      );
+      
+      if (alreadyLinked) continue;
+      
+      // Auto-approve same-type pairs above 0.70 similarity (lowered from 0.80 to allow family members)
+      // Family contacts like Mom/Dad/Sister have ~70-73% similarity due to short names without context
+      if (candidate.similarity >= 0.70) {
+        print('[EmbeddingSimilarityLinkPredictor] ✓ Same-type approved: ${candidate.entityA.name} <-> ${candidate.entityB.name} (${(candidate.similarity * 100).toStringAsFixed(1)}%)');
+        validLinks.add(PredictedLink(
+          sourceEntityId: candidate.entityA.id,
+          targetEntityId: candidate.entityB.id,
+          relationshipType: 'RELATED_TO',
+          confidence: candidate.similarity,
+          predictionMethod: 'embedding_similarity_same_type',
+          evidence: {
+            'embeddingSimilarity': candidate.similarity,
+            'explanation': 'High embedding similarity (${(candidate.similarity * 100).toStringAsFixed(1)}%) between same-type entities',
+            'entityAType': candidate.entityA.type,
+            'entityBType': candidate.entityB.type,
+          },
+        ));
+      }
+    }
+    
+    // Process cross-type candidates with LLM validation (limited to top 20)
+    final llmCandidates = crossTypeCandidates.take(20).toList();
+    print('[EmbeddingSimilarityLinkPredictor] Processing ${llmCandidates.length} cross-type candidates with LLM');
+    
+    for (var idx = 0; idx < llmCandidates.length; idx++) {
+      final candidate = llmCandidates[idx];
       try {
+        print('[EmbeddingSimilarityLinkPredictor] Validating ${idx + 1}/${llmCandidates.length}: ${candidate.entityA.name} <-> ${candidate.entityB.name}');
+        
         // Check if relationship already exists
         final existingRels = await repository.getRelationships(candidate.entityA.id);
         final alreadyLinked = existingRels.any(
           (r) => r.targetId == candidate.entityB.id || r.sourceId == candidate.entityB.id,
         );
         
-        if (alreadyLinked) continue;
+        if (alreadyLinked) {
+          print('[EmbeddingSimilarityLinkPredictor] Skipping - already linked');
+          continue;
+        }
         
         // Run 3-step LLM validation chain
         final result = await _runValidationChain(candidate);
         
         if (result.isValid && result.relationshipType != null) {
+          print('[EmbeddingSimilarityLinkPredictor] ✓ Valid: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
           validLinks.add(PredictedLink(
             sourceEntityId: candidate.entityA.id,
             targetEntityId: candidate.entityB.id,
@@ -979,13 +1084,15 @@ class EmbeddingSimilarityLinkPredictor {
               'entityBType': candidate.entityB.type,
             },
           ));
+        } else {
+          print('[EmbeddingSimilarityLinkPredictor] ✗ Invalid: LLM rejected the link');
         }
+        
+        // Small delay between LLM calls to prevent memory pressure
+        await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         // Skip on error and continue with next candidate
-        assert(() {
-          print('[EmbeddingSimilarityLinkPredictor] Error validating candidate ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
-          return true;
-        }());
+        print('[EmbeddingSimilarityLinkPredictor] Error validating candidate ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
         continue;
       }
     }
@@ -999,6 +1106,8 @@ class EmbeddingSimilarityLinkPredictor {
   Future<LinkValidationResult> _runValidationChain(EmbeddingCandidate candidate) async {
     final entityA = candidate.entityA;
     final entityB = candidate.entityB;
+    
+    print('[LLM Chain] Step 1: Categorizing relationship for ${entityA.name} <-> ${entityB.name}');
     
     // Step 1: Categorize relationship type
     final categorizePrompt = '''Given two entities from a personal knowledge graph, suggest what type of relationship might exist between them.
@@ -1023,6 +1132,7 @@ Respond with ONLY the relationship type in uppercase (e.g., "RELATED_TO"):''';
     String relationshipType;
     try {
       final step1Response = await llmCallback(categorizePrompt);
+      print('[LLM Chain] Step 1 raw response: "$step1Response"');
       relationshipType = step1Response.trim().toUpperCase().replaceAll(' ', '_');
       // Clean up the response - extract just the relationship type
       if (relationshipType.contains('\n')) {
@@ -1032,33 +1142,52 @@ Respond with ONLY the relationship type in uppercase (e.g., "RELATED_TO"):''';
       if (relationshipType.length > 30 || relationshipType.isEmpty) {
         relationshipType = 'SEMANTICALLY_SIMILAR';
       }
+      print('[LLM Chain] Step 1 result: $relationshipType');
     } catch (e) {
+      print('[LLM Chain] Step 1 error: $e');
       // Skip on error
       return LinkValidationResult(isValid: false);
     }
 
+    print('[LLM Chain] Step 2: Validating plausibility of $relationshipType');
+    
     // Step 2: Validate plausibility
-    final validatePrompt = '''Is it plausible that these two entities have a "$relationshipType" relationship?
+    // Note: The prompt is designed to be lenient - these entities already have high 
+    // embedding similarity so we're just checking for obvious false positives.
+    final validatePrompt = '''These two entities have ${(candidate.similarity * 100).toStringAsFixed(0)}% semantic similarity, suggesting they are related.
 
 Entity A: ${entityA.name} (${entityA.type})
 Entity B: ${entityB.name} (${entityB.type})
 Proposed relationship: $relationshipType
 
-Answer ONLY with "YES" or "NO":''';
+Is there ANY reasonable way these entities could be connected? Examples:
+- Same category (both holidays, both people, both places)
+- Shared theme (both family-related, both work-related)
+- Temporal connection (same time period, same season)
+- Any other logical connection
+
+Answer YES unless it's completely impossible for them to be related.
+Answer with "YES" or "NO":''';
 
     bool isPlausible;
     try {
       final step2Response = await llmCallback(validatePrompt);
+      print('[LLM Chain] Step 2 raw response: "$step2Response"');
       isPlausible = step2Response.trim().toUpperCase().startsWith('YES');
+      print('[LLM Chain] Step 2 result: isPlausible=$isPlausible');
     } catch (e) {
+      print('[LLM Chain] Step 2 error: $e');
       // Skip on error
       return LinkValidationResult(isValid: false);
     }
 
     if (!isPlausible) {
+      print('[LLM Chain] Step 2 rejected: not plausible');
       return LinkValidationResult(isValid: false);
     }
 
+    print('[LLM Chain] Step 3: Assigning confidence score');
+    
     // Step 3: Assign confidence score
     final confidencePrompt = '''Rate your confidence that "${entityA.name}" and "${entityB.name}" have a "$relationshipType" relationship.
 
@@ -1074,6 +1203,7 @@ Respond with ONLY a decimal number (e.g., "0.75"):''';
     String? explanation;
     try {
       final step3Response = await llmCallback(confidencePrompt);
+      print('[LLM Chain] Step 3 raw response: "$step3Response"');
       // Extract first number from response
       final match = RegExp(r'(\d+\.?\d*)').firstMatch(step3Response);
       if (match != null) {
@@ -1082,16 +1212,21 @@ Respond with ONLY a decimal number (e.g., "0.75"):''';
         confidence = 0.5; // Default confidence
       }
       explanation = 'LLM validated with ${(confidence * 100).toStringAsFixed(0)}% confidence';
+      print('[LLM Chain] Step 3 result: confidence=$confidence');
     } catch (e) {
+      print('[LLM Chain] Step 3 error: $e');
       // Skip on error
       return LinkValidationResult(isValid: false);
     }
 
     // Only accept if confidence is reasonable
     if (confidence < 0.4) {
+      print('[LLM Chain] Rejected: confidence $confidence < 0.4 threshold');
       return LinkValidationResult(isValid: false);
     }
 
+    print('[LLM Chain] ✓ Link validated: $relationshipType with final confidence ${(confidence * candidate.similarity).toStringAsFixed(2)}');
+    
     return LinkValidationResult(
       isValid: true,
       relationshipType: relationshipType,
@@ -1110,7 +1245,8 @@ Respond with ONLY a decimal number (e.g., "0.75"):''';
     ];
     
     for (final type in types) {
-      final typeEntities = await repository.getEntitiesByType(type);
+      // Use the method that actually fetches embeddings from the database
+      final typeEntities = await repository.getEntitiesWithEmbeddingsByType(type);
       allEntities.addAll(typeEntities);
     }
     

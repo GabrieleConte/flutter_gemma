@@ -171,6 +171,9 @@ abstract class PlatformService {
   List<EntityResult> getEntitiesByType(String type);
 
   @async
+  List<EntityWithEmbedding> getEntitiesWithEmbeddingsByType(String type);
+
+  @async
   void addRelationship({
     required String id,
     required String sourceId,
@@ -349,6 +352,27 @@ class EntityResult {
     this.description,
     this.metadata,
     required this.lastModified,
+  });
+}
+
+/// Entity result with embedding included (for similarity calculations)
+class EntityWithEmbedding {
+  final String id;
+  final String name;
+  final String type;
+  final String? description;
+  final String? metadata;
+  final int lastModified;
+  final List<double> embedding;
+
+  EntityWithEmbedding({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.description,
+    this.metadata,
+    required this.lastModified,
+    required this.embedding,
   });
 }
 

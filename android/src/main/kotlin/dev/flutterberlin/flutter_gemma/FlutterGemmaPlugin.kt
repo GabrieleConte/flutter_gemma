@@ -573,6 +573,18 @@ private class PlatformServiceImpl(
     }
   }
 
+  override fun getEntitiesWithEmbeddingsByType(type: String, callback: (Result<List<EntityWithEmbedding>>) -> Unit) {
+    scope.launch {
+      try {
+        val entities = graphStore?.getEntitiesWithEmbeddingsByType(type)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(entities))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
   override fun addRelationship(
     id: String,
     sourceId: String,
