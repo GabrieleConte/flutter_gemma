@@ -745,6 +745,427 @@ class _ParsedExtraction {
   });
 }
 
+/// Direct entity extractor that extracts from structured data without LLM
+/// 
+/// This extractor is much faster than LLM-based extraction and should be used
+/// for structured data sources like contacts, calendar events, photos, and calls.
+/// It deterministically extracts entities from known fields.
+class DirectEntityExtractor implements EntityExtractor {
+  /// Callback to generate embeddings (still needed for entity embeddings)
+  final Future<List<double>> Function(String text) embeddingCallback;
+  
+  /// Configuration
+  final EntityExtractionConfig config;
+
+  DirectEntityExtractor({
+    required this.embeddingCallback,
+    EntityExtractionConfig? config,
+  }) : config = config ?? EntityExtractionConfig();
+
+  @override
+  Future<ExtractionResult> extractFromText(
+    String text, {
+    required String sourceId,
+    required String sourceType,
+  }) async {
+    // Direct extractor doesn't handle free text - return empty result
+    // Use LLMEntityExtractor for text extraction
+    return ExtractionResult(
+      entities: [],
+      relationships: [],
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  @override
+  Future<ExtractionResult> extractFromStructured(
+    Map<String, dynamic> data, {
+    required String sourceId,
+    required String sourceType,
+  }) async {
+    switch (sourceType.toLowerCase()) {
+      case 'contact':
+      case 'contacts':
+        return _extractFromContact(data, sourceId, sourceType);
+      case 'event':
+      case 'calendar':
+      case 'calendar_event':
+        return _extractFromCalendarEvent(data, sourceId, sourceType);
+      case 'photo':
+      case 'photos':
+        return _extractFromPhoto(data, sourceId, sourceType);
+      case 'phone_call':
+      case 'phone_calls':
+      case 'call':
+      case 'calls':
+        return _extractFromPhoneCall(data, sourceId, sourceType);
+      default:
+        // For unknown types, return empty - use LLM extractor instead
+        return ExtractionResult(
+          entities: [],
+          relationships: [],
+          sourceId: sourceId,
+          sourceType: sourceType,
+        );
+    }
+  }
+
+  @override
+  Future<List<double>> generateEmbedding(String text) async {
+    return await embeddingCallback(text);
+  }
+
+  /// Extract entities from a contact
+  ExtractionResult _extractFromContact(
+    Map<String, dynamic> contact,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+
+    // Extract person entity
+    final fullName = contact['fullName'] ?? contact['name'];
+    final givenName = contact['givenName'];
+    final familyName = contact['familyName'];
+    
+    String personName = '';
+    if (fullName != null && fullName.toString().isNotEmpty) {
+      personName = fullName.toString();
+    } else if (givenName != null || familyName != null) {
+      personName = '${givenName ?? ''} ${familyName ?? ''}'.trim();
+    }
+
+    if (personName.isNotEmpty) {
+      final jobTitle = contact['jobTitle']?.toString();
+      final note = contact['note']?.toString();
+      
+      entities.add(ExtractedEntity(
+        name: personName,
+        type: EntityTypes.person,
+        description: jobTitle ?? note,
+        attributes: {
+          if (contact['emailAddresses'] != null) 
+            'emails': contact['emailAddresses'],
+          if (contact['phoneNumbers'] != null) 
+            'phones': contact['phoneNumbers'],
+          if (jobTitle != null) 'jobTitle': jobTitle,
+        },
+        confidence: 1.0, // Deterministic extraction
+      ));
+    }
+
+    // Extract organization entity if present
+    final orgName = contact['organization'] ?? contact['organizationName'];
+    if (orgName != null && orgName.toString().isNotEmpty) {
+      entities.add(ExtractedEntity(
+        name: orgName.toString(),
+        type: EntityTypes.organization,
+        confidence: 1.0,
+      ));
+
+      // Create WORKS_AT relationship
+      if (personName.isNotEmpty) {
+        relationships.add(ExtractedRelationship(
+          sourceEntity: personName,
+          targetEntity: orgName.toString(),
+          type: RelationshipTypes.worksAt,
+          confidence: 1.0,
+        ));
+      }
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Extract entities from a calendar event
+  ExtractionResult _extractFromCalendarEvent(
+    Map<String, dynamic> event,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+
+    // Extract event entity
+    final title = event['title'] ?? event['summary'];
+    if (title != null && title.toString().isNotEmpty) {
+      final eventName = title.toString();
+      final notes = event['notes'] ?? event['description'];
+      final startDate = event['startDate'] ?? event['start'];
+      final endDate = event['endDate'] ?? event['end'];
+      
+      entities.add(ExtractedEntity(
+        name: eventName,
+        type: EntityTypes.event,
+        description: notes?.toString(),
+        attributes: {
+          if (startDate != null) 'startDate': startDate.toString(),
+          if (endDate != null) 'endDate': endDate.toString(),
+        },
+        confidence: 1.0,
+      ));
+
+      // Extract location if present
+      final location = event['location'];
+      if (location != null && location.toString().isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: location.toString(),
+          type: EntityTypes.location,
+          confidence: 1.0,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: eventName,
+          targetEntity: location.toString(),
+          type: RelationshipTypes.locatedIn,
+          confidence: 1.0,
+        ));
+      }
+
+      // Extract attendees as person entities
+      final attendees = event['attendees'] as List<dynamic>?;
+      if (attendees != null) {
+        for (final attendee in attendees) {
+          final attendeeStr = attendee.toString();
+          if (attendeeStr.isNotEmpty) {
+            entities.add(ExtractedEntity(
+              name: attendeeStr,
+              type: EntityTypes.person,
+              confidence: 0.9, // Slightly lower - might be email addresses
+            ));
+
+            relationships.add(ExtractedRelationship(
+              sourceEntity: attendeeStr,
+              targetEntity: eventName,
+              type: RelationshipTypes.attendedBy,
+              confidence: 1.0,
+            ));
+          }
+        }
+      }
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Extract entities from a photo
+  ExtractionResult _extractFromPhoto(
+    Map<String, dynamic> photo,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+
+    // Extract photo entity
+    final photoId = photo['id'] ?? photo['name'] ?? photo['filename'];
+    final filename = photo['filename'] ?? photo['name'];
+    
+    if (photoId != null) {
+      final photoName = filename?.toString() ?? photoId.toString();
+      final creationDate = photo['creationDate'] ?? photo['dateTaken'] ?? photo['timestamp'];
+      final width = photo['width'];
+      final height = photo['height'];
+      
+      entities.add(ExtractedEntity(
+        name: photoName,
+        type: 'PHOTO',
+        attributes: {
+          if (creationDate != null) 'creationDate': creationDate.toString(),
+          if (width != null) 'width': width,
+          if (height != null) 'height': height,
+          if (photo['mediaType'] != null) 'mediaType': photo['mediaType'],
+        },
+        confidence: 1.0,
+      ));
+
+      // Extract location if present
+      final locationName = photo['locationName'] ?? photo['location'];
+      final latitude = photo['latitude'];
+      final longitude = photo['longitude'];
+      
+      if (locationName != null && locationName.toString().isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: locationName.toString(),
+          type: EntityTypes.location,
+          attributes: {
+            if (latitude != null) 'latitude': latitude,
+            if (longitude != null) 'longitude': longitude,
+          },
+          confidence: 1.0,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: photoName,
+          targetEntity: locationName.toString(),
+          type: 'TAKEN_AT',
+          confidence: 1.0,
+        ));
+      } else if (latitude != null && longitude != null) {
+        // Create a generic location entity from coordinates
+        final coordLocation = 'Location ($latitude, $longitude)';
+        entities.add(ExtractedEntity(
+          name: coordLocation,
+          type: EntityTypes.location,
+          attributes: {
+            'latitude': latitude,
+            'longitude': longitude,
+          },
+          confidence: 0.8,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: photoName,
+          targetEntity: coordLocation,
+          type: 'TAKEN_AT',
+          confidence: 0.8,
+        ));
+      }
+
+      // Extract date entity if present
+      if (creationDate != null) {
+        final dateStr = _formatDateForEntity(creationDate);
+        if (dateStr.isNotEmpty) {
+          entities.add(ExtractedEntity(
+            name: dateStr,
+            type: EntityTypes.date,
+            confidence: 1.0,
+          ));
+
+          relationships.add(ExtractedRelationship(
+            sourceEntity: photoName,
+            targetEntity: dateStr,
+            type: 'TAKEN_ON',
+            confidence: 1.0,
+          ));
+        }
+      }
+
+      // Extract people in photo if available (from face detection etc.)
+      final people = photo['people'] ?? photo['faces'] as List<dynamic>?;
+      if (people != null) {
+        for (final person in people) {
+          final personStr = person.toString();
+          if (personStr.isNotEmpty) {
+            entities.add(ExtractedEntity(
+              name: personStr,
+              type: EntityTypes.person,
+              confidence: 0.8, // Face recognition might not be perfect
+            ));
+
+            relationships.add(ExtractedRelationship(
+              sourceEntity: personStr,
+              targetEntity: photoName,
+              type: 'PICTURED_IN',
+              confidence: 0.8,
+            ));
+          }
+        }
+      }
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Extract entities from a phone call
+  ExtractionResult _extractFromPhoneCall(
+    Map<String, dynamic> call,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+
+    // Extract person entity from contact name
+    final contactName = call['contactName'] ?? call['name'];
+    final phoneNumber = call['phoneNumber'] ?? call['number'];
+    final callType = call['callType'] ?? call['type'];
+    final timestamp = call['timestamp'] ?? call['date'];
+    final duration = call['duration'];
+
+    if (contactName != null && contactName.toString().isNotEmpty) {
+      entities.add(ExtractedEntity(
+        name: contactName.toString(),
+        type: EntityTypes.person,
+        attributes: {
+          if (phoneNumber != null) 'phoneNumber': phoneNumber.toString(),
+        },
+        confidence: 1.0,
+      ));
+
+      // Create call relationship from "You" perspective
+      // The actual "You" link will be created by LinkPredictor
+    } else if (phoneNumber != null && phoneNumber.toString().isNotEmpty) {
+      // If no contact name, create a phone number entity
+      entities.add(ExtractedEntity(
+        name: phoneNumber.toString(),
+        type: EntityTypes.phone,
+        attributes: {
+          if (callType != null) 'lastCallType': callType.toString(),
+          if (timestamp != null) 'lastCallTime': timestamp.toString(),
+          if (duration != null) 'lastCallDuration': duration,
+        },
+        confidence: 0.9,
+      ));
+    }
+
+    // Extract date entity if timestamp is available
+    if (timestamp != null) {
+      final dateStr = _formatDateForEntity(timestamp);
+      if (dateStr.isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: dateStr,
+          type: EntityTypes.date,
+          confidence: 1.0,
+        ));
+      }
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Format date for entity name
+  String _formatDateForEntity(dynamic date) {
+    DateTime? dt;
+    if (date is DateTime) {
+      dt = date;
+    } else if (date is int) {
+      dt = DateTime.fromMillisecondsSinceEpoch(date);
+    } else if (date is String) {
+      try {
+        dt = DateTime.parse(date);
+      } catch (_) {}
+    }
+    
+    if (dt != null) {
+      return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+    }
+    return '';
+  }
+}
+
 /// Entity deduplication and merging utilities
 class EntityMerger {
   /// Merge entities with similar names

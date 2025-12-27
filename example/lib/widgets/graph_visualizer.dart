@@ -10,19 +10,28 @@ class GraphNode {
   Offset position;
   Offset velocity;
   bool isDragging;
+  
+  /// For cluster nodes: the entity IDs contained in this cluster
+  final List<String>? clusterEntityIds;
+  
+  /// Whether this is a cluster node
+  bool get isCluster => clusterEntityIds != null && clusterEntityIds!.isNotEmpty;
 
   GraphNode({
     required this.id,
     required this.name,
     required this.type,
     required this.position,
+    this.clusterEntityIds,
   })  : velocity = Offset.zero,
         isDragging = false;
 
   Color get color {
+    if (isCluster) return Colors.blueGrey;
+    
     switch (type.toUpperCase()) {
       case 'SELF':
-        return Colors.amber; // "You" central node
+        return Colors.amber; // "You" central node - golden
       case 'PERSON':
         return Colors.blue;
       case 'ORGANIZATION':
@@ -32,15 +41,31 @@ class GraphNode {
       case 'LOCATION':
         return Colors.purple;
       case 'PHOTO':
-        return Colors.pink;
+        return Colors.pink.shade300;
       case 'PHONE_CALL':
         return Colors.teal;
+      case 'DOCUMENT':
+        return Colors.deepOrange;
+      case 'NOTE':
+        return Colors.cyan;
+      case 'PROJECT':
+        return Colors.deepPurple;
+      case 'TOPIC':
+        return Colors.pinkAccent;
+      case 'DATE':
+        return Colors.brown;
+      case 'EMAIL':
+        return Colors.red.shade300;
+      case 'PHONE':
+        return Colors.lightGreen;
       default:
         return Colors.grey;
     }
   }
 
   IconData get icon {
+    if (isCluster) return Icons.workspaces;
+    
     switch (type.toUpperCase()) {
       case 'SELF':
         return Icons.account_circle; // "You" central node
@@ -56,6 +81,20 @@ class GraphNode {
         return Icons.photo;
       case 'PHONE_CALL':
         return Icons.phone;
+      case 'DOCUMENT':
+        return Icons.description;
+      case 'NOTE':
+        return Icons.note;
+      case 'PROJECT':
+        return Icons.folder;
+      case 'TOPIC':
+        return Icons.tag;
+      case 'DATE':
+        return Icons.calendar_today;
+      case 'EMAIL':
+        return Icons.email;
+      case 'PHONE':
+        return Icons.phone_android;
       default:
         return Icons.circle;
     }
@@ -77,19 +116,44 @@ class GraphEdge {
   });
 }
 
-/// Interactive graph visualizer with force-directed layout
+/// A cluster of related entities
+class GraphCluster {
+  final String id;
+  final String name;
+  final List<GraphEntity> entities;
+  final String dominantType;
+  bool isExpanded;
+
+  GraphCluster({
+    required this.id,
+    required this.name,
+    required this.entities,
+    required this.dominantType,
+    this.isExpanded = false,
+  });
+  
+  int get size => entities.length;
+}
+
+/// Interactive graph visualizer with force-directed layout and clustering
 class GraphVisualizer extends StatefulWidget {
   final List<GraphEntity> entities;
   final List<GraphRelationship> relationships;
   final void Function(GraphEntity entity)? onEntityTap;
-  final int maxNodes;
+  
+  /// Threshold for clustering - types with more than this many nodes will be clustered
+  final int clusterThreshold;
+  
+  /// Whether to enable clustering mode
+  final bool enableClustering;
 
   const GraphVisualizer({
     super.key,
     required this.entities,
     required this.relationships,
     this.onEntityTap,
-    this.maxNodes = 50,
+    this.clusterThreshold = 20,
+    this.enableClustering = true,
   });
 
   @override
@@ -101,6 +165,10 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   late List<GraphNode> _nodes;
   late List<GraphEdge> _edges;
   late AnimationController _simulationController;
+  
+  // Clustering state
+  Map<String, GraphCluster> _clusters = {};
+  Set<String> _expandedClusters = {};
 
   // Transformation state
   Offset _offset = Offset.zero;
@@ -149,11 +217,132 @@ class _GraphVisualizerState extends State<GraphVisualizer>
     const centerX = 200.0;
     const centerY = 200.0;
 
-    // Limit nodes for performance
-    final limitedEntities = widget.entities.take(widget.maxNodes).toList();
-    final entityIds = limitedEntities.map((e) => e.id).toSet();
+    if (widget.enableClustering) {
+      _initializeWithClustering(random, centerX, centerY);
+    } else {
+      _initializeWithoutClustering(random, centerX, centerY);
+    }
+  }
+  
+  void _initializeWithClustering(Random random, double centerX, double centerY) {
+    // Group entities by type
+    final entitiesByType = <String, List<GraphEntity>>{};
+    for (final entity in widget.entities) {
+      entitiesByType.putIfAbsent(entity.type, () => []);
+      entitiesByType[entity.type]!.add(entity);
+    }
+    
+    // Create clusters for types that exceed threshold
+    _clusters = {};
+    final clusteredEntityIds = <String>{};
+    final unclustered = <GraphEntity>[];
+    
+    for (final entry in entitiesByType.entries) {
+      final type = entry.key;
+      final entities = entry.value;
+      
+      // Always show "You" node and don't cluster types with few entities
+      if (type == 'SELF' || entities.length <= widget.clusterThreshold) {
+        unclustered.addAll(entities);
+      } else {
+        // Check if this cluster is expanded
+        final clusterId = 'cluster_$type';
+        if (_expandedClusters.contains(clusterId)) {
+          // Show all entities from expanded cluster
+          unclustered.addAll(entities);
+        } else {
+          // Create cluster node
+          _clusters[clusterId] = GraphCluster(
+            id: clusterId,
+            name: '$type (${entities.length})',
+            entities: entities,
+            dominantType: type,
+            isExpanded: false,
+          );
+          clusteredEntityIds.addAll(entities.map((e) => e.id));
+        }
+      }
+    }
+    
+    // Create nodes for unclustered entities
+    final visibleEntityIds = <String>{};
+    _nodes = [];
+    
+    for (final entity in unclustered) {
+      visibleEntityIds.add(entity.id);
+      _nodes.add(GraphNode(
+        id: entity.id,
+        name: entity.name,
+        type: entity.type,
+        position: Offset(
+          centerX + (random.nextDouble() - 0.5) * 300,
+          centerY + (random.nextDouble() - 0.5) * 300,
+        ),
+      ));
+    }
+    
+    // Add cluster nodes
+    for (final cluster in _clusters.values) {
+      _nodes.add(GraphNode(
+        id: cluster.id,
+        name: cluster.name,
+        type: cluster.dominantType,
+        position: Offset(
+          centerX + (random.nextDouble() - 0.5) * 300,
+          centerY + (random.nextDouble() - 0.5) * 300,
+        ),
+        clusterEntityIds: cluster.entities.map((e) => e.id).toList(),
+      ));
+    }
+    
+    // Create edges - connect to cluster if entity is clustered
+    _edges = [];
+    for (final rel in widget.relationships) {
+      String sourceId = rel.sourceId;
+      String targetId = rel.targetId;
+      
+      // Redirect edges to cluster nodes if source/target is clustered
+      if (clusteredEntityIds.contains(sourceId)) {
+        final cluster = _clusters.values.firstWhere(
+          (c) => c.entities.any((e) => e.id == sourceId),
+          orElse: () => _clusters.values.first,
+        );
+        sourceId = cluster.id;
+      }
+      if (clusteredEntityIds.contains(targetId)) {
+        final cluster = _clusters.values.firstWhere(
+          (c) => c.entities.any((e) => e.id == targetId),
+          orElse: () => _clusters.values.first,
+        );
+        targetId = cluster.id;
+      }
+      
+      // Only add edge if both endpoints are visible
+      final sourceVisible = visibleEntityIds.contains(sourceId) || _clusters.containsKey(sourceId);
+      final targetVisible = visibleEntityIds.contains(targetId) || _clusters.containsKey(targetId);
+      
+      if (sourceVisible && targetVisible && sourceId != targetId) {
+        // Avoid duplicate edges
+        final edgeExists = _edges.any(
+          (e) => (e.sourceId == sourceId && e.targetId == targetId) ||
+                 (e.sourceId == targetId && e.targetId == sourceId),
+        );
+        if (!edgeExists) {
+          _edges.add(GraphEdge(
+            sourceId: sourceId,
+            targetId: targetId,
+            type: rel.type,
+            weight: rel.weight,
+          ));
+        }
+      }
+    }
+  }
+  
+  void _initializeWithoutClustering(Random random, double centerX, double centerY) {
+    final entityIds = widget.entities.map((e) => e.id).toSet();
 
-    _nodes = limitedEntities.map((entity) {
+    _nodes = widget.entities.map((entity) {
       return GraphNode(
         id: entity.id,
         name: entity.name,
@@ -176,6 +365,17 @@ class _GraphVisualizerState extends State<GraphVisualizer>
               weight: rel.weight,
             ))
         .toList();
+  }
+  
+  void _toggleCluster(String clusterId) {
+    setState(() {
+      if (_expandedClusters.contains(clusterId)) {
+        _expandedClusters.remove(clusterId);
+      } else {
+        _expandedClusters.add(clusterId);
+      }
+      _initializeGraph();
+    });
   }
 
   void _simulateStep() {
@@ -308,8 +508,17 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       onTapUp: (details) {
         final node = _findNodeAt(details.localPosition);
         if (node != null) {
+          // Check if this is a cluster node
+          if (node.isCluster) {
+            _toggleCluster(node.id);
+            return;
+          }
+          
           setState(() => _selectedNodeId = node.id);
-          final entity = widget.entities.firstWhere((e) => e.id == node.id);
+          final entity = widget.entities.firstWhere(
+            (e) => e.id == node.id,
+            orElse: () => widget.entities.first,
+          );
           widget.onEntityTap?.call(entity);
         } else {
           setState(() => _selectedNodeId = null);
@@ -355,15 +564,30 @@ class _GraphVisualizerState extends State<GraphVisualizer>
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text(
-                  '${_nodes.length} nodes, ${_edges.length} edges',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${widget.entities.length} entities total',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    Text(
+                      '${_nodes.length} nodes, ${_edges.length} edges shown',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11),
+                    ),
+                    if (_clusters.isNotEmpty)
+                      Text(
+                        '${_clusters.length} clusters (tap to expand)',
+                        style: const TextStyle(color: Colors.white38, fontSize: 10),
+                      ),
+                  ],
                 ),
               ),
             ),
 
             // Selected node info
-            if (_selectedNodeId != null)
+            if (_selectedNodeId != null && !_selectedNodeId!.startsWith('cluster_'))
               Positioned(
                 bottom: 8,
                 left: 8,

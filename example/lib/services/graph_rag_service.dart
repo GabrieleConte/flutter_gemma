@@ -365,13 +365,30 @@ class GraphRAGService {
   /// Fetches entities of all known types including the "You" central node
   Future<List<GraphEntity>> getAllEntities() async {
     _checkInitialized();
-    // Include SELF type for the "You" central node, plus PHOTO and PHONE_CALL
-    final entityTypes = ['SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION', 'PHOTO', 'PHONE_CALL'];
+    // Include all entity types that may exist in the graph
+    final entityTypes = [
+      'SELF',           // "You" central node
+      'PERSON',         // People from contacts, calendar, photos
+      'ORGANIZATION',   // Companies, organizations
+      'EVENT',          // Calendar events
+      'LOCATION',       // Places, addresses
+      'PHOTO',          // Photos
+      'PHONE_CALL',     // Phone calls
+      'DOCUMENT',       // Documents
+      'NOTE',           // Notes
+      'PROJECT',        // Projects, folders
+      'TOPIC',          // Topics, tags
+      'DATE',           // Dates
+      'EMAIL',          // Email addresses
+      'PHONE',          // Phone numbers
+    ];
     final entities = <GraphEntity>[];
     
     for (final type in entityTypes) {
       final typeEntities = await _graphRag!.getEntitiesByType(type);
-      debugPrint('[GraphRAGService] Type "$type": ${typeEntities.length} entities');
+      if (typeEntities.isNotEmpty) {
+        debugPrint('[GraphRAGService] Type "$type": ${typeEntities.length} entities');
+      }
       entities.addAll(typeEntities);
     }
     

@@ -24,6 +24,7 @@ class IndexingProgress {
   final int processedItems;
   final int totalItems;
   final int extractedEntities;
+  final int uniqueEntitiesStored;
   final int extractedRelationships;
   final int predictedLinks;
   final int detectedCommunities;
@@ -37,6 +38,7 @@ class IndexingProgress {
     this.processedItems = 0,
     this.totalItems = 0,
     this.extractedEntities = 0,
+    this.uniqueEntitiesStored = 0,
     this.extractedRelationships = 0,
     this.predictedLinks = 0,
     this.detectedCommunities = 0,
@@ -57,6 +59,7 @@ class IndexingProgress {
     int? processedItems,
     int? totalItems,
     int? extractedEntities,
+    int? uniqueEntitiesStored,
     int? extractedRelationships,
     int? predictedLinks,
     int? detectedCommunities,
@@ -70,6 +73,7 @@ class IndexingProgress {
       processedItems: processedItems ?? this.processedItems,
       totalItems: totalItems ?? this.totalItems,
       extractedEntities: extractedEntities ?? this.extractedEntities,
+      uniqueEntitiesStored: uniqueEntitiesStored ?? this.uniqueEntitiesStored,
       extractedRelationships: extractedRelationships ?? this.extractedRelationships,
       predictedLinks: predictedLinks ?? this.predictedLinks,
       detectedCommunities: detectedCommunities ?? this.detectedCommunities,
@@ -132,8 +136,19 @@ class BackgroundIndexingService {
   late final LouvainCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
   late final LinkPredictor? _linkPredictor;
+  late final EmbeddingSimilarityLinkPredictor? _embeddingSimilarityPredictor;
+  late final DirectEntityExtractor _directExtractor;
   late final Future<List<double>> Function(String text) _embeddingCallback;
+  late final Future<String> Function(String prompt) _llmCallback;
   final PlatformService _platform = PlatformService();
+  
+  /// Data types that should use direct extraction (no LLM)
+  static const _structuredDataTypes = {
+    'CONTACT', 'CONTACTS',
+    'CALENDAR', 'CALENDAR_EVENT', 'EVENT',
+    'PHOTO', 'PHOTOS',
+    'PHONE_CALL', 'PHONE_CALLS', 'CALL', 'CALLS',
+  };
   
   IndexingProgress _progress = IndexingProgress(
     status: IndexingStatus.idle,
@@ -158,6 +173,12 @@ class BackgroundIndexingService {
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
     _embeddingCallback = embeddingCallback;
+    _llmCallback = llmCallback;
+    
+    // Initialize direct extractor for structured data (no LLM)
+    _directExtractor = DirectEntityExtractor(
+      embeddingCallback: embeddingCallback,
+    );
     
     _communityDetector = LouvainCommunityDetector(
       config: CommunityDetectionConfig(maxDepth: this.config.maxCommunityDepth),
@@ -176,6 +197,16 @@ class BackgroundIndexingService {
         repository: repository,
         config: this.config.linkPredictionConfig,
       );
+      
+      // Initialize embedding similarity predictor
+      final linkConfig = this.config.linkPredictionConfig ?? LinkPredictionConfig();
+      if (linkConfig.enableEmbeddingSimilarityLinks) {
+        _embeddingSimilarityPredictor = EmbeddingSimilarityLinkPredictor(
+          repository: repository,
+          llmCallback: llmCallback,
+          config: linkConfig,
+        );
+      }
     }
     
     // Setup periodic reindexing if configured
@@ -225,6 +256,7 @@ class BackgroundIndexingService {
         processedItems: 0,
         totalItems: 0,
         extractedEntities: 0,
+        uniqueEntitiesStored: 0,
         extractedRelationships: 0,
         predictedLinks: 0,
         detectedCommunities: 0,
@@ -247,6 +279,12 @@ class BackgroundIndexingService {
       // Phase 1.5: Link prediction (after entity extraction)
       if (config.enableLinkPrediction && _linkPredictor != null) {
         await _linkPredictionPhase();
+        if (_cancelRequested) return;
+      }
+      
+      // Phase 1.6: Embedding similarity link prediction
+      if (config.enableLinkPrediction && _embeddingSimilarityPredictor != null) {
+        await _embeddingSimilarityPhase();
         if (_cancelRequested) return;
       }
 
@@ -401,22 +439,42 @@ class BackgroundIndexingService {
         final itemMap = _itemToMap(item, dataType);
         final sourceId = _getItemId(item, dataType);
 
-        // Extract entities and relationships using LLM
-        final extraction = await extractor.extractFromStructured(
-          itemMap,
-          sourceId: sourceId,
-          sourceType: dataType,
-        );
+        // Choose extraction method based on data type
+        // Use direct extraction for structured data (fast, no LLM)
+        // Use LLM extraction for free-text data (notes, documents)
+        final ExtractionResult extraction;
+        final isStructuredData = _structuredDataTypes.contains(dataType.toUpperCase());
         
-        // Debug: Log extraction results
-        assert(() {
-          print('[BackgroundIndexing] Extracted ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
-          return true;
-        }());
+        if (isStructuredData) {
+          // Fast path: direct extraction without LLM
+          extraction = await _directExtractor.extractFromStructured(
+            itemMap,
+            sourceId: sourceId,
+            sourceType: dataType,
+          );
+          assert(() {
+            print('[BackgroundIndexing] Direct extraction: ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
+            return true;
+          }());
+        } else {
+          // Slow path: LLM-based extraction for free text
+          extraction = await extractor.extractFromStructured(
+            itemMap,
+            sourceId: sourceId,
+            sourceType: dataType,
+          );
+          assert(() {
+            print('[BackgroundIndexing] LLM extraction: ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
+            return true;
+          }());
+        }
+
+        // Track unique entities stored
+        var uniqueStored = 0;
 
         // Add extracted entities to graph
         for (final entity in extraction.entities) {
-          final embedding = await extractor.generateEmbedding(
+          final embedding = await _embeddingCallback(
             '${entity.name} ${entity.description ?? ""}',
           );
 
@@ -434,6 +492,7 @@ class BackgroundIndexingService {
           final existing = await repository.getEntity(graphEntity.id);
           if (existing == null) {
             await repository.addEntity(graphEntity);
+            uniqueStored++;
             assert(() {
               print('[BackgroundIndexing] Added entity: ${entity.name} (${entity.type})');
               return true;
@@ -532,6 +591,7 @@ class BackgroundIndexingService {
 
         _updateProgress(_progress.copyWith(
           extractedEntities: _progress.extractedEntities + extraction.entities.length,
+          uniqueEntitiesStored: _progress.uniqueEntitiesStored + uniqueStored,
           extractedRelationships: _progress.extractedRelationships + extraction.relationships.length,
         ));
         
@@ -764,6 +824,49 @@ class BackgroundIndexingService {
     ));
     
     print('[BackgroundIndexing] Link prediction phase complete');
+  }
+  
+  /// Phase 1.6: Embedding similarity-based link prediction
+  Future<void> _embeddingSimilarityPhase() async {
+    if (_embeddingSimilarityPredictor == null) return;
+    
+    _updateProgress(_progress.copyWith(
+      currentPhase: 'Finding similar entities',
+    ));
+    
+    print('[BackgroundIndexing] Starting embedding similarity phase');
+    
+    // 1. Find candidate pairs based on embedding similarity
+    final candidates = await _embeddingSimilarityPredictor.findCandidates();
+    
+    if (candidates.isEmpty) {
+      print('[BackgroundIndexing] No embedding similarity candidates found');
+      return;
+    }
+    
+    _updateProgress(_progress.copyWith(
+      currentPhase: 'Validating similar pairs',
+    ));
+    
+    // 2. Validate candidates with LLM chain and create links
+    final validatedLinks = await _embeddingSimilarityPredictor.validateAndCreateLinks(candidates);
+    
+    // 3. Store validated links
+    var storedLinks = 0;
+    for (final link in validatedLinks) {
+      try {
+        await repository.addRelationship(link.toRelationship());
+        storedLinks++;
+      } catch (e) {
+        // Link might already exist
+      }
+    }
+    
+    _updateProgress(_progress.copyWith(
+      predictedLinks: _progress.predictedLinks + storedLinks,
+    ));
+    
+    print('[BackgroundIndexing] Embedding similarity phase complete: $storedLinks links created');
   }
 
   /// Phase 2: Detect communities

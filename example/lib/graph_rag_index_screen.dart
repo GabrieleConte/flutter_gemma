@@ -306,7 +306,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
       entities: _entities,
       relationships: _relationships,
       onEntityTap: _showEntityDetails,
-      maxNodes: 100,
+      enableClustering: true,
+      clusterThreshold: 20,
     );
   }
 
@@ -472,7 +473,11 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                 style: const TextStyle(fontSize: 12, color: Colors.white70),
               ),
               Text(
-                'Entities: ${progress.extractedEntities}, Relationships: ${progress.extractedRelationships}',
+                'Entities: ${progress.extractedEntities} extracted → ${progress.uniqueEntitiesStored} stored',
+                style: const TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              Text(
+                'Relationships: ${progress.extractedRelationships}',
                 style: const TextStyle(fontSize: 12, color: Colors.white54),
               ),
             ],
@@ -648,6 +653,20 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return Colors.pink;
       case 'PHONE_CALL':
         return Colors.teal;
+      case 'DOCUMENT':
+        return Colors.brown;
+      case 'NOTE':
+        return Colors.cyan;
+      case 'PROJECT':
+        return Colors.indigo;
+      case 'TOPIC':
+        return Colors.lime;
+      case 'DATE':
+        return Colors.deepOrange;
+      case 'EMAIL':
+        return Colors.lightBlue;
+      case 'PHONE':
+        return Colors.deepPurple;
       default:
         return Colors.grey;
     }
