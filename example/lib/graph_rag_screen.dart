@@ -77,7 +77,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       // Step 1: Initialize inference model
       _showSnackBar('Installing inference model...');
       
-      const inferenceModel = Model.qwen25_1_5B_InstructCpu;
+      const inferenceModel = Model.gemma3_1B;
       final installer = FlutterGemma.installModel(
         modelType: inferenceModel.modelType,
         fileType: inferenceModel.fileType,
@@ -100,7 +100,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       );
       
       final chat = await model.createChat(
-        temperature: 0.1,
+        temperature: 0.0,
         randomSeed: 1,
         topK: inferenceModel.topK,
       );

@@ -32,7 +32,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   String _statusMessage = 'Checking models...';
 
   // Model definitions
-  static const _inferenceModel = Model.qwen25_1_5B_InstructCpu;
+  static const _inferenceModel = Model.gemma3_1B;
   static const _embeddingModel = app_models.EmbeddingModel.embeddingGemma512;
 
   @override
@@ -127,7 +127,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       );
 
       final chat = await model.createChat(
-        temperature: 0.1,
+        temperature: 0.0,
         randomSeed: 1,
         topK: _inferenceModel.topK,
       );

@@ -516,11 +516,11 @@ class _QueryResultCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
               Icon(Icons.source, size: 14, color: Colors.white70),
-              const SizedBox(width: 6),
-              const Text(
+              SizedBox(width: 6),
+              Text(
                 'Relevant Sources',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,

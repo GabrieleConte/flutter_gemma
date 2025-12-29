@@ -378,13 +378,14 @@ class _GraphVisualizerState extends State<GraphVisualizer>
           _expandedClusterCenters[clusterId] ?? Offset(centerX, centerY);
 
       // Position entities in a circular cloud around the cluster center
-      // Scale aggressively for large clusters to prevent overlap
+      // Scale very aggressively for large clusters - hub will be at center
       final count = entities.length;
-      final baseRadius = 100.0 + (count * 20).clamp(0, 1000).toDouble();
-      // More entities per ring for larger clusters, but with bigger spacing
-      final entitiesPerRing = count > 30 ? 10 : (count > 15 ? 8 : 6);
+      // Much larger base radius to leave room for hub at center
+      final baseRadius = 150.0 + (count * 25).clamp(0, 1500).toDouble();
+      // Fewer entities per ring with larger spacing
+      final entitiesPerRing = count > 40 ? 12 : (count > 20 ? 10 : 8);
       final ringSpacing =
-          60.0 + (count > 30 ? 40.0 : (count > 15 ? 20.0 : 0.0));
+          80.0 + (count > 40 ? 60.0 : (count > 20 ? 40.0 : 20.0));
 
       for (var i = 0; i < entities.length; i++) {
         final entity = entities[i];
@@ -394,7 +395,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         final angle = i * 2.39996; // Golden angle in radians (~137.5 degrees)
         final ringIndex = i ~/ entitiesPerRing;
         final radius = baseRadius + (ringIndex * ringSpacing);
-        final jitter = (random.nextDouble() - 0.5) * 25;
+        final jitter = (random.nextDouble() - 0.5) * 30;
 
         _nodes.add(GraphNode(
           id: entity.id,
@@ -614,13 +615,28 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         final otherCluster = _entitySourceCluster[other.id];
         final sameCluster = nodeCluster != null && nodeCluster == otherCluster;
 
-        if (sameCluster) {
-          // Cloud behavior: only push when overlapping, no long-range interaction
-          const cloudMinDistance = 45.0;
+        // Check if other node is the hub of this node's cluster
+        final otherIsMyHub = nodeCluster != null && other.id == nodeCluster;
+        // Check if this node is an entity and other is its cluster hub
+        final iAmEntityOtherIsHub = otherIsMyHub;
+
+        if (iAmEntityOtherIsHub) {
+          // Entity must stay away from its hub - strong repulsion at close range
+          const hubMinDistance = 80.0;
+          if (distance < hubMinDistance) {
+            final overlap = hubMinDistance - distance;
+            final pushStrength = overlap * 0.15; // Strong push away from hub
+            final pushDir =
+                delta.distance > 0.1 ? delta / distance : const Offset(1, 0);
+            force += pushDir * pushStrength;
+          }
+        } else if (sameCluster) {
+          // Cloud behavior: push when overlapping - larger minimum distance
+          const cloudMinDistance = 70.0;
           if (distance < cloudMinDistance) {
             final overlap = cloudMinDistance - distance;
-            // Weaker push with more nodes to avoid chain reactions
-            final pushStrength = overlap * 0.08 * forceScale;
+            // Stronger push to keep entities apart
+            final pushStrength = overlap * 0.12 * forceScale;
             final pushDir =
                 delta.distance > 0.1 ? delta / distance : const Offset(1, 0);
             force += pushDir * pushStrength;
@@ -649,7 +665,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       }
 
       // Cluster hub nodes should stay at the dynamic center of their cloud
-      // This is the PRIMARY force for expanded cluster hubs - override other forces
+      // This is the PRIMARY force for expanded cluster hubs
       if (node.id.startsWith('cluster_') &&
           _expandedClusters.contains(node.id)) {
         // Calculate dynamic center of all entities in this cluster
@@ -671,16 +687,12 @@ class _GraphVisualizerState extends State<GraphVisualizer>
             sumY / clusterEntityNodes.length,
           );
 
-          // VERY strong attraction to centroid - this overrides other forces
-          // Just snap to centroid directly for stability
-          node.position = centroid;
-          node.velocity = Offset.zero;
+          // Strong but smooth attraction to centroid (allows dragging)
+          final toCentroid = centroid - node.position;
+          force += toCentroid * 0.5; // Very strong pull toward center
 
           // Update saved center
           _expandedClusterCenters[node.id] = centroid;
-
-          // Skip all other force calculations for this node
-          continue;
         }
       }
 
