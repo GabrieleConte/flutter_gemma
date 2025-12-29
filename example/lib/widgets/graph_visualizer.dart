@@ -14,9 +14,8 @@ class GraphNode {
   /// For cluster nodes: the entity IDs contained in this cluster
   final List<String>? clusterEntityIds;
 
-  /// Whether this is a cluster node
-  bool get isCluster =>
-      clusterEntityIds != null && clusterEntityIds!.isNotEmpty;
+  /// Whether this node can be clicked to expand (for collapsed clusters)
+  final bool isCluster;
 
   GraphNode({
     required this.id,
@@ -24,7 +23,10 @@ class GraphNode {
     required this.type,
     required this.position,
     this.clusterEntityIds,
-  })  : velocity = Offset.zero,
+    bool? isCluster,
+  })  : isCluster = isCluster ??
+            (clusterEntityIds != null && clusterEntityIds.isNotEmpty),
+        velocity = Offset.zero,
         isDragging = false;
 
   Color get color {
@@ -329,8 +331,16 @@ class _GraphVisualizerState extends State<GraphVisualizer>
           for (final e in entities) {
             _entitySourceCluster[e.id] = clusterId;
           }
+          // Keep cluster as a hub node even when expanded
+          _clusters[clusterId] = GraphCluster(
+            id: clusterId,
+            name: type, // Just type name, not count
+            entities: entities,
+            dominantType: type,
+            isExpanded: true,
+          );
         } else {
-          // Create cluster node
+          // Create cluster node (collapsed)
           _clusters[clusterId] = GraphCluster(
             id: clusterId,
             name: '$type (${entities.length})',
@@ -368,10 +378,13 @@ class _GraphVisualizerState extends State<GraphVisualizer>
           _expandedClusterCenters[clusterId] ?? Offset(centerX, centerY);
 
       // Position entities in a circular cloud around the cluster center
-      // Increase base radius and spacing to prevent overlap
-      final baseRadius =
-          60.0 + (entities.length * 8).clamp(0, 200); // More spread per entity
-      final minSpacing = 40.0; // Minimum distance between nodes
+      // Scale aggressively for large clusters to prevent overlap
+      final count = entities.length;
+      final baseRadius = 100.0 + (count * 20).clamp(0, 1000).toDouble();
+      // More entities per ring for larger clusters, but with bigger spacing
+      final entitiesPerRing = count > 30 ? 10 : (count > 15 ? 8 : 6);
+      final ringSpacing =
+          60.0 + (count > 30 ? 40.0 : (count > 15 ? 20.0 : 0.0));
 
       for (var i = 0; i < entities.length; i++) {
         final entity = entities[i];
@@ -379,10 +392,9 @@ class _GraphVisualizerState extends State<GraphVisualizer>
 
         // Use golden angle for even distribution around circle
         final angle = i * 2.39996; // Golden angle in radians (~137.5 degrees)
-        // Start from outer edge and work inward slightly for visual balance
-        final ringIndex = i ~/ 8; // New ring every 8 entities
-        final radius = baseRadius + (ringIndex * minSpacing);
-        final jitter = (random.nextDouble() - 0.5) * 15; // Smaller jitter
+        final ringIndex = i ~/ entitiesPerRing;
+        final radius = baseRadius + (ringIndex * ringSpacing);
+        final jitter = (random.nextDouble() - 0.5) * 25;
 
         _nodes.add(GraphNode(
           id: entity.id,
@@ -396,17 +408,28 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       }
     }
 
-    // Add cluster nodes
+    // Add cluster nodes (both collapsed and expanded as hubs)
     for (final cluster in _clusters.values) {
+      // For expanded clusters, position at saved center
+      final position =
+          cluster.isExpanded && _expandedClusterCenters.containsKey(cluster.id)
+              ? _expandedClusterCenters[cluster.id]!
+              : Offset(
+                  centerX + (random.nextDouble() - 0.5) * 300,
+                  centerY + (random.nextDouble() - 0.5) * 300,
+                );
+
       _nodes.add(GraphNode(
         id: cluster.id,
         name: cluster.name,
-        type: cluster.dominantType,
-        position: Offset(
-          centerX + (random.nextDouble() - 0.5) * 300,
-          centerY + (random.nextDouble() - 0.5) * 300,
-        ),
-        clusterEntityIds: cluster.entities.map((e) => e.id).toList(),
+        type: cluster.isExpanded
+            ? 'HUB'
+            : cluster.dominantType, // Mark expanded as HUB
+        position: position,
+        clusterEntityIds: cluster.isExpanded
+            ? null
+            : cluster.entities.map((e) => e.id).toList(),
+        isCluster: !cluster.isExpanded, // Only clickable to expand if collapsed
       ));
     }
 
@@ -480,26 +503,23 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       }
     }
 
-    // For expanded clusters, find hub nodes and ensure they connect to "You"
+    // For expanded clusters: connect cluster hub to "You" (no edges to individual entities)
     for (final clusterId in _expandedClusters) {
-      // Look for hub nodes in the expanded entities
-      final clusterEntities = expandedClusterEntities[clusterId] ?? [];
-      final hubNodes = clusterEntities.where((e) => e.type == 'HUB');
-      for (final hub in hubNodes) {
-        final edgeExists = _edges.any(
-          (e) =>
-              (e.sourceId == hub.id && e.targetId == youNode.id) ||
-              (e.sourceId == youNode.id && e.targetId == hub.id),
-        );
-        if (!edgeExists) {
-          _edges.add(GraphEdge(
-            sourceId: youNode.id,
-            targetId: hub.id,
-            type: 'HAS_DATA',
-            weight: 0.8,
-          ));
-        }
+      // Connect cluster hub to "You"
+      final hubEdgeExists = _edges.any(
+        (e) =>
+            (e.sourceId == clusterId && e.targetId == youNode.id) ||
+            (e.sourceId == youNode.id && e.targetId == clusterId),
+      );
+      if (!hubEdgeExists) {
+        _edges.add(GraphEdge(
+          sourceId: youNode.id,
+          targetId: clusterId,
+          type: 'CONTAINS',
+          weight: 0.7,
+        ));
       }
+      // Entities in the cloud are NOT connected to hub - they just orbit around it
     }
   }
 
@@ -628,8 +648,45 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         force += toClusterCenter * attractionStrength;
       }
 
+      // Cluster hub nodes should stay at the dynamic center of their cloud
+      // This is the PRIMARY force for expanded cluster hubs - override other forces
+      if (node.id.startsWith('cluster_') &&
+          _expandedClusters.contains(node.id)) {
+        // Calculate dynamic center of all entities in this cluster
+        final clusterEntityNodes = _nodes
+            .where(
+              (n) => _entitySourceCluster[n.id] == node.id,
+            )
+            .toList();
+
+        if (clusterEntityNodes.isNotEmpty) {
+          // Calculate centroid of all cluster entities
+          double sumX = 0, sumY = 0;
+          for (final entityNode in clusterEntityNodes) {
+            sumX += entityNode.position.dx;
+            sumY += entityNode.position.dy;
+          }
+          final centroid = Offset(
+            sumX / clusterEntityNodes.length,
+            sumY / clusterEntityNodes.length,
+          );
+
+          // VERY strong attraction to centroid - this overrides other forces
+          // Just snap to centroid directly for stability
+          node.position = centroid;
+          node.velocity = Offset.zero;
+
+          // Update saved center
+          _expandedClusterCenters[node.id] = centroid;
+
+          // Skip all other force calculations for this node
+          continue;
+        }
+      }
+
       // Hub nodes should stay closer to center (where "You" is)
-      if (node.type == 'HUB') {
+      // But NOT expanded cluster hubs - they follow their cloud
+      if (node.type == 'HUB' && !_expandedClusters.contains(node.id)) {
         final toCenter = center - node.position;
         force += toCenter * 0.02 * forceScale;
       }
@@ -905,16 +962,14 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       children: [
         FloatingActionButton.small(
           heroTag: 'zoom_in',
-          onPressed: () =>
-              setState(() => _scale = (_scale * 1.2).clamp(0.3, 3.0)),
+          onPressed: () => _zoomAroundCenter(1.2),
           backgroundColor: Colors.white24,
           child: const Icon(Icons.add, color: Colors.white),
         ),
         const SizedBox(height: 8),
         FloatingActionButton.small(
           heroTag: 'zoom_out',
-          onPressed: () =>
-              setState(() => _scale = (_scale / 1.2).clamp(0.3, 3.0)),
+          onPressed: () => _zoomAroundCenter(1 / 1.2),
           backgroundColor: Colors.white24,
           child: const Icon(Icons.remove, color: Colors.white),
         ),
@@ -993,6 +1048,25 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         size.width / 2 - graphCenterX * _scale,
         size.height / 2 - graphCenterY * _scale,
       );
+    });
+  }
+
+  void _zoomAroundCenter(double factor) {
+    final size = context.size ?? const Size(400, 400);
+    final screenCenter = Offset(size.width / 2, size.height / 2);
+
+    // Find the world point at screen center before zoom
+    final worldPointAtCenter = (screenCenter - _offset) / _scale;
+
+    // Apply zoom
+    final newScale = (_scale * factor).clamp(0.3, 3.0);
+
+    // Adjust offset so the same world point stays at screen center
+    final newOffset = screenCenter - worldPointAtCenter * newScale;
+
+    setState(() {
+      _scale = newScale;
+      _offset = newOffset;
     });
   }
 
