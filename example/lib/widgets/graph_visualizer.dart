@@ -168,7 +168,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   
   // Clustering state
   Map<String, GraphCluster> _clusters = {};
-  Set<String> _expandedClusters = {};
+  final Set<String> _expandedClusters = {};
 
   // Transformation state
   Offset _offset = Offset.zero;

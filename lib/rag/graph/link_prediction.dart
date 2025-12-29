@@ -972,7 +972,7 @@ class EmbeddingSimilarityLinkPredictor {
             : config.embeddingSimilarityThreshold;
         
         if (similarity >= threshold) {
-          print('[EmbeddingSimilarityLinkPredictor] Candidate: ${entityA.name} <-> ${entityB.name} (similarity: ${similarity.toStringAsFixed(3)}, threshold: ${threshold})');
+          print('[EmbeddingSimilarityLinkPredictor] Candidate: ${entityA.name} <-> ${entityB.name} (similarity: ${similarity.toStringAsFixed(3)}, threshold: $threshold)');
           candidates.add(EmbeddingCandidate(
             entityA: entityA,
             entityB: entityB,

@@ -552,10 +552,13 @@ class CommunitySummarizer {
   });
 
   /// Maximum entities to include in a summary prompt to avoid token overflow
-  static const int _maxEntitiesInPrompt = 20;
+  static const int _maxEntitiesInPrompt = 15;
   
   /// Maximum relationships to include in a summary prompt
-  static const int _maxRelationshipsInPrompt = 30;
+  static const int _maxRelationshipsInPrompt = 20;
+  
+  /// Maximum characters per entity description
+  static const int _maxDescriptionLength = 100;
 
   /// Generate summary for a community
   Future<CommunitySummary> summarize(
@@ -586,10 +589,22 @@ class CommunitySummarizer {
       communityRelationships = communityRelationships.take(_maxRelationshipsInPrompt).toList();
     }
     
-    // Build prompt
+    // Build prompt with truncated descriptions to prevent token overflow
     final entityNames = communityEntities.map((e) => e.name).toList();
     final entityDescriptions = communityEntities
-        .map((e) => e.description ?? '')
+        .map((e) {
+          final desc = e.description ?? '';
+          // Strip HTML tags and truncate long descriptions
+          final cleanDesc = desc
+              .replaceAll(RegExp(r'<[^>]*>'), '') // Remove HTML tags
+              .replaceAll(RegExp(r'-apple-system[^;]*;'), '') // Remove CSS font families
+              .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
+              .trim();
+          if (cleanDesc.length > _maxDescriptionLength) {
+            return '${cleanDesc.substring(0, _maxDescriptionLength)}...';
+          }
+          return cleanDesc;
+        })
         .toList();
     final relationshipStrings = communityRelationships
         .map((r) {
