@@ -144,10 +144,11 @@ class GraphRAG {
       config: _config.extractionConfig,
     );
 
-    // Setup query engine
+    // Setup query engine with LLM for local answer generation
     _queryEngine = HybridQueryEngine(
       repository: _repository,
       embeddingCallback: _embeddingCallback,
+      llmCallback: _llmCallback,
       config: _config.queryConfig,
     );
 
@@ -264,6 +265,38 @@ class GraphRAG {
       query,
       cypherQuery: cypherQuery,
       entityTypes: entityTypes,
+    );
+  }
+  
+  /// Execute a local query with answer generation
+  /// Returns retrieval results plus a generated answer based on top entities
+  Future<HybridQueryResult> queryWithAnswer(
+    String query, {
+    String? cypherQuery,
+    List<String>? entityTypes,
+  }) async {
+    _checkInitialized();
+    return await _queryEngine.queryWithAnswer(
+      query,
+      cypherQuery: cypherQuery,
+      entityTypes: entityTypes,
+    );
+  }
+  
+  /// Stream a local query answer
+  /// Yields tokens as they are generated
+  Stream<String> queryWithAnswerStreaming(
+    String query, {
+    String? cypherQuery,
+    List<String>? entityTypes,
+    required Stream<String> Function(String prompt) llmStreamCallback,
+  }) async* {
+    _checkInitialized();
+    yield* _queryEngine.queryWithAnswerStreaming(
+      query,
+      cypherQuery: cypherQuery,
+      entityTypes: entityTypes,
+      llmStreamCallback: llmStreamCallback,
     );
   }
 

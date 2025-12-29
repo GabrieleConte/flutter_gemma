@@ -18,6 +18,65 @@ class DataSourceTypes {
   ];
 }
 
+/// Hub entities that group data by type (sit between "You" and individual entities)
+class DataHubEntity {
+  /// Get the hub entity ID for a data source type
+  static String idFor(String dataSourceType) {
+    return 'hub_${dataSourceType.toLowerCase()}';
+  }
+  
+  /// Get the display name for a hub entity
+  static String nameFor(String dataSourceType) {
+    switch (dataSourceType.toUpperCase()) {
+      case 'CONTACT':
+      case 'CONTACTS':
+        return 'My Contacts';
+      case 'CALENDAR':
+      case 'CALENDAR_EVENT':
+      case 'EVENT':
+        return 'My Calendar';
+      case 'DOCUMENT':
+      case 'DOCUMENTS':
+      case 'DRIVE':
+        return 'My Documents';
+      case 'PHOTO':
+      case 'PHOTOS':
+        return 'My Photos';
+      case 'PHONE_CALL':
+      case 'PHONE_CALLS':
+      case 'CALL':
+      case 'CALLS':
+        return 'My Calls';
+      case 'NOTE':
+      case 'NOTES':
+        return 'My Notes';
+      default:
+        return 'My Data';
+    }
+  }
+  
+  /// Create the GraphEntity for a data hub
+  static GraphEntity create(String dataSourceType, {List<double>? embedding, int? count}) {
+    final id = idFor(dataSourceType);
+    final name = count != null 
+        ? '${nameFor(dataSourceType)} ($count)'
+        : nameFor(dataSourceType);
+    
+    return GraphEntity(
+      id: id,
+      name: name,
+      type: 'HUB',
+      embedding: embedding,
+      description: 'Hub node grouping all ${dataSourceType.toLowerCase()} data',
+      metadata: {
+        'isHubNode': true,
+        'dataSourceType': dataSourceType,
+      },
+      lastModified: DateTime.now(),
+    );
+  }
+}
+
 /// The central "You" entity that connects all personal data
 class YouEntity {
   /// The fixed ID for the "You" entity
@@ -48,6 +107,9 @@ class YouEntity {
 
 /// Relationship types from "You" to data families
 class YouRelationshipTypes {
+  /// You -> Hub: You have this data category
+  static const String hasData = 'HAS_DATA';
+  
   /// You -> Contact: You know this person
   static const String knows = 'KNOWS';
   
@@ -147,7 +209,7 @@ class LinkPredictionConfig {
     this.enableTemplateLinks = true,
     this.enableEmbeddingSimilarityLinks = true,
     this.embeddingSimilarityThreshold = 0.75,
-    this.sameTypeSimilarityThreshold = 0.55,
+    this.sameTypeSimilarityThreshold = 0.65,
     this.maxEmbeddingCandidates = 100,
   });
 }
@@ -190,6 +252,9 @@ class PredictedLink {
 class LinkPredictor {
   final GraphRepository repository;
   final LinkPredictionConfig config;
+  
+  /// Track created hub entities to avoid duplicates
+  final Set<String> _createdHubs = {};
 
   LinkPredictor({
     required this.repository,
@@ -212,8 +277,81 @@ class LinkPredictor {
       print('[LinkPredictor] Created "You" central entity');
     }
   }
+  
+  /// Ensure a hub entity exists for a data source type
+  /// Returns the hub entity ID
+  Future<String> ensureHubEntityExists({
+    required String dataSourceType,
+    Future<List<double>> Function(String text)? embeddingCallback,
+  }) async {
+    final hubId = DataHubEntity.idFor(dataSourceType);
+    
+    // Check if already created this session
+    if (_createdHubs.contains(hubId)) {
+      return hubId;
+    }
+    
+    final existing = await repository.getEntity(hubId);
+    if (existing == null) {
+      List<double>? embedding;
+      if (embeddingCallback != null) {
+        embedding = await embeddingCallback(
+          DataHubEntity.nameFor(dataSourceType),
+        );
+      }
+      await repository.addEntity(DataHubEntity.create(dataSourceType, embedding: embedding));
+      
+      // Link hub to "You"
+      await repository.addRelationship(GraphRelationship(
+        id: '${YouEntity.id}_${YouRelationshipTypes.hasData}_$hubId',
+        sourceId: YouEntity.id,
+        targetId: hubId,
+        type: YouRelationshipTypes.hasData,
+        weight: 1.0,
+      ));
+      
+      print('[LinkPredictor] Created hub entity: ${DataHubEntity.nameFor(dataSourceType)}');
+    }
+    
+    _createdHubs.add(hubId);
+    return hubId;
+  }
+
+  /// Create a link from an entity to its hub (and hub to "You")
+  /// This replaces direct entity-to-You links with a 2-hop path: Entity -> Hub -> You
+  Future<PredictedLink?> linkToHub({
+    required String entityId,
+    required String dataSourceType,
+    Future<List<double>> Function(String text)? embeddingCallback,
+  }) async {
+    // Verify the entity exists
+    final entity = await repository.getEntity(entityId);
+    if (entity == null) return null;
+    
+    // Ensure hub exists (this also links hub to You)
+    final hubId = await ensureHubEntityExists(
+      dataSourceType: dataSourceType,
+      embeddingCallback: embeddingCallback,
+    );
+    
+    final relationshipType = YouRelationshipTypes.forDataSource(dataSourceType);
+    
+    return PredictedLink(
+      sourceEntityId: hubId,
+      targetEntityId: entityId,
+      relationshipType: relationshipType,
+      confidence: config.templateWeight,
+      predictionMethod: 'template_hub_link',
+      evidence: {
+        'dataSourceType': dataSourceType,
+        'entityType': entity.type,
+        'hubId': hubId,
+      },
+    );
+  }
 
   /// Create a link from "You" to an entity based on data source type
+  /// @deprecated Use linkToHub instead for new implementations
   Future<PredictedLink?> linkToYou({
     required String entityId,
     required String dataSourceType,
@@ -1016,8 +1154,27 @@ class EmbeddingSimilarityLinkPredictor {
     // Process same-type candidates WITHOUT LLM (use embedding similarity as evidence)
     // This prevents LLM memory exhaustion when there are many same-type pairs
     // Note: EVENT/DATE/CALENDAR pairs are already filtered out during candidate collection
+    // EXCEPTION: PERSON-PERSON pairs with very high similarity go through LLM validation
+    
+    final personPersonCandidates = <EmbeddingCandidate>[];
+    final otherSameTypeCandidates = <EmbeddingCandidate>[];
     
     for (final candidate in sameTypeCandidates) {
+      if (candidate.entityA.type == 'PERSON' && candidate.entityB.type == 'PERSON') {
+        // Only validate PERSON-PERSON with very high similarity (>= 0.80)
+        if (candidate.similarity >= 0.80) {
+          personPersonCandidates.add(candidate);
+        }
+        // Skip lower similarity PERSON-PERSON pairs entirely (prefer fewer, correct relationships)
+      } else {
+        otherSameTypeCandidates.add(candidate);
+      }
+    }
+    
+    print('[EmbeddingSimilarityLinkPredictor] PERSON-PERSON for LLM validation: ${personPersonCandidates.length}');
+    
+    // Process non-PERSON same-type pairs without LLM
+    for (final candidate in otherSameTypeCandidates) {
       // Check if relationship already exists
       final existingRels = await repository.getRelationships(candidate.entityA.id);
       final alreadyLinked = existingRels.any(
@@ -1026,8 +1183,7 @@ class EmbeddingSimilarityLinkPredictor {
       
       if (alreadyLinked) continue;
       
-      // Auto-approve same-type pairs above 0.70 similarity (lowered from 0.80 to allow family members)
-      // Family contacts like Mom/Dad/Sister have ~70-73% similarity due to short names without context
+      // Auto-approve same-type pairs above 0.70 similarity
       if (candidate.similarity >= 0.70) {
         print('[EmbeddingSimilarityLinkPredictor] ✓ Same-type approved: ${candidate.entityA.name} <-> ${candidate.entityB.name} (${(candidate.similarity * 100).toStringAsFixed(1)}%)');
         validLinks.add(PredictedLink(
@@ -1043,6 +1199,56 @@ class EmbeddingSimilarityLinkPredictor {
             'entityBType': candidate.entityB.type,
           },
         ));
+      }
+    }
+    
+    // Process PERSON-PERSON candidates with LLM validation (limited to top 15)
+    final personLlmCandidates = personPersonCandidates.take(15).toList();
+    print('[EmbeddingSimilarityLinkPredictor] Processing ${personLlmCandidates.length} PERSON-PERSON candidates with LLM');
+    
+    for (var idx = 0; idx < personLlmCandidates.length; idx++) {
+      final candidate = personLlmCandidates[idx];
+      try {
+        print('[EmbeddingSimilarityLinkPredictor] Validating PERSON-PERSON ${idx + 1}/${personLlmCandidates.length}: ${candidate.entityA.name} <-> ${candidate.entityB.name}');
+        
+        // Check if relationship already exists
+        final existingRels = await repository.getRelationships(candidate.entityA.id);
+        final alreadyLinked = existingRels.any(
+          (r) => r.targetId == candidate.entityB.id || r.sourceId == candidate.entityB.id,
+        );
+        
+        if (alreadyLinked) {
+          print('[EmbeddingSimilarityLinkPredictor] Skipping - already linked');
+          continue;
+        }
+        
+        // Run specialized PERSON-PERSON validation
+        final result = await _runPersonPersonValidation(candidate);
+        
+        if (result.isValid && result.relationshipType != null) {
+          print('[EmbeddingSimilarityLinkPredictor] ✓ Valid PERSON: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
+          validLinks.add(PredictedLink(
+            sourceEntityId: candidate.entityA.id,
+            targetEntityId: candidate.entityB.id,
+            relationshipType: result.relationshipType!,
+            confidence: result.confidence,
+            predictionMethod: 'embedding_similarity_person_llm_validated',
+            evidence: {
+              'embeddingSimilarity': candidate.similarity,
+              'explanation': result.explanation,
+              'entityAType': candidate.entityA.type,
+              'entityBType': candidate.entityB.type,
+            },
+          ));
+        } else {
+          print('[EmbeddingSimilarityLinkPredictor] ✗ Rejected PERSON-PERSON: ${result.explanation ?? "no clear relationship"}');
+        }
+        
+        // Small delay between LLM calls
+        await Future.delayed(const Duration(milliseconds: 100));
+      } catch (e) {
+        print('[EmbeddingSimilarityLinkPredictor] Error validating PERSON-PERSON ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
+        continue;
       }
     }
     
@@ -1233,6 +1439,74 @@ Respond with ONLY a decimal number (e.g., "0.75"):''';
       confidence: confidence * candidate.similarity, // Weight by embedding similarity
       explanation: explanation,
     );
+  }
+
+  /// Specialized validation for PERSON-PERSON relationships
+  /// More strict than general validation - prefers not creating wrong relationships
+  Future<LinkValidationResult> _runPersonPersonValidation(EmbeddingCandidate candidate) async {
+    final personA = candidate.entityA;
+    final personB = candidate.entityB;
+    
+    print('[PERSON-PERSON] Validating: ${personA.name} <-> ${personB.name}');
+    
+    // Truncate descriptions to avoid token overflow
+    String truncateDesc(String? desc, int maxLen) {
+      if (desc == null || desc.isEmpty) return '';
+      final clean = desc.length > maxLen ? desc.substring(0, maxLen) : desc;
+      return ' ($clean)';
+    }
+    
+    // Very short prompt to stay under token limit
+    final descA = truncateDesc(personA.description, 30);
+    final descB = truncateDesc(personB.description, 30);
+    
+    final prompt = '''Are these people related?
+A: ${personA.name}$descA
+B: ${personB.name}$descB
+
+Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
+
+    try {
+      final response = await llmCallback(prompt);
+      print('[PERSON-PERSON] LLM response: "$response"');
+      
+      final cleanResponse = response.trim().toUpperCase().split('\n').first.trim();
+      
+      if (cleanResponse.contains('FAMILY')) {
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: 'FAMILY_MEMBER',
+          confidence: candidate.similarity * 0.9,
+          explanation: 'LLM identified as family relationship',
+        );
+      } else if (cleanResponse.contains('COLLEAGUE')) {
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: 'COLLEAGUE',
+          confidence: candidate.similarity * 0.85,
+          explanation: 'LLM identified as colleague relationship',
+        );
+      } else if (cleanResponse.contains('FRIEND')) {
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: 'FRIEND',
+          confidence: candidate.similarity * 0.8,
+          explanation: 'LLM identified as friend relationship',
+        );
+      } else {
+        // NONE or unclear - reject
+        return LinkValidationResult(
+          isValid: false,
+          explanation: 'No clear relationship identified',
+        );
+      }
+    } catch (e) {
+      print('[PERSON-PERSON] Error: $e');
+      return LinkValidationResult(
+        isValid: false,
+        explanation: 'Validation error: $e',
+      );
+    }
   }
 
   /// Get all entities with embeddings from repository

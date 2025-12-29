@@ -734,27 +734,29 @@ class BackgroundIndexingService {
         break;
     }
     
-    // Create the "You" link if we have a primary entity
+    // Create the hub link if we have a primary entity
+    // This connects: Hub -> Entity, and ensures Hub -> You exists
     if (primaryEntityId != null) {
-      final youLink = await _linkPredictor.linkToYou(
+      final hubLink = await _linkPredictor.linkToHub(
         entityId: primaryEntityId,
         dataSourceType: dataType,
+        embeddingCallback: _embeddingCallback,
       );
       
-      if (youLink != null) {
+      if (hubLink != null) {
         try {
-          await repository.addRelationship(youLink.toRelationship());
+          await repository.addRelationship(hubLink.toRelationship());
           _updateProgress(_progress.copyWith(
             predictedLinks: _progress.predictedLinks + 1,
           ));
           assert(() {
-            print('[BackgroundIndexing] Added "You" link to $primaryEntityId');
+            print('[BackgroundIndexing] Added hub link to $primaryEntityId');
             return true;
           }());
         } catch (e) {
           // Link might already exist
           assert(() {
-            print('[BackgroundIndexing] "You" link error: $e');
+            print('[BackgroundIndexing] Hub link error: $e');
             return true;
           }());
         }

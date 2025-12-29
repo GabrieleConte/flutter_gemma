@@ -92,20 +92,19 @@ class GraphRAGService {
     }
     
     // Truncate prompt if too long
-    // The Qwen model supports larger context windows - increase limit significantly
-    // Reserve ~200 tokens for output, allow ~800 tokens for input = ~3200 chars
-    // For global queries with community summaries, we need more space
-    // Using 6000 chars allows for richer context while staying within model limits
-    const maxPromptChars = 6000;
+    // Model has 1024 max tokens total (input + output)
+    // Reserve ~300 tokens for output, allow ~700 tokens for input = ~2800 chars
+    // Being conservative to avoid crashes from model template overhead
+    const maxPromptChars = 2500;
     String truncatedPrompt = prompt;
     if (prompt.length > maxPromptChars) {
       // Smart truncation: try to preserve the question part at the end
       // Most prompts have context first, question last
-      final questionMarkers = ['Question:', 'Query:', 'User question:', '\n\nQuestion'];
+      final questionMarkers = ['Question:', 'Query:', 'User question:', '\n\nQuestion', 'Answer:', 'Your JSON:'];
       String? preservedEnd;
       for (final marker in questionMarkers) {
         final markerIndex = prompt.lastIndexOf(marker);
-        if (markerIndex > 0 && markerIndex > prompt.length - 1000) {
+        if (markerIndex > 0 && markerIndex > prompt.length - 500) {
           // Found question marker near the end, preserve it
           preservedEnd = prompt.substring(markerIndex);
           break;
@@ -115,9 +114,13 @@ class GraphRAGService {
       if (preservedEnd != null) {
         // Keep beginning context and question, truncate middle
         final availableForContext = maxPromptChars - preservedEnd.length - 50; // 50 for truncation notice
-        truncatedPrompt = '${prompt.substring(0, availableForContext)}\n...[context truncated]...\n$preservedEnd';
+        if (availableForContext > 100) {
+          truncatedPrompt = '${prompt.substring(0, availableForContext)}\n[...]\n$preservedEnd';
+        } else {
+          truncatedPrompt = '${prompt.substring(0, maxPromptChars)}...';
+        }
       } else {
-        truncatedPrompt = '${prompt.substring(0, maxPromptChars)}...[truncated]';
+        truncatedPrompt = '${prompt.substring(0, maxPromptChars)}...';
       }
       debugPrint('[GraphRAGService] Truncated prompt from ${prompt.length} to ${truncatedPrompt.length} chars');
     }
@@ -247,6 +250,25 @@ class GraphRAGService {
     );
     
     debugPrint('[GraphRAGService] Query returned ${result.entities.length} entities, ${result.communities.length} communities');
+    return result;
+  }
+  
+  /// Query the knowledge graph with generated answer
+  Future<HybridQueryResult> queryWithAnswer(
+    String naturalLanguageQuery, {
+    String? cypherQuery,
+    List<String>? entityTypes,
+  }) async {
+    _checkInitialized();
+    debugPrint('[GraphRAGService] Query with answer: "$naturalLanguageQuery"');
+    
+    final result = await _graphRag!.queryWithAnswer(
+      naturalLanguageQuery,
+      cypherQuery: cypherQuery,
+      entityTypes: entityTypes,
+    );
+    
+    debugPrint('[GraphRAGService] Query returned ${result.entities.length} entities, answer: ${result.generatedAnswer?.substring(0, result.generatedAnswer!.length.clamp(0, 50)) ?? "none"}...');
     return result;
   }
   

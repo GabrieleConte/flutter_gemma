@@ -102,8 +102,8 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
           _streamingAnswer = '';
         });
       } else {
-        // Standard local/hybrid query
-        final result = await _service.query(query);
+        // Local query with answer generation
+        final result = await _service.queryWithAnswer(query);
 
         setState(() {
           _queryHistory.insert(
@@ -114,6 +114,7 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
                 communities: result.communities,
                 contextString: result.contextString,
                 timestamp: DateTime.now(),
+                generatedAnswer: result.generatedAnswer,
               ));
           _isQuerying = false;
         });
@@ -380,6 +381,9 @@ class _QueryResult {
   final bool isGlobalQuery;
   final global.QueryMetadata? globalQueryMetadata;
   final int communityAnswersUsed;
+  
+  /// Generated answer (for local queries with answer generation)
+  final String? generatedAnswer;
 
   _QueryResult({
     required this.query,
@@ -390,6 +394,7 @@ class _QueryResult {
     this.isGlobalQuery = false,
     this.globalQueryMetadata,
     this.communityAnswersUsed = 0,
+    this.generatedAnswer,
   });
 }
 
@@ -423,113 +428,228 @@ class _QueryResultCard extends StatelessWidget {
         subtitle: Text(
           result.isGlobalQuery
               ? 'Global Query (Level ${result.globalQueryMetadata?.communityLevel ?? 0}, ${result.communityAnswersUsed} communities used)'
-              : '${result.entities.length} entities, ${result.communities.length} communities',
+              : '${result.entities.length} entities found',
           style: const TextStyle(fontSize: 12, color: Colors.white70),
         ),
+        initiallyExpanded: true,
         children: [
+          // === ANSWER SECTION (both local and global) ===
           if (result.isGlobalQuery && result.contextString.isNotEmpty)
+            _buildAnswerSection(
+              title: 'Global Answer',
+              answer: result.contextString,
+              color: Colors.purple,
+            ),
+          if (!result.isGlobalQuery && result.generatedAnswer != null && result.generatedAnswer!.isNotEmpty)
+            _buildAnswerSection(
+              title: 'Answer',
+              answer: result.generatedAnswer!,
+              color: Colors.blue,
+            ),
+          
+          // === RELEVANT SOURCES SECTION ===
+          if (result.entities.isNotEmpty || result.communities.isNotEmpty)
+            _buildRelevantSourcesSection(),
+          
+          // === METADATA SECTION ===
+          if (result.isGlobalQuery && result.globalQueryMetadata != null)
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Text(
+                'Map: ${result.globalQueryMetadata!.mapPhaseDuration.inMilliseconds}ms | '
+                'Reduce: ${result.globalQueryMetadata!.reducePhaseDuration.inMilliseconds}ms | '
+                'Total: ${result.globalQueryMetadata!.totalDuration.inMilliseconds}ms',
+                style: const TextStyle(fontSize: 10, color: Colors.white54),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildAnswerSection({
+    required String title,
+    required String answer,
+    required Color color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 14, color: color),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Text(
+              answer,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildRelevantSourcesSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.source, size: 14, color: Colors.white70),
+              const SizedBox(width: 6),
+              const Text(
+                'Relevant Sources',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white70,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Top 3 entities as chips
+          if (result.entities.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: result.entities.take(3).map((scored) {
+                return _EntityChip(
+                  entity: scored.entity,
+                  score: scored.score,
+                );
+              }).toList(),
+            ),
+          // Community if available
+          if (result.communities.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.purple.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Global Answer:',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.purple),
-                  ),
-                  const SizedBox(height: 8),
+                  const Icon(Icons.group_work, size: 14, color: Colors.purple),
+                  const SizedBox(width: 6),
                   Text(
-                    result.contextString,
-                    style: const TextStyle(color: Colors.white),
+                    'Community L${result.communities.first.community.level}',
+                    style: const TextStyle(
+                      color: Colors.purple,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                  if (result.globalQueryMetadata != null) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      'Map phase: ${result.globalQueryMetadata!.mapPhaseDuration.inMilliseconds}ms | '
-                      'Reduce phase: ${result.globalQueryMetadata!.reducePhaseDuration.inMilliseconds}ms | '
-                      'Total: ${result.globalQueryMetadata!.totalDuration.inMilliseconds}ms',
-                      style:
-                          const TextStyle(fontSize: 10, color: Colors.white54),
+                  if (result.communities.first.community.summary.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '• ${_truncate(result.communities.first.community.summary, 50)}',
+                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ],
               ),
             ),
-          if (!result.isGlobalQuery && result.entities.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Entities:',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                  const SizedBox(height: 4),
-                  ...result.entities.take(5).map((e) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: _getTypeColor(e.entity.type),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                e.entity.type,
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                e.entity.name,
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                            ),
-                            Text(
-                              '${(e.score * 100).toStringAsFixed(0)}%',
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.white54),
-                            ),
-                          ],
-                        ),
-                      )),
-                ],
+          ],
+        ],
+      ),
+    );
+  }
+  
+  String _truncate(String text, int maxLength) {
+    if (text.length <= maxLength) return text;
+    return '${text.substring(0, maxLength)}...';
+  }
+}
+
+class _EntityChip extends StatelessWidget {
+  final GraphEntity entity;
+  final double score;
+
+  const _EntityChip({
+    required this.entity,
+    required this.score,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final typeColor = _getTypeColor(entity.type);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: typeColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: typeColor.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: typeColor,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              entity.type.substring(0, entity.type.length.clamp(0, 3)).toUpperCase(),
+              style: const TextStyle(
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
-          if (!result.isGlobalQuery && result.contextString.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Context:',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.black26,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      result.contextString.length > 500
-                          ? '${result.contextString.substring(0, 500)}...'
-                          : result.contextString,
-                      style:
-                          const TextStyle(fontSize: 12, color: Colors.white70),
-                    ),
-                  ),
-                ],
+          ),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 120),
+            child: Text(
+              entity.name,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
               ),
+              overflow: TextOverflow.ellipsis,
             ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '${(score * 100).toStringAsFixed(0)}%',
+            style: TextStyle(
+              fontSize: 10,
+              color: typeColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -545,8 +665,15 @@ class _QueryResultCard extends StatelessWidget {
         return Colors.orange;
       case 'LOCATION':
         return Colors.purple;
+      case 'PHONE':
+        return Colors.teal;
+      case 'EMAIL':
+        return Colors.red;
+      case 'DATE':
+      case 'TIME':
+        return Colors.amber;
       default:
-        return Colors.grey;
+        return Colors.blueGrey;
     }
   }
 }

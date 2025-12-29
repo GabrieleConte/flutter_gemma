@@ -281,18 +281,26 @@ Your JSON:''';
     final startDate = event['startDate'] ?? event['start'] ?? '';
     final endDate = event['endDate'] ?? event['end'] ?? '';
 
-    return '''Extract entities and relationships from this event.
+    // Build a more explicit prompt that ensures location is extracted
+    final locationInstruction = location.toString().isNotEmpty
+        ? '\nIMPORTANT: Extract "$location" as a LOCATION entity and link it to the event with LOCATED_IN.'
+        : '';
 
-Event:
+    return '''Extract entities from this calendar event.
+
 Title: $title
 Location: $location
 Description: $description
 Attendees: $attendees
-Start: $startDate
-End: $endDate
+Date: $startDate to $endDate
+$locationInstruction
+Required extractions:
+1. The event itself (type: EVENT)
+2. Each attendee as PERSON
+3. The location as LOCATION (if present)
 
-Return JSON with this exact format:
-{"entities":[{"name":"EventTitle","type":"EVENT"},{"name":"PersonName","type":"PERSON"},{"name":"PlaceName","type":"LOCATION"}],"relationships":[{"source":"PersonName","target":"EventTitle","type":"ATTENDS"}]}
+Return JSON:
+{"entities":[{"name":"Event Name","type":"EVENT"},{"name":"Location Name","type":"LOCATION"},{"name":"Person","type":"PERSON"}],"relationships":[{"source":"Event Name","target":"Location Name","type":"LOCATED_IN"},{"source":"Person","target":"Event Name","type":"ATTENDS"}]}
 
 Your JSON:''';
   }

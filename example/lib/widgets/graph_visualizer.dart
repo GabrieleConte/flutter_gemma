@@ -10,12 +10,13 @@ class GraphNode {
   Offset position;
   Offset velocity;
   bool isDragging;
-  
+
   /// For cluster nodes: the entity IDs contained in this cluster
   final List<String>? clusterEntityIds;
-  
+
   /// Whether this is a cluster node
-  bool get isCluster => clusterEntityIds != null && clusterEntityIds!.isNotEmpty;
+  bool get isCluster =>
+      clusterEntityIds != null && clusterEntityIds!.isNotEmpty;
 
   GraphNode({
     required this.id,
@@ -28,10 +29,12 @@ class GraphNode {
 
   Color get color {
     if (isCluster) return Colors.blueGrey;
-    
+
     switch (type.toUpperCase()) {
       case 'SELF':
         return Colors.amber; // "You" central node - golden
+      case 'HUB':
+        return Colors.indigo.shade300; // Hub nodes - indigo
       case 'PERSON':
         return Colors.blue;
       case 'ORGANIZATION':
@@ -65,10 +68,12 @@ class GraphNode {
 
   IconData get icon {
     if (isCluster) return Icons.workspaces;
-    
+
     switch (type.toUpperCase()) {
       case 'SELF':
         return Icons.account_circle; // "You" central node
+      case 'HUB':
+        return Icons.hub; // Hub node
       case 'PERSON':
         return Icons.person;
       case 'ORGANIZATION':
@@ -131,7 +136,7 @@ class GraphCluster {
     required this.dominantType,
     this.isExpanded = false,
   });
-  
+
   int get size => entities.length;
 }
 
@@ -140,10 +145,10 @@ class GraphVisualizer extends StatefulWidget {
   final List<GraphEntity> entities;
   final List<GraphRelationship> relationships;
   final void Function(GraphEntity entity)? onEntityTap;
-  
+
   /// Threshold for clustering - types with more than this many nodes will be clustered
   final int clusterThreshold;
-  
+
   /// Whether to enable clustering mode
   final bool enableClustering;
 
@@ -165,10 +170,16 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   late List<GraphNode> _nodes;
   late List<GraphEdge> _edges;
   late AnimationController _simulationController;
-  
+
   // Clustering state
   Map<String, GraphCluster> _clusters = {};
   final Set<String> _expandedClusters = {};
+
+  // Track which entities came from which cluster (for cloud grouping)
+  final Map<String, String> _entitySourceCluster = {};
+
+  // Track cluster center positions when expanded
+  final Map<String, Offset> _expandedClusterCenters = {};
 
   // Transformation state
   Offset _offset = Offset.zero;
@@ -185,6 +196,49 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   static const double _centeringStrength = 0.01;
   static const double _damping = 0.9;
   static const double _minDistance = 50.0;
+
+  // Virtual canvas size - much larger than screen for panning
+  double _virtualCanvasSize = 2000.0;
+
+  // Dynamic node sizing based on total entities
+  double _getNodeRadius(GraphNode node, {bool isSelected = false}) {
+    final totalNodes = _nodes.length;
+
+    // Base size reduction when many nodes visible
+    double scaleFactor = 1.0;
+    if (totalNodes > 30) {
+      scaleFactor = 30 / totalNodes; // Scale down proportionally
+      scaleFactor = scaleFactor.clamp(0.5, 1.0); // Min 50% of original size
+    }
+
+    // Type-based sizing
+    double baseRadius;
+    switch (node.type) {
+      case 'SELF':
+        baseRadius = 28.0; // "You" is largest
+        break;
+      case 'HUB':
+        baseRadius = 22.0; // Hubs are medium-large
+        break;
+      case 'PERSON':
+        baseRadius = 16.0;
+        break;
+      case 'EVENT':
+      case 'ORGANIZATION':
+        baseRadius = 14.0;
+        break;
+      default:
+        baseRadius = 12.0; // Other types are smaller
+    }
+
+    // Is this a cluster node?
+    if (node.clusterEntityIds != null && node.clusterEntityIds!.isNotEmpty) {
+      baseRadius = 24.0; // Cluster nodes are large
+    }
+
+    final scaledRadius = baseRadius * scaleFactor;
+    return isSelected ? scaledRadius * 1.2 : scaledRadius;
+  }
 
   @override
   void initState() {
@@ -214,33 +268,55 @@ class _GraphVisualizerState extends State<GraphVisualizer>
 
   void _initializeGraph() {
     final random = Random(42);
-    const centerX = 200.0;
-    const centerY = 200.0;
+    // Use virtual canvas center for positioning
+    final centerX = _virtualCanvasSize / 2;
+    final centerY = _virtualCanvasSize / 2;
 
     if (widget.enableClustering) {
       _initializeWithClustering(random, centerX, centerY);
     } else {
       _initializeWithoutClustering(random, centerX, centerY);
     }
+
+    // Set initial offset to center the virtual canvas in the view
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final size = context.size ?? const Size(400, 400);
+        setState(() {
+          // Center the virtual canvas center in the screen
+          _offset = Offset(
+            size.width / 2 - (_virtualCanvasSize / 2) * _scale,
+            size.height / 2 - (_virtualCanvasSize / 2) * _scale,
+          );
+        });
+      }
+    });
   }
-  
-  void _initializeWithClustering(Random random, double centerX, double centerY) {
+
+  void _initializeWithClustering(
+      Random random, double centerX, double centerY) {
+    // Dynamically size virtual canvas based on entity count
+    final totalEntities = widget.entities.length;
+    _virtualCanvasSize = (1500.0 + totalEntities * 30).clamp(1500.0, 5000.0);
+
     // Group entities by type
     final entitiesByType = <String, List<GraphEntity>>{};
     for (final entity in widget.entities) {
       entitiesByType.putIfAbsent(entity.type, () => []);
       entitiesByType[entity.type]!.add(entity);
     }
-    
+
     // Create clusters for types that exceed threshold
     _clusters = {};
     final clusteredEntityIds = <String>{};
     final unclustered = <GraphEntity>[];
-    
+    // Track which entities come from expanded clusters
+    final expandedClusterEntities = <String, List<GraphEntity>>{};
+
     for (final entry in entitiesByType.entries) {
       final type = entry.key;
       final entities = entry.value;
-      
+
       // Always show "You" node and don't cluster types with few entities
       if (type == 'SELF' || entities.length <= widget.clusterThreshold) {
         unclustered.addAll(entities);
@@ -248,8 +324,11 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         // Check if this cluster is expanded
         final clusterId = 'cluster_$type';
         if (_expandedClusters.contains(clusterId)) {
-          // Show all entities from expanded cluster
-          unclustered.addAll(entities);
+          // Track these entities as coming from this expanded cluster
+          expandedClusterEntities[clusterId] = entities;
+          for (final e in entities) {
+            _entitySourceCluster[e.id] = clusterId;
+          }
         } else {
           // Create cluster node
           _clusters[clusterId] = GraphCluster(
@@ -263,11 +342,11 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         }
       }
     }
-    
-    // Create nodes for unclustered entities
+
+    // Create nodes for unclustered entities (not from expanded clusters)
     final visibleEntityIds = <String>{};
     _nodes = [];
-    
+
     for (final entity in unclustered) {
       visibleEntityIds.add(entity.id);
       _nodes.add(GraphNode(
@@ -280,7 +359,43 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         ),
       ));
     }
-    
+
+    // Create nodes for expanded cluster entities - position in a cloud around saved center
+    for (final entry in expandedClusterEntities.entries) {
+      final clusterId = entry.key;
+      final entities = entry.value;
+      final clusterCenter =
+          _expandedClusterCenters[clusterId] ?? Offset(centerX, centerY);
+
+      // Position entities in a circular cloud around the cluster center
+      // Increase base radius and spacing to prevent overlap
+      final baseRadius =
+          60.0 + (entities.length * 8).clamp(0, 200); // More spread per entity
+      final minSpacing = 40.0; // Minimum distance between nodes
+
+      for (var i = 0; i < entities.length; i++) {
+        final entity = entities[i];
+        visibleEntityIds.add(entity.id);
+
+        // Use golden angle for even distribution around circle
+        final angle = i * 2.39996; // Golden angle in radians (~137.5 degrees)
+        // Start from outer edge and work inward slightly for visual balance
+        final ringIndex = i ~/ 8; // New ring every 8 entities
+        final radius = baseRadius + (ringIndex * minSpacing);
+        final jitter = (random.nextDouble() - 0.5) * 15; // Smaller jitter
+
+        _nodes.add(GraphNode(
+          id: entity.id,
+          name: entity.name,
+          type: entity.type,
+          position: Offset(
+            clusterCenter.dx + cos(angle) * radius + jitter,
+            clusterCenter.dy + sin(angle) * radius + jitter,
+          ),
+        ));
+      }
+    }
+
     // Add cluster nodes
     for (final cluster in _clusters.values) {
       _nodes.add(GraphNode(
@@ -294,13 +409,13 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         clusterEntityIds: cluster.entities.map((e) => e.id).toList(),
       ));
     }
-    
+
     // Create edges - connect to cluster if entity is clustered
     _edges = [];
     for (final rel in widget.relationships) {
       String sourceId = rel.sourceId;
       String targetId = rel.targetId;
-      
+
       // Redirect edges to cluster nodes if source/target is clustered
       if (clusteredEntityIds.contains(sourceId)) {
         final cluster = _clusters.values.firstWhere(
@@ -316,16 +431,19 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         );
         targetId = cluster.id;
       }
-      
+
       // Only add edge if both endpoints are visible
-      final sourceVisible = visibleEntityIds.contains(sourceId) || _clusters.containsKey(sourceId);
-      final targetVisible = visibleEntityIds.contains(targetId) || _clusters.containsKey(targetId);
-      
+      final sourceVisible = visibleEntityIds.contains(sourceId) ||
+          _clusters.containsKey(sourceId);
+      final targetVisible = visibleEntityIds.contains(targetId) ||
+          _clusters.containsKey(targetId);
+
       if (sourceVisible && targetVisible && sourceId != targetId) {
         // Avoid duplicate edges
         final edgeExists = _edges.any(
-          (e) => (e.sourceId == sourceId && e.targetId == targetId) ||
-                 (e.sourceId == targetId && e.targetId == sourceId),
+          (e) =>
+              (e.sourceId == sourceId && e.targetId == targetId) ||
+              (e.sourceId == targetId && e.targetId == sourceId),
         );
         if (!edgeExists) {
           _edges.add(GraphEdge(
@@ -337,9 +455,60 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         }
       }
     }
+
+    // Ensure clusters and expanded cluster entities connect to "You" via hub representation
+    // Find the "You" node
+    final youNode = _nodes.firstWhere(
+      (n) => n.type == 'SELF',
+      orElse: () => _nodes.first,
+    );
+
+    // For collapsed clusters, create edge from cluster to "You"
+    for (final cluster in _clusters.values) {
+      final edgeExists = _edges.any(
+        (e) =>
+            (e.sourceId == cluster.id && e.targetId == youNode.id) ||
+            (e.sourceId == youNode.id && e.targetId == cluster.id),
+      );
+      if (!edgeExists) {
+        _edges.add(GraphEdge(
+          sourceId: youNode.id,
+          targetId: cluster.id,
+          type: 'CONTAINS',
+          weight: 0.5,
+        ));
+      }
+    }
+
+    // For expanded clusters, find hub nodes and ensure they connect to "You"
+    for (final clusterId in _expandedClusters) {
+      // Look for hub nodes in the expanded entities
+      final clusterEntities = expandedClusterEntities[clusterId] ?? [];
+      final hubNodes = clusterEntities.where((e) => e.type == 'HUB');
+      for (final hub in hubNodes) {
+        final edgeExists = _edges.any(
+          (e) =>
+              (e.sourceId == hub.id && e.targetId == youNode.id) ||
+              (e.sourceId == youNode.id && e.targetId == hub.id),
+        );
+        if (!edgeExists) {
+          _edges.add(GraphEdge(
+            sourceId: youNode.id,
+            targetId: hub.id,
+            type: 'HAS_DATA',
+            weight: 0.8,
+          ));
+        }
+      }
+    }
   }
-  
-  void _initializeWithoutClustering(Random random, double centerX, double centerY) {
+
+  void _initializeWithoutClustering(
+      Random random, double centerX, double centerY) {
+    // Dynamically size virtual canvas based on entity count
+    final totalEntities = widget.entities.length;
+    _virtualCanvasSize = (1500.0 + totalEntities * 30).clamp(1500.0, 5000.0);
+
     final entityIds = widget.entities.map((e) => e.id).toSet();
 
     _nodes = widget.entities.map((entity) {
@@ -366,15 +535,30 @@ class _GraphVisualizerState extends State<GraphVisualizer>
             ))
         .toList();
   }
-  
+
   void _toggleCluster(String clusterId) {
     setState(() {
       if (_expandedClusters.contains(clusterId)) {
+        // Collapsing: remove center position tracking
         _expandedClusters.remove(clusterId);
+        _expandedClusterCenters.remove(clusterId);
+        // Clear entity source cluster mapping for this cluster
+        _entitySourceCluster.removeWhere((_, v) => v == clusterId);
       } else {
+        // Expanding: save current cluster node position as center
+        final clusterNode = _nodes.firstWhere(
+          (n) => n.id == clusterId,
+          orElse: () => _nodes.first,
+        );
+        _expandedClusterCenters[clusterId] = clusterNode.position;
         _expandedClusters.add(clusterId);
       }
       _initializeGraph();
+
+      // Auto-fit view after cluster expansion/collapse with a slight delay
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) _fitAllNodes();
+      });
     });
   }
 
@@ -383,6 +567,14 @@ class _GraphVisualizerState extends State<GraphVisualizer>
 
     final size = context.size ?? const Size(400, 400);
     final center = Offset(size.width / 2, size.height / 2);
+
+    // Adaptive parameters based on node count - more nodes = faster settling
+    final nodeCount = _nodes.length;
+    final adaptiveDamping =
+        nodeCount > 30 ? 0.8 : (nodeCount > 15 ? 0.85 : _damping);
+    final velocityThreshold =
+        nodeCount > 30 ? 0.5 : (nodeCount > 15 ? 0.3 : 0.1);
+    final forceScale = nodeCount > 30 ? 0.5 : (nodeCount > 15 ? 0.7 : 1.0);
 
     // Calculate forces for each node
     for (final node in _nodes) {
@@ -395,10 +587,51 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         if (other.id == node.id) continue;
 
         final delta = node.position - other.position;
-        final distance = max(delta.distance, _minDistance);
-        final repulsion =
-            delta / distance * (_repulsionStrength / (distance * distance));
-        force += repulsion;
+        final distance = max(delta.distance, 1.0); // Avoid division by zero
+
+        // Check if same cluster
+        final nodeCluster = _entitySourceCluster[node.id];
+        final otherCluster = _entitySourceCluster[other.id];
+        final sameCluster = nodeCluster != null && nodeCluster == otherCluster;
+
+        if (sameCluster) {
+          // Cloud behavior: only push when overlapping, no long-range interaction
+          const cloudMinDistance = 45.0;
+          if (distance < cloudMinDistance) {
+            final overlap = cloudMinDistance - distance;
+            // Weaker push with more nodes to avoid chain reactions
+            final pushStrength = overlap * 0.08 * forceScale;
+            final pushDir =
+                delta.distance > 0.1 ? delta / distance : const Offset(1, 0);
+            force += pushDir * pushStrength;
+          }
+        } else {
+          // Normal repulsion for different clusters
+          final effectiveDistance = max(distance, _minDistance);
+          final repulsion = delta /
+              effectiveDistance *
+              (_repulsionStrength / (effectiveDistance * effectiveDistance));
+          force += repulsion * forceScale;
+        }
+      }
+
+      // Extra attraction to cluster center for entities from expanded clusters
+      final sourceCluster = _entitySourceCluster[node.id];
+      if (sourceCluster != null &&
+          _expandedClusterCenters.containsKey(sourceCluster)) {
+        final clusterCenter = _expandedClusterCenters[sourceCluster]!;
+        final toClusterCenter = clusterCenter - node.position;
+        final distToCenter = toClusterCenter.distance;
+        // Weaker center pull with many nodes - just enough to keep cloud coherent
+        final attractionStrength =
+            (0.015 + (distToCenter > 100 ? 0.02 : 0)) * forceScale;
+        force += toClusterCenter * attractionStrength;
+      }
+
+      // Hub nodes should stay closer to center (where "You" is)
+      if (node.type == 'HUB') {
+        final toCenter = center - node.position;
+        force += toCenter * 0.02 * forceScale;
       }
 
       // Attraction along edges
@@ -412,23 +645,33 @@ class _GraphVisualizerState extends State<GraphVisualizer>
 
         if (other != null) {
           final delta = other.position - node.position;
-          final attraction = delta * _attractionStrength * edge.weight;
+          final attraction =
+              delta * _attractionStrength * edge.weight * forceScale;
           force += attraction;
         }
       }
 
-      // Centering force
-      final toCenter = center - node.position;
-      force += toCenter * _centeringStrength;
+      // Centering force - pull towards virtual center, not screen center
+      // This keeps the graph coherent in virtual space
+      final virtualCenter =
+          Offset(_virtualCanvasSize / 2, _virtualCanvasSize / 2);
+      final toVirtualCenter = virtualCenter - node.position;
+      force += toVirtualCenter * _centeringStrength * forceScale * 0.5;
 
-      // Update velocity and position
-      node.velocity = (node.velocity + force) * _damping;
-      node.position += node.velocity;
+      // Update velocity and position with adaptive damping
+      node.velocity = (node.velocity + force) * adaptiveDamping;
 
-      // Keep within bounds
+      // Adaptive velocity threshold - higher with more nodes
+      if (node.velocity.distance < velocityThreshold) {
+        node.velocity = Offset.zero;
+      } else {
+        node.position += node.velocity;
+      }
+
+      // Keep within virtual canvas bounds (much larger than screen)
       node.position = Offset(
-        node.position.dx.clamp(50, size.width - 50),
-        node.position.dy.clamp(50, size.height - 50),
+        node.position.dx.clamp(50, _virtualCanvasSize - 50),
+        node.position.dy.clamp(50, _virtualCanvasSize - 50),
       );
     }
 
@@ -513,7 +756,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
             _toggleCluster(node.id);
             return;
           }
-          
+
           setState(() => _selectedNodeId = node.id);
           final entity = widget.entities.firstWhere(
             (e) => e.id == node.id,
@@ -536,6 +779,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
                 offset: _offset,
                 scale: _scale,
                 selectedNodeId: _selectedNodeId,
+                getNodeRadius: _getNodeRadius,
               ),
               size: Size.infinite,
             ),
@@ -570,16 +814,19 @@ class _GraphVisualizerState extends State<GraphVisualizer>
                   children: [
                     Text(
                       '${widget.entities.length} entities total',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                     Text(
                       '${_nodes.length} nodes, ${_edges.length} edges shown',
-                      style: const TextStyle(color: Colors.white54, fontSize: 11),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 11),
                     ),
                     if (_clusters.isNotEmpty)
                       Text(
                         '${_clusters.length} clusters (tap to expand)',
-                        style: const TextStyle(color: Colors.white38, fontSize: 10),
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 10),
                       ),
                   ],
                 ),
@@ -587,7 +834,8 @@ class _GraphVisualizerState extends State<GraphVisualizer>
             ),
 
             // Selected node info
-            if (_selectedNodeId != null && !_selectedNodeId!.startsWith('cluster_'))
+            if (_selectedNodeId != null &&
+                !_selectedNodeId!.startsWith('cluster_'))
               Positioned(
                 bottom: 8,
                 left: 8,
@@ -672,16 +920,80 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         ),
         const SizedBox(height: 8),
         FloatingActionButton.small(
-          heroTag: 'reset',
-          onPressed: () => setState(() {
-            _scale = 1.0;
-            _offset = Offset.zero;
-          }),
+          heroTag: 'fit_all',
+          onPressed: _fitAllNodes,
           backgroundColor: Colors.white24,
+          tooltip: 'Fit all nodes',
+          child: const Icon(Icons.fit_screen, color: Colors.white),
+        ),
+        const SizedBox(height: 8),
+        FloatingActionButton.small(
+          heroTag: 'reset',
+          onPressed: _centerOnGraph,
+          backgroundColor: Colors.white24,
+          tooltip: 'Center view',
           child: const Icon(Icons.center_focus_strong, color: Colors.white),
         ),
       ],
     );
+  }
+
+  void _centerOnGraph() {
+    if (_nodes.isEmpty) return;
+
+    final size = context.size ?? const Size(400, 400);
+
+    // Find center of all nodes
+    double sumX = 0, sumY = 0;
+    for (final node in _nodes) {
+      sumX += node.position.dx;
+      sumY += node.position.dy;
+    }
+    final graphCenterX = sumX / _nodes.length;
+    final graphCenterY = sumY / _nodes.length;
+
+    setState(() {
+      _scale = 1.0;
+      _offset = Offset(
+        size.width / 2 - graphCenterX * _scale,
+        size.height / 2 - graphCenterY * _scale,
+      );
+    });
+  }
+
+  void _fitAllNodes() {
+    if (_nodes.isEmpty) return;
+
+    final size = context.size ?? const Size(400, 400);
+
+    // Find bounding box of all nodes
+    double minX = double.infinity, maxX = double.negativeInfinity;
+    double minY = double.infinity, maxY = double.negativeInfinity;
+
+    for (final node in _nodes) {
+      minX = min(minX, node.position.dx);
+      maxX = max(maxX, node.position.dx);
+      minY = min(minY, node.position.dy);
+      maxY = max(maxY, node.position.dy);
+    }
+
+    final graphWidth = maxX - minX + 100; // Add padding
+    final graphHeight = maxY - minY + 100;
+    final graphCenterX = (minX + maxX) / 2;
+    final graphCenterY = (minY + maxY) / 2;
+
+    // Calculate scale to fit all nodes with some padding
+    final scaleX = (size.width - 100) / graphWidth;
+    final scaleY = (size.height - 150) / graphHeight;
+    final newScale = min(scaleX, scaleY).clamp(0.3, 2.0);
+
+    setState(() {
+      _scale = newScale;
+      _offset = Offset(
+        size.width / 2 - graphCenterX * _scale,
+        size.height / 2 - graphCenterY * _scale,
+      );
+    });
   }
 
   Widget _buildSelectedNodeInfo() {
@@ -757,12 +1069,14 @@ class _GraphPainter extends CustomPainter {
   final Offset offset;
   final double scale;
   final String? selectedNodeId;
+  final double Function(GraphNode node, {bool isSelected}) getNodeRadius;
 
   _GraphPainter({
     required this.nodes,
     required this.edges,
     required this.offset,
     required this.scale,
+    required this.getNodeRadius,
     this.selectedNodeId,
   });
 
@@ -803,7 +1117,7 @@ class _GraphPainter extends CustomPainter {
     // Draw nodes
     for (final node in nodes) {
       final isSelected = node.id == selectedNodeId;
-      final radius = isSelected ? 22.0 : 18.0;
+      final radius = getNodeRadius(node, isSelected: isSelected);
 
       // Node shadow
       canvas.drawCircle(
@@ -831,7 +1145,8 @@ class _GraphPainter extends CustomPainter {
         );
       }
 
-      // Node label
+      // Node label - adjust font size based on node size
+      final fontSize = (radius * 0.5).clamp(8.0, 12.0);
       final textPainter = TextPainter(
         text: TextSpan(
           text: node.name.length > 10
@@ -839,7 +1154,7 @@ class _GraphPainter extends CustomPainter {
               : node.name,
           style: TextStyle(
             color: Colors.white,
-            fontSize: isSelected ? 11 : 9,
+            fontSize: isSelected ? fontSize + 1 : fontSize,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           ),
         ),

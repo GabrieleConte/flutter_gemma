@@ -41,7 +41,7 @@ class HybridQueryConfig {
   });
 }
 
-/// Result from hybrid query
+/// Result from hybrid query with optional generated answer
 class HybridQueryResult {
   /// Retrieved entities with relevance scores
   final List<ScoredQueryEntity> entities;
@@ -57,6 +57,9 @@ class HybridQueryResult {
   
   /// Query metadata
   final QueryMetadata metadata;
+  
+  /// Generated answer from local retrieval (if answer generation was requested)
+  final String? generatedAnswer;
 
   HybridQueryResult({
     required this.entities,
@@ -64,7 +67,20 @@ class HybridQueryResult {
     this.cypherResults,
     required this.contextString,
     required this.metadata,
+    this.generatedAnswer,
   });
+  
+  /// Create a copy with a generated answer
+  HybridQueryResult withAnswer(String answer) {
+    return HybridQueryResult(
+      entities: entities,
+      communities: communities,
+      cypherResults: cypherResults,
+      contextString: contextString,
+      metadata: metadata,
+      generatedAnswer: answer,
+    );
+  }
 }
 
 /// Entity with query relevance score
@@ -114,6 +130,7 @@ class QueryMetadata {
 class HybridQueryEngine {
   final GraphRepository repository;
   final Future<List<double>> Function(String text) embeddingCallback;
+  final Future<String> Function(String prompt)? llmCallback;
   final HybridQueryConfig config;
   
   late final CypherQueryExecutor _cypherExecutor;
@@ -121,9 +138,121 @@ class HybridQueryEngine {
   HybridQueryEngine({
     required this.repository,
     required this.embeddingCallback,
+    this.llmCallback,
     HybridQueryConfig? config,
   }) : config = config ?? HybridQueryConfig() {
     _cypherExecutor = CypherQueryExecutor(repository);
+  }
+
+  /// Execute a hybrid query with optional answer generation
+  ///
+  /// If [generateAnswer] is true and an LLM callback is available,
+  /// generates a focused answer based on retrieved entities.
+  Future<HybridQueryResult> queryWithAnswer(
+    String query, {
+    String? cypherQuery,
+    List<String>? entityTypes,
+  }) async {
+    // First, get the retrieval results
+    final result = await this.query(query, cypherQuery: cypherQuery, entityTypes: entityTypes);
+    
+    // If no LLM callback, return results without answer
+    if (llmCallback == null) {
+      return result;
+    }
+    
+    // Generate answer from retrieved entities
+    final answer = await _generateLocalAnswer(query, result);
+    return result.withAnswer(answer);
+  }
+  
+  /// Generate a focused answer from local retrieval results
+  Future<String> _generateLocalAnswer(String query, HybridQueryResult result) async {
+    if (llmCallback == null) {
+      return "Answer generation not available.";
+    }
+    
+    if (result.entities.isEmpty) {
+      return "I couldn't find relevant information to answer your question.";
+    }
+    
+    // Build context from top 3 entities (keep very short for token limit)
+    final topEntities = result.entities.take(3).toList();
+    final entityContext = topEntities.map((scored) {
+      final e = scored.entity;
+      // Truncate description to 50 chars max
+      String desc = '';
+      if (e.description != null && e.description!.isNotEmpty) {
+        final cleanDesc = e.description!.length > 50 
+            ? '${e.description!.substring(0, 50)}...'
+            : e.description!;
+        desc = ': $cleanDesc';
+      }
+      return '- ${e.name} (${e.type})$desc';
+    }).join('\n');
+    
+    // Truncate query if too long
+    final shortQuery = query.length > 100 ? '${query.substring(0, 100)}...' : query;
+    
+    // Very short prompt to stay under 1024 tokens (~400 tokens max for prompt)
+    final prompt = '''Answer based on this data:
+$entityContext
+
+Q: $shortQuery
+A (1 sentence):''';
+
+    try {
+      final response = await llmCallback!(prompt);
+      return response.trim();
+    } catch (e) {
+      return "Unable to generate an answer: $e";
+    }
+  }
+  
+  /// Stream tokens while generating a local answer
+  Stream<String> queryWithAnswerStreaming(
+    String query, {
+    String? cypherQuery,
+    List<String>? entityTypes,
+    required Stream<String> Function(String prompt) llmStreamCallback,
+  }) async* {
+    // First, get the retrieval results
+    final result = await this.query(query, cypherQuery: cypherQuery, entityTypes: entityTypes);
+    
+    if (result.entities.isEmpty) {
+      yield "I couldn't find relevant information to answer your question.";
+      return;
+    }
+    
+    // Build context from top entities
+    final topEntities = result.entities.take(5).toList();
+    final entityContext = topEntities.map((scored) {
+      final e = scored.entity;
+      final desc = e.description != null && e.description!.isNotEmpty
+          ? ': ${e.description}'
+          : '';
+      return '- ${e.name} (${e.type})$desc';
+    }).join('\n');
+    
+    final communityContext = result.communities.isNotEmpty
+        ? '\n\nRelated context:\n${result.communities.first.community.summary}'
+        : '';
+    
+    final prompt = '''Based on the following information from your personal data, answer the question briefly and directly.
+
+Relevant entities:
+$entityContext$communityContext
+
+Question: $query
+
+Provide a short, focused answer (1-2 sentences). If the information doesn't fully answer the question, say what you can based on what's available.
+
+Answer:''';
+
+    // Stream the response
+    await for (final token in llmStreamCallback(prompt)) {
+      yield token;
+    }
   }
 
   /// Execute a hybrid query
