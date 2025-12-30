@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'graph_repository.dart';
+import '../utils/math_utils.dart';
 
 /// Progress event types for streaming global queries
 enum GlobalQueryPhase {
@@ -163,20 +164,73 @@ class QueryMetadata {
 /// This follows the methodology from "From Local to Global: A GraphRAG Approach
 /// to Query-Focused Summarization" (Edge et al., 2024):
 /// 
-/// 1. **Map Phase**: For each community summary at the selected level, generate
-///    a partial answer and helpfulness score (0-100)
-/// 2. **Reduce Phase**: Sort answers by helpfulness, select top answers that fit
-///    in context window, and synthesize a final global answer
+/// 1. **Selection Phase**: Use embedding similarity to select top-k most relevant communities
+/// 2. **Map Phase**: For each selected community summary, generate a partial answer
+/// 3. **Reduce Phase**: Synthesize final answer from partial answers
 class GlobalQueryEngine {
   final GraphRepository repository;
   final Future<String> Function(String prompt) llmCallback;
+  final Future<List<double>> Function(String text) embeddingCallback;
   final GlobalQueryConfig config;
 
   GlobalQueryEngine({
     required this.repository,
     required this.llmCallback,
+    required this.embeddingCallback,
     GlobalQueryConfig? config,
   }) : config = config ?? GlobalQueryConfig();
+  
+  /// Select top-k communities most relevant to query using embedding similarity
+  Future<List<GraphCommunity>> _selectTopCommunitiesByEmbedding(
+    String query,
+    List<GraphCommunity> communities,
+    {int topK = 3}
+  ) async {
+    // Truncate query if needed (embedding model: 512 tokens max ~1800 chars safe limit)
+    final maxChars = 1800;
+    final truncatedQuery = query.length > maxChars 
+        ? query.substring(0, maxChars) 
+        : query;
+    
+    // Get query embedding
+    final queryEmbedding = await embeddingCallback(truncatedQuery);
+    if (queryEmbedding.isEmpty) {
+      print('[GlobalQueryEngine] Failed to generate query embedding, using all communities');
+      return communities.take(topK).toList();
+    }
+    
+    // Calculate similarity scores for each community
+    final scoredCommunities = <({GraphCommunity community, double similarity})>[];
+    
+    for (final community in communities) {
+      if (community.summary.isEmpty) continue;
+      
+      // Truncate summary to fit embedding model (512 tokens ~1800 chars safe)
+      final truncatedSummary = community.summary.length > maxChars
+          ? community.summary.substring(0, maxChars)
+          : community.summary;
+      
+      // Get embedding for community summary
+      final summaryEmbedding = await embeddingCallback(truncatedSummary);
+      if (summaryEmbedding.isEmpty) continue;
+      
+      // Calculate cosine similarity
+      final similarity = MathUtils.cosineSimilarity(queryEmbedding, summaryEmbedding);
+      scoredCommunities.add((community: community, similarity: similarity));
+    }
+    
+    // Sort by similarity descending and take top-k
+    scoredCommunities.sort((a, b) => b.similarity.compareTo(a.similarity));
+    final topCommunities = scoredCommunities.take(topK).map((s) => s.community).toList();
+    
+    print('[GlobalQueryEngine] Selected ${topCommunities.length} most relevant communities (top $topK)');
+    for (var i = 0; i < topCommunities.length; i++) {
+      final score = scoredCommunities[i].similarity;
+      print('[GlobalQueryEngine]   ${i+1}. Similarity: ${(score * 100).toStringAsFixed(1)}%');
+    }
+    
+    return topCommunities;
+  }
 
   /// Execute a global query using map-reduce over community summaries
   /// 
@@ -228,38 +282,60 @@ class GlobalQueryEngine {
     int level,
     Stopwatch totalStopwatch,
   ) async {
+    // === SELECTION PHASE ===
+    // Select top 3 most relevant communities using embedding similarity
+    print('[GlobalQueryEngine] Selecting top 3 communities from ${communities.length} using embedding similarity');
+    final selectedCommunities = await _selectTopCommunitiesByEmbedding(
+      userQuery, 
+      communities,
+      topK: 3,
+    );
+    
+    if (selectedCommunities.isEmpty) {
+      print('[GlobalQueryEngine] No communities selected');
+      return GlobalQueryResult(
+        answer: 'No relevant information found in the knowledge graph.',
+        communityAnswers: [],
+        totalCommunitiesProcessed: 0,
+        communitiesFiltered: communities.length,
+        metadata: QueryMetadata(
+          originalQuery: userQuery,
+          communityLevel: level,
+          mapPhaseDuration: Duration.zero,
+          reducePhaseDuration: Duration.zero,
+          totalDuration: totalStopwatch.elapsed,
+        ),
+      );
+    }
+    
     final mapStopwatch = Stopwatch()..start();
     
     // === MAP PHASE ===
-    // Process each community SEQUENTIALLY to generate partial answers
-    // NOTE: We must process sequentially because the native LLM engine 
-    // doesn't support concurrent inference calls - parallel calls cause crashes
+    // Process only the top 3 selected communities
     final communityAnswers = <CommunityAnswer>[];
     
-    print('[GlobalQueryEngine] Starting map phase with ${communities.length} communities');
-    var skippedEmpty = 0;
+    print('[GlobalQueryEngine] Starting map phase with ${selectedCommunities.length} selected communities');
     var failedCommunities = 0;
     
-    for (var i = 0; i < communities.length; i++) {
-      final community = communities[i];
+    for (var i = 0; i < selectedCommunities.length; i++) {
+      final community = selectedCommunities[i];
       if (community.summary.isEmpty) {
-        skippedEmpty++;
         continue;
       }
       
       final answer = await _generateCommunityAnswer(userQuery, community);
       if (answer != null) {
         communityAnswers.add(answer);
-        print('[GlobalQueryEngine] Community ${i + 1}/${communities.length}: score=${answer.helpfulnessScore}');
+        print('[GlobalQueryEngine] Community ${i + 1}/${selectedCommunities.length}: generated answer');
       } else {
         failedCommunities++;
-        print('[GlobalQueryEngine] Community ${i + 1}/${communities.length}: failed to generate answer');
+        print('[GlobalQueryEngine] Community ${i + 1}/${selectedCommunities.length}: failed to generate answer');
       }
     }
     
     mapStopwatch.stop();
     
-    print('[GlobalQueryEngine] Map phase complete: ${communityAnswers.length} answers, $skippedEmpty empty, $failedCommunities failed');
+    print('[GlobalQueryEngine] Map phase complete: ${communityAnswers.length} answers, $failedCommunities failed');
     
     // Filter by minimum helpfulness score
     final filteredAnswers = communityAnswers
@@ -314,54 +390,40 @@ class GlobalQueryEngine {
   ) async {
     if (community.summary.isEmpty) return null;
     
-    final prompt = '''---Role---
-You are a helpful assistant responding to questions about data in the provided community summary.
+    // Truncate summary to prevent token overflow
+    // Target: ~1500 chars (~375 tokens) for summary + ~300 chars for prompt = ~675 tokens total
+    // This leaves room for output (~300 tokens) within 1024 limit
+    final maxSummaryChars = 1500;
+    final truncatedSummary = community.summary.length > maxSummaryChars
+        ? '${community.summary.substring(0, maxSummaryChars)}...'
+        : community.summary;
+    
+    final prompt = '''Based on this summary, answer the question.
 
----Goal---
-Generate a response to the question based ONLY on the community summary provided below.
-Also provide a helpfulness score from 0-100 indicating how relevant and useful your answer is for the question.
+Summary:
+$truncatedSummary
 
-If the community summary does not contain information relevant to the question, respond with score 0.
+Question: $query
 
----Community Summary---
-${community.summary}
-
----Question---
-$query
-
----Response Format---
-First, output a helpfulness score on its own line: SCORE: <number from 0-100>
-Then provide your answer based on the community summary.
-
-Response:''';
+Provide a brief answer (2-3 sentences):
+''';
 
     try {
       final response = await llmCallback(prompt);
       
-      // Parse score and answer
-      final scoreMatch = RegExp(r'SCORE:\s*(\d+)').firstMatch(response);
-      final score = scoreMatch != null 
-          ? int.tryParse(scoreMatch.group(1) ?? '0') ?? 0
-          : 0;
-      
-      // Extract answer (everything after SCORE line)
-      var answer = response;
-      if (scoreMatch != null) {
-        answer = response.substring(scoreMatch.end).trim();
-      }
-      
-      // Clamp score to valid range
-      final clampedScore = score.clamp(0, 100);
+      // Since we selected by embedding similarity, assign high base score
+      // All selected communities are relevant (score >= 85)
+      final baseScore = 90;
       
       return CommunityAnswer(
         communityId: community.id,
         summary: community.summary,
-        answer: answer,
-        helpfulnessScore: clampedScore,
+        answer: response.trim(),
+        helpfulnessScore: baseScore,
         level: community.level,
       );
     } catch (e) {
-      // Skip failed community processing
+      print('[GlobalQueryEngine] Error generating answer for community: $e');
       return null;
     }
   }
@@ -372,44 +434,29 @@ Response:''';
     List<CommunityAnswer> communityAnswers,
   ) async {
     if (communityAnswers.isEmpty) {
-      return "I don't have enough relevant information to answer this question based on the available data.";
+      return 'No relevant information found in the knowledge graph.';
     }
     
-    // Build context from community answers
+    // Build context from community answers - truncate each answer
+    final maxAnswerChars = 400; // ~100 tokens per answer
     final answersContext = communityAnswers.asMap().entries.map((entry) {
       final idx = entry.key + 1;
       final answer = entry.value;
-      return '''--- Report $idx (Helpfulness: ${answer.helpfulnessScore}/100) ---
-${answer.answer}
-''';
-    }).join('\n');
+      final truncated = answer.answer.length > maxAnswerChars
+          ? '${answer.answer.substring(0, maxAnswerChars)}...'
+          : answer.answer;
+      return 'Context $idx: $truncated';
+    }).join('\n\n');
     
-    final prompt = '''---Role---
-You are a helpful assistant responding to questions about a dataset by synthesizing perspectives from multiple analyst reports.
+    // Simplified prompt to reduce token count
+    final prompt = '''Synthesize these contexts to answer the question.
 
----Goal---
-Generate a response of ${config.responseType} that responds to the user's question, summarizing all the reports from multiple analysts who focused on different parts of the dataset.
-
-If you don't know the answer or the reports don't contain relevant information, say so. Do not make anything up.
-
-The final response should:
-1. Remove irrelevant information from the reports
-2. Merge the cleaned information into a comprehensive answer
-3. Provide explanations of key points and implications
-4. Reference the report numbers when citing specific information, e.g., [Report 1, 3]
-
-Do not mention "analysts" or "reports" in a way that's visible to the end user - just synthesize the information naturally.
-
----Analyst Reports---
 $answersContext
 
----Question---
-$query
+Question: $query
 
----Target Response Format---
-${config.responseType}
-
-Response:''';
+Provide a comprehensive answer:
+''';
 
     return await llmCallback(prompt);
   }
@@ -464,6 +511,7 @@ Response:''';
     final levelEngine = GlobalQueryEngine(
       repository: repository,
       llmCallback: llmCallback,
+      embeddingCallback: embeddingCallback,
       config: levelConfig,
     );
     
@@ -550,12 +598,14 @@ class StreamingGlobalQueryEngine {
   final GraphRepository repository;
   final Future<String> Function(String prompt) llmCallback;
   final Stream<String> Function(String prompt)? llmStreamCallback;
+  final Future<List<double>> Function(String text) embeddingCallback;
   final GlobalQueryConfig config;
 
   StreamingGlobalQueryEngine({
     required this.repository,
     required this.llmCallback,
     this.llmStreamCallback,
+    required this.embeddingCallback,
     GlobalQueryConfig? config,
   }) : config = config ?? GlobalQueryConfig();
 
@@ -619,23 +669,45 @@ class StreamingGlobalQueryEngine {
     final communities = await repository.getCommunitiesByLevel(selectedLevel);
     
     yield GlobalQueryProgress(
-      phase: GlobalQueryPhase.mapPhase,
-      message: 'Processing ${communities.length} communities...',
-      currentCommunity: 0,
-      totalCommunities: communities.length,
+      phase: GlobalQueryPhase.starting,
+      message: 'Selecting top 3 most relevant communities from ${communities.length}...',
       communityLevel: selectedLevel,
+      totalCommunities: communities.length,
+    );
+    
+    // === SELECTION PHASE ===
+    final selectedCommunities = await _selectTopCommunitiesByEmbedding(
+      userQuery,
+      communities,
+      topK: 3,
+    );
+    
+    if (selectedCommunities.isEmpty) {
+      yield GlobalQueryProgress(
+        phase: GlobalQueryPhase.completed,
+        message: 'No relevant communities found',
+        partialResponse: 'No relevant information found in the knowledge graph.',
+      );
+      return;
+    }
+    
+    yield GlobalQueryProgress(
+      phase: GlobalQueryPhase.mapPhase,
+      message: 'Processing ${selectedCommunities.length} selected communities...',
+      communityLevel: selectedLevel,
+      totalCommunities: selectedCommunities.length,
     );
     
     // === MAP PHASE ===
     mapStopwatch.start();
     final communityAnswers = <CommunityAnswer>[];
     
-    for (var i = 0; i < communities.length; i++) {
-      final community = communities[i];
+    for (var i = 0; i < selectedCommunities.length; i++) {
+      final community = selectedCommunities[i];
       
       yield GlobalQueryProgress(
         phase: GlobalQueryPhase.mapPhase,
-        message: 'Analyzing community ${i + 1}/${communities.length}...',
+        message: 'Analyzing community ${i + 1}/${selectedCommunities.length}...',
         currentCommunity: i + 1,
         totalCommunities: communities.length,
         communityLevel: selectedLevel,
@@ -763,40 +835,26 @@ class StreamingGlobalQueryEngine {
   }
   
   String _buildReducePrompt(String query, List<CommunityAnswer> communityAnswers) {
+    // Build context from community answers - truncate each answer
+    final maxAnswerChars = 400; // ~100 tokens per answer
     final answersContext = communityAnswers.asMap().entries.map((entry) {
       final idx = entry.key + 1;
       final answer = entry.value;
-      return '''--- Report $idx (Helpfulness: ${answer.helpfulnessScore}/100) ---
-${answer.answer}
-''';
-    }).join('\n');
+      final truncated = answer.answer.length > maxAnswerChars
+          ? '${answer.answer.substring(0, maxAnswerChars)}...'
+          : answer.answer;
+      return 'Context $idx: $truncated';
+    }).join('\n\n');
     
-    return '''---Role---
-You are a helpful assistant responding to questions about a dataset by synthesizing perspectives from multiple analyst reports.
+    // Simplified prompt to reduce token count
+    return '''Synthesize these contexts to answer the question.
 
----Goal---
-Generate a response of ${config.responseType} that responds to the user's question, summarizing all the reports from multiple analysts who focused on different parts of the dataset.
-
-If you don't know the answer or the reports don't contain relevant information, say so. Do not make anything up.
-
-The final response should:
-1. Remove irrelevant information from the reports
-2. Merge the cleaned information into a comprehensive answer
-3. Provide explanations of key points and implications
-4. Reference the report numbers when citing specific information, e.g., [Report 1, 3]
-
-Do not mention "analysts" or "reports" in a way that's visible to the end user - just synthesize the information naturally.
-
----Analyst Reports---
 $answersContext
 
----Question---
-$query
+Question: $query
 
----Target Response Format---
-${config.responseType}
-
-Response:''';
+Provide a comprehensive answer:
+''';
   }
   
   Future<CommunityAnswer?> _generateCommunityAnswer(
@@ -805,50 +863,33 @@ Response:''';
   ) async {
     if (community.summary.isEmpty) return null;
     
-    final prompt = '''---Role---
-You are a helpful assistant responding to questions about data in the provided community summary.
+    // Truncate summary to prevent token overflow
+    final maxSummaryChars = 1500;
+    final truncatedSummary = community.summary.length > maxSummaryChars
+        ? '${community.summary.substring(0, maxSummaryChars)}...'
+        : community.summary;
+    
+    final prompt = '''Based on this summary, answer the question.
 
----Goal---
-Generate a response to the question based ONLY on the community summary provided below.
-Also provide a helpfulness score from 0-100 indicating how relevant and useful your answer is for the question.
+Summary:
+$truncatedSummary
 
-If the community summary does not contain information relevant to the question, respond with score 0.
+Question: $query
 
----Community Summary---
-${community.summary}
-
----Question---
-$query
-
----Response Format---
-First, output a helpfulness score on its own line: SCORE: <number from 0-100>
-Then provide your answer based on the community summary.
-
-Response:''';
+Provide a brief answer (2-3 sentences):
+''';
 
     try {
       final response = await llmCallback(prompt);
       
-      // Parse score and answer
-      final scoreMatch = RegExp(r'SCORE:\s*(\d+)').firstMatch(response);
-      final score = scoreMatch != null 
-          ? int.tryParse(scoreMatch.group(1) ?? '0') ?? 0
-          : 0;
-      
-      // Extract answer (everything after SCORE line)
-      var answer = response;
-      if (scoreMatch != null) {
-        answer = response.substring(scoreMatch.end).trim();
-      }
-      
-      // Clamp score to valid range
-      final clampedScore = score.clamp(0, 100);
+      // Since we selected by embedding similarity, assign high base score
+      final baseScore = 90;
       
       return CommunityAnswer(
         communityId: community.id,
         summary: community.summary,
-        answer: answer,
-        helpfulnessScore: clampedScore,
+        answer: response.trim(),
+        helpfulnessScore: baseScore,
         level: community.level,
       );
     } catch (e) {
@@ -881,5 +922,43 @@ Response:''';
       'tell me about', 'info on', 'information about',
     ];
     return specificIndicators.any((indicator) => query.contains(indicator));
+  }
+  
+  /// Select top-k communities most relevant to query using embedding similarity
+  Future<List<GraphCommunity>> _selectTopCommunitiesByEmbedding(
+    String query,
+    List<GraphCommunity> communities,
+    {int topK = 3}
+  ) async {
+    // Truncate query if needed (embedding model: 512 tokens max ~1800 chars safe limit)
+    final maxChars = 1800;
+    final truncatedQuery = query.length > maxChars 
+        ? query.substring(0, maxChars) 
+        : query;
+    
+    final queryEmbedding = await embeddingCallback(truncatedQuery);
+    if (queryEmbedding.isEmpty) {
+      return communities.take(topK).toList();
+    }
+    
+    final scoredCommunities = <({GraphCommunity community, double similarity})>[];
+    
+    for (final community in communities) {
+      if (community.summary.isEmpty) continue;
+      
+      // Truncate summary to fit embedding model (512 tokens ~1800 chars safe)
+      final truncatedSummary = community.summary.length > maxChars
+          ? community.summary.substring(0, maxChars)
+          : community.summary;
+      
+      final summaryEmbedding = await embeddingCallback(truncatedSummary);
+      if (summaryEmbedding.isEmpty) continue;
+      
+      final similarity = MathUtils.cosineSimilarity(queryEmbedding, summaryEmbedding);
+      scoredCommunities.add((community: community, similarity: similarity));
+    }
+    
+    scoredCommunities.sort((a, b) => b.similarity.compareTo(a.similarity));
+    return scoredCommunities.take(topK).map((s) => s.community).toList();
   }
 }

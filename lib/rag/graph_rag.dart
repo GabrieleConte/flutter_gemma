@@ -368,6 +368,7 @@ class GraphRAG {
     final engine = GlobalQueryEngine(
       repository: _repository,
       llmCallback: _llmCallback,
+      embeddingCallback: _embeddingCallback,
       config: GlobalQueryConfig(
         communityLevel: communityLevel,
         maxCommunityAnswers: maxCommunityAnswers,
@@ -397,6 +398,7 @@ class GraphRAG {
     final engine = GlobalQueryEngine(
       repository: _repository,
       llmCallback: _llmCallback,
+      embeddingCallback: _embeddingCallback,
       config: GlobalQueryConfig(
         maxCommunityAnswers: maxCommunityAnswers,
         minHelpfulnessScore: minHelpfulnessScore,
@@ -426,6 +428,7 @@ class GraphRAG {
       repository: _repository,
       llmCallback: _llmCallback,
       llmStreamCallback: llmStreamCallback,
+      embeddingCallback: _embeddingCallback,
       config: GlobalQueryConfig(
         maxCommunityAnswers: maxCommunityAnswers,
         minHelpfulnessScore: minHelpfulnessScore,
