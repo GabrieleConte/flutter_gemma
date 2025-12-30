@@ -1,3 +1,17 @@
+## 0.11.15
+- 🤖 **FunctionGemma Single-Turn Mode**: FunctionGemma now operates in single-turn mode by design (clears history after each response)
+- 🐛 **Download Resume Fix**: Fixed model download resume after interruption
+
+## 0.11.14
+- 🤖 **FunctionGemma Support**: Added `ModelType.functionGemma` for Google's specialized function calling model
+  - Pre-converted models available on HuggingFace
+  - Fine-tuning Colab notebooks (3-step pipeline)
+- 🐛 **Batch Embeddings Fix**: Fixed type cast issue in platform channel for batch embeddings (#142)
+
+## 0.11.13
+ - ✅ **iOS Embeddings Fix**: XNNPACK + SentencePiece integration for better results on iOS
+ - 🌐 **Web CDN**: Modules available via jsDelivr (`@0.11.13/web/*.js`)
+
 ## 0.11.12
  - 🌐 **Web VectorStore**: Full RAG support on web with SQLite WASM
    - Uses wa-sqlite with OPFS storage (10x faster than IndexedDB)

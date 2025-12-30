@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/core/message.dart';
 import 'package:flutter_gemma/core/model.dart';
 import 'package:flutter_gemma/core/model_response.dart';
 
 const userPrefix = "user";
 const modelPrefix = "model";
+const developerPrefix = "developer"; // FunctionGemma uses developer role for tools
 const startTurn = "<start_of_turn>";
 const endTurn = "<end_of_turn>";
 
@@ -23,17 +25,31 @@ const llamaInstEnd = "[/INST]";
 const hammerUser = "User:";
 const hammerAssistant = "Assistant:";
 
+// FunctionGemma special tokens
+const functionGemmaStartCall = '<start_function_call>';
+const functionGemmaEndCall = '<end_function_call>';
+const functionGemmaStartDecl = '<start_function_declaration>';
+const functionGemmaEndDecl = '<end_function_declaration>';
+const functionGemmaStartResp = '<start_function_response>';
+const functionGemmaEndResp = '<end_function_response>';
+const functionGemmaEscape = '<escape>';
+
 extension MessageExtension on Message {
   String transformToChatPrompt(
       {ModelType type = ModelType.general, ModelFileType fileType = ModelFileType.binary}) {
+    // DEBUG LOG
+    debugPrint('[transformToChatPrompt] modelType=$type, fileType=$fileType, messageType=${this.type}, isUser=$isUser');
+
     // System messages should not be sent to the model
     if (this.type == MessageType.systemInfo) {
       return '';
     }
 
     // .task files - MediaPipe handles templates, return raw content
-    if (fileType == ModelFileType.task) {
+    // EXCEPT FunctionGemma which needs manual formatting (no prefix/suffix in .task)
+    if (fileType == ModelFileType.task && type != ModelType.functionGemma) {
       final result = _formatToolResponseContent();
+      debugPrint('[transformToChatPrompt] Using _formatToolResponseContent, result length=${result.length}');
       return result;
     }
 
@@ -45,6 +61,7 @@ extension MessageExtension on Message {
       ModelType.qwen => _transformQwen(),
       ModelType.llama => _transformLlama(),
       ModelType.hammer => _transformHammer(),
+      ModelType.functionGemma => _transformFunctionGemma(),
     };
     return result;
   }
@@ -125,6 +142,36 @@ extension MessageExtension on Message {
     }
     return text;
   }
+
+  String _transformFunctionGemma() {
+    // If text already has turn markers (from chat.dart with tools), return as is
+    if (text.startsWith(startTurn)) {
+      return text;
+    }
+
+    // Handle tool response - NO user turn, goes directly after function call
+    // Per FunctionGemma docs: <end_function_call><start_function_response>...
+    if (type == MessageType.toolResponse) {
+      final content = _formatFunctionGemmaContent();
+      return '$content\n$startTurn$modelPrefix\n';
+    }
+
+    if (isUser) {
+      final content = _formatFunctionGemmaContent();
+      return '$startTurn$userPrefix\n$content$endTurn\n$startTurn$modelPrefix\n';
+    }
+    return '$text$endTurn\n';
+  }
+
+  String _formatFunctionGemmaContent() {
+    // Format tool response in FunctionGemma format
+    if (type == MessageType.toolResponse && toolName != null) {
+      return '$functionGemmaStartResp'
+             'response:$toolName{result:$functionGemmaEscape$text$functionGemmaEscape}'
+             '$functionGemmaEndResp';
+    }
+    return text;
+  }
 }
 
 // Filter class for thinking models
@@ -188,6 +235,7 @@ class ModelThinkingFilter {
       case ModelType.qwen:
       case ModelType.llama:
       case ModelType.hammer:
+      case ModelType.functionGemma:
         // For all other models just pass original stream
         // Thinking not supported
         yield* originalStream;
@@ -209,6 +257,7 @@ class ModelThinkingFilter {
       case ModelType.qwen:
       case ModelType.llama:
       case ModelType.hammer:
+      case ModelType.functionGemma:
         // For all other models return text without changes
         // Thinking not supported
         return text;
@@ -244,6 +293,7 @@ class ModelThinkingFilter {
       case ModelType.llama:
       case ModelType.hammer:
       case ModelType.deepSeek:
+      case ModelType.functionGemma:
         // These models don't use special end tags, just trim whitespace
         return cleaned.trim();
     }

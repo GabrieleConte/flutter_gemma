@@ -34,6 +34,10 @@ class InferenceChat {
   int _currentTokens = 0;
   bool _toolsInstructionSent = false; // Flag to track if tools instruction was sent
 
+  /// Determines if model history should be cleared after each turn
+  /// FunctionGemma requires single-turn mode (no multi-turn context)
+  bool get _isSingleTurnModel => modelType == ModelType.functionGemma;
+
   InferenceChat({
     required this.sessionCreator,
     required this.maxTokens,
@@ -67,9 +71,17 @@ class InferenceChat {
         !noTool &&
         supportsFunctionCalls) {
       _toolsInstructionSent = true;
-      final toolsPrompt = _createToolsPrompt();
-      final newText = '$toolsPrompt\n${message.text}';
-      messageToSend = message.copyWith(text: newText);
+      final toolsPrompt = createToolsPrompt();
+
+      // For FunctionGemma, manually construct the full prompt with turn markers
+      // because tools prompt already has developer turn markers
+      if (modelType == ModelType.functionGemma) {
+        final newText = '$toolsPrompt$startTurn$userPrefix\n${message.text}\n$endTurn\n$startTurn$modelPrefix\n';
+        messageToSend = message.copyWith(text: newText);
+      } else {
+        final newText = '$toolsPrompt\n${message.text}';
+        messageToSend = message.copyWith(text: newText);
+      }
     } else if (!supportsFunctionCalls && tools.isNotEmpty && !noTool) {
       // Log warning if model doesn't support function calls but tools are provided
       debugPrint(
@@ -107,7 +119,10 @@ class InferenceChat {
 
     // Try to parse as function call if tools are available and model supports function calls
     if (tools.isNotEmpty && supportsFunctionCalls) {
-      final functionCall = FunctionCallParser.parse(cleanedResponse);
+      final functionCall = FunctionCallParser.parse(
+        cleanedResponse,
+        modelType: modelType,
+      );
       if (functionCall != null) {
         debugPrint('InferenceChat: Detected function call in sync response');
         final toolCallMessage = Message.toolCall(text: cleanedResponse);
@@ -122,6 +137,19 @@ class InferenceChat {
     final chatMessage = Message(text: cleanedResponse, isUser: false);
     _fullHistory.add(chatMessage);
     _modelHistory.add(chatMessage);
+
+    // Clear model history for single-turn models (e.g., FunctionGemma)
+    if (_isSingleTurnModel) {
+      debugPrint('InferenceChat: Single-turn model detected, clearing model history...');
+      _modelHistory.clear();
+      _currentTokens = 0;
+      _toolsInstructionSent = false;
+
+      // Recreate session to clear native state
+      await session.close();
+      session = await sessionCreator!();
+      debugPrint('InferenceChat: Model history cleared and session recreated');
+    }
 
     return TextResponse(cleanedResponse); // Return TextResponse instead of String
   }
@@ -160,7 +188,7 @@ class InferenceChat {
                 'InferenceChat: Buffering token: "$token", total: ${funcBuffer.length} chars');
 
             // Check if we now have a complete JSON
-            if (FunctionCallParser.isJsonComplete(funcBuffer)) {
+            if (FunctionCallParser.isFunctionCallComplete(funcBuffer, modelType: modelType)) {
               // First try to extract message from any JSON with message field
               try {
                 final jsonData = jsonDecode(funcBuffer);
@@ -178,7 +206,10 @@ class InferenceChat {
               }
 
               // If no message field found, try parsing as function call
-              final functionCall = FunctionCallParser.parse(funcBuffer);
+              final functionCall = FunctionCallParser.parse(
+                funcBuffer,
+                modelType: modelType,
+              );
               if (functionCall != null) {
                 debugPrint('InferenceChat: Found function call in complete buffer!');
                 yield functionCall;
@@ -240,28 +271,47 @@ class InferenceChat {
     final response = buffer.toString();
     debugPrint('InferenceChat: Complete response accumulated: "$response"');
 
+    // Track if we emitted a function call (to skip history clearing)
+    bool emittedFunctionCall = false;
+
     // Handle end of stream - process any remaining buffer
     if (funcBuffer.isNotEmpty) {
       debugPrint(
           'InferenceChat: Processing remaining buffer at end of stream: ${funcBuffer.length} chars');
 
+      // For FunctionGemma, the function call spans response + funcBuffer
+      // (e.g., response="<start_function_call>call:fn", funcBuffer="{params}")
+      // For JSON models, funcBuffer contains the complete JSON
+      final contentToCheck = modelType == ModelType.functionGemma
+          ? response + funcBuffer
+          : funcBuffer;
+
       // First try to extract message from JSON if it has message field
-      if (FunctionCallParser.isJsonComplete(funcBuffer)) {
+      if (FunctionCallParser.isFunctionCallComplete(contentToCheck, modelType: modelType)) {
         try {
-          final jsonData = jsonDecode(funcBuffer);
-          if (jsonData is Map<String, dynamic> && jsonData.containsKey('message')) {
-            final message = jsonData['message'] as String;
-            debugPrint('InferenceChat: Extracted message from end-of-stream JSON: "$message"');
-            yield TextResponse(message);
-          } else {
-            // Try to parse as function call
-            final functionCall = FunctionCallParser.parse(funcBuffer);
-            if (functionCall != null) {
-              debugPrint('InferenceChat: Function call found at end of stream');
-              yield functionCall;
-            } else {
-              yield TextResponse(funcBuffer);
+          // For JSON parsing, use funcBuffer (the actual JSON part)
+          // For FunctionGemma parsing, use contentToCheck (full function call)
+          if (modelType != ModelType.functionGemma) {
+            final jsonData = jsonDecode(funcBuffer);
+            if (jsonData is Map<String, dynamic> && jsonData.containsKey('message')) {
+              final message = jsonData['message'] as String;
+              debugPrint('InferenceChat: Extracted message from end-of-stream JSON: "$message"');
+              yield TextResponse(message);
+              return;
             }
+          }
+
+          // Try to parse as function call
+          final functionCall = FunctionCallParser.parse(
+            contentToCheck,
+            modelType: modelType,
+          );
+          if (functionCall != null) {
+            debugPrint('InferenceChat: Function call found at end of stream');
+            emittedFunctionCall = true;
+            yield functionCall;
+          } else {
+            yield TextResponse(funcBuffer);
           }
         } catch (e) {
           debugPrint('InferenceChat: Failed to parse end-of-stream JSON: $e');
@@ -298,6 +348,22 @@ class InferenceChat {
       _modelHistory.add(chatMessage);
       debugPrint('InferenceChat: Added to model history');
       debugPrint('InferenceChat: Message added to history successfully');
+
+      // Clear model history for single-turn models (e.g., FunctionGemma)
+      // BUT only if this was NOT a function call - we need context for tool response
+      if (_isSingleTurnModel && !emittedFunctionCall) {
+        debugPrint('InferenceChat: Single-turn model detected (text response), clearing model history...');
+        _modelHistory.clear();
+        _currentTokens = 0;
+        _toolsInstructionSent = false;
+
+        // Recreate session to clear native state
+        await session.close();
+        session = await sessionCreator!();
+        debugPrint('InferenceChat: Model history cleared and session recreated');
+      } else if (_isSingleTurnModel && emittedFunctionCall) {
+        debugPrint('InferenceChat: Single-turn model with function call - keeping history for tool response');
+      }
     } catch (e) {
       debugPrint('InferenceChat: Error adding message to history: $e');
       rethrow;
@@ -346,11 +412,23 @@ class InferenceChat {
 
   Future<void> stopGeneration() => session.stopGeneration();
 
-  String _createToolsPrompt() {
+  /// Creates tools prompt based on model type.
+  /// Made package-private for testing.
+  @visibleForTesting
+  String createToolsPrompt() {
     if (tools.isEmpty) {
       return '';
     }
 
+    // Explicit routing by ModelType using Dart 3 switch expression
+    return switch (modelType) {
+      ModelType.functionGemma => _createFunctionGemmaToolsPrompt(),
+      // All other models use JSON format
+      _ => _createJsonToolsPrompt(),
+    };
+  }
+
+  String _createJsonToolsPrompt() {
     final toolsPrompt = StringBuffer();
     toolsPrompt.writeln(
         'You have access to functions. ONLY call a function when the user explicitly requests an action or command (like "change color", "show alert", "set title"). For regular conversation, greetings, and questions, respond normally without calling any functions.');
@@ -364,6 +442,79 @@ class InferenceChat {
           .writeln('${tool.name}: ${tool.description} Parameters: ${jsonEncode(tool.parameters)}');
     }
     toolsPrompt.writeln('</tool_code>');
+    return toolsPrompt.toString();
+  }
+
+  String _createFunctionGemmaToolsPrompt() {
+    final toolsPrompt = StringBuffer();
+
+    // FunctionGemma requires developer turn for tools definition
+    toolsPrompt.write('$startTurn$developerPrefix\n');
+    toolsPrompt.writeln(
+        'You are a model that can do function calling with the following functions');
+
+    for (final tool in tools) {
+      toolsPrompt.write(functionGemmaStartDecl);
+      toolsPrompt.write('declaration:${tool.name}{');
+      toolsPrompt.write(
+          'description:$functionGemmaEscape${tool.description}$functionGemmaEscape');
+
+      // Access properties from JSON Schema structure (following Google's FunctionGemma format)
+      final properties = tool.parameters['properties'] as Map<String, dynamic>?;
+      final required = tool.parameters['required'] as List<dynamic>?;
+      if (properties != null && properties.isNotEmpty) {
+        toolsPrompt.write(',parameters:{properties:{');
+        final paramEntries = <String>[];
+        properties.forEach((name, schema) {
+          if (schema is Map<String, dynamic>) {
+            final type =
+                (schema['type'] as String?)?.toUpperCase() ?? 'STRING';
+            final desc = schema['description'];
+            final enumValues = schema['enum'] as List<dynamic>?;
+
+            final parts = <String>[];
+            if (desc != null) {
+              parts.add(
+                  'description:$functionGemmaEscape$desc$functionGemmaEscape');
+            }
+            if (enumValues != null && enumValues.isNotEmpty) {
+              // Validate enum values don't contain FunctionGemma special tokens
+              for (final v in enumValues) {
+                final str = v.toString();
+                if (str.contains('<escape>') ||
+                    str.contains('<start_') ||
+                    str.contains('<end_')) {
+                  throw ArgumentError(
+                    'Enum value "$str" contains FunctionGemma special tokens',
+                  );
+                }
+              }
+              final enumStr = enumValues
+                  .map((v) => '$functionGemmaEscape$v$functionGemmaEscape')
+                  .join(',');
+              parts.add('enum:[$enumStr]');
+            }
+            parts.add('type:$functionGemmaEscape$type$functionGemmaEscape');
+
+            paramEntries.add('$name:{${parts.join(',')}}');
+          }
+        });
+        toolsPrompt.write(paramEntries.join(','));
+        toolsPrompt.write('}');
+        // Add required array if present
+        if (required != null && required.isNotEmpty) {
+          final requiredStr = required
+              .map((r) => '$functionGemmaEscape$r$functionGemmaEscape')
+              .join(',');
+          toolsPrompt.write(',required:[$requiredStr]');
+        }
+        toolsPrompt.write(',type:${functionGemmaEscape}OBJECT$functionGemmaEscape}');
+      }
+
+      toolsPrompt.writeln('}$functionGemmaEndDecl');
+    }
+
+    toolsPrompt.write('$endTurn\n');
     return toolsPrompt.toString();
   }
 }

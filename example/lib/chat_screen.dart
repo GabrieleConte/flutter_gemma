@@ -29,40 +29,39 @@ class ChatScreenState extends State<ChatScreen> {
   // Toggle for sync/async mode
   bool _useSyncMode = false;
 
-  // Define the tools
+  // Define the tools (order and descriptions must match Colab training!)
   final List<Tool> _tools = [
     const Tool(
+      name: 'change_background_color',
+      description: 'Changes the app background color',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'color': {
+            'type': 'string',
+            'description': 'The color name (red, green, blue, yellow, purple, orange)',
+          },
+        },
+        'required': ['color'],
+      },
+    ),
+    const Tool(
       name: 'change_app_title',
-      description: 'Changes the title of the app in the AppBar. Provide a new title text.',
+      description: 'Changes the application title text in the AppBar',
       parameters: {
         'type': 'object',
         'properties': {
           'title': {
             'type': 'string',
-            'description': 'The new title text to display in the AppBar',
+            'description': 'The new title text to display',
           },
         },
         'required': ['title'],
       },
     ),
     const Tool(
-      name: 'change_background_color',
-      description:
-          "Changes the background color of the app. The color should be a standard web color name like 'red', 'blue', 'green', 'yellow', 'purple', or 'orange'.",
-      parameters: {
-        'type': 'object',
-        'properties': {
-          'color': {
-            'type': 'string',
-            'description': 'The color name',
-          },
-        },
-        'required': ['color'],
-      },
-    ),
-    /* const Tool(
       name: 'show_alert',
-      description: 'Shows an alert dialog with a custom message and title.',
+      description: 'Shows an alert dialog with a custom message and title',
       parameters: {
         'type': 'object',
         'properties': {
@@ -74,14 +73,10 @@ class ChatScreenState extends State<ChatScreen> {
             'type': 'string',
             'description': 'The message content of the alert dialog',
           },
-          'button_text': {
-            'type': 'string',
-            'description': 'The text for the OK button (optional, defaults to "OK")',
-          },
         },
         'required': ['title', 'message'],
       },
-    ), */
+    ),
   ];
 
   @override
@@ -283,7 +278,6 @@ class ChatScreenState extends State<ChatScreen> {
     if (functionCall.name == 'show_alert') {
       final title = functionCall.args['title'] as String? ?? 'Alert';
       final message = functionCall.args['message'] as String? ?? 'No message provided';
-      final buttonText = functionCall.args['button_text'] as String? ?? 'OK';
 
       // Show the alert dialog
       await showDialog(
@@ -295,7 +289,7 @@ class ChatScreenState extends State<ChatScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: Text(buttonText),
+                child: const Text('OK'),
               ),
             ],
           );
