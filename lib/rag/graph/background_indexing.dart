@@ -139,7 +139,6 @@ class BackgroundIndexingService {
   late final EmbeddingSimilarityLinkPredictor? _embeddingSimilarityPredictor;
   late final DirectEntityExtractor _directExtractor;
   late final Future<List<double>> Function(String text) _embeddingCallback;
-  late final Future<String> Function(String prompt) _llmCallback;
   final PlatformService _platform = PlatformService();
   
   /// Data types that should use direct extraction (no LLM)
@@ -173,7 +172,6 @@ class BackgroundIndexingService {
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
     _embeddingCallback = embeddingCallback;
-    _llmCallback = llmCallback;
     
     // Initialize direct extractor for structured data (no LLM)
     _directExtractor = DirectEntityExtractor(
