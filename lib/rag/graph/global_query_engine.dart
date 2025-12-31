@@ -187,7 +187,7 @@ class GlobalQueryEngine {
     {int topK = 3}
   ) async {
     // Truncate query if needed (embedding model: 512 tokens max ~1800 chars safe limit)
-    final maxChars = 1800;
+    const maxChars = 1800;
     final truncatedQuery = query.length > maxChars 
         ? query.substring(0, maxChars) 
         : query;
@@ -393,7 +393,7 @@ class GlobalQueryEngine {
     // Truncate summary to prevent token overflow
     // Target: ~1500 chars (~375 tokens) for summary + ~300 chars for prompt = ~675 tokens total
     // This leaves room for output (~300 tokens) within 1024 limit
-    final maxSummaryChars = 1500;
+    const maxSummaryChars = 1500;
     final truncatedSummary = community.summary.length > maxSummaryChars
         ? '${community.summary.substring(0, maxSummaryChars)}...'
         : community.summary;
@@ -413,7 +413,7 @@ Provide a brief answer (2-3 sentences):
       
       // Since we selected by embedding similarity, assign high base score
       // All selected communities are relevant (score >= 85)
-      final baseScore = 90;
+      const baseScore = 90;
       
       return CommunityAnswer(
         communityId: community.id,
@@ -438,7 +438,7 @@ Provide a brief answer (2-3 sentences):
     }
     
     // Build context from community answers - truncate each answer
-    final maxAnswerChars = 400; // ~100 tokens per answer
+    const maxAnswerChars = 400; // ~100 tokens per answer
     final answersContext = communityAnswers.asMap().entries.map((entry) {
       final idx = entry.key + 1;
       final answer = entry.value;
@@ -836,7 +836,7 @@ class StreamingGlobalQueryEngine {
   
   String _buildReducePrompt(String query, List<CommunityAnswer> communityAnswers) {
     // Build context from community answers - truncate each answer
-    final maxAnswerChars = 400; // ~100 tokens per answer
+    const maxAnswerChars = 400; // ~100 tokens per answer
     final answersContext = communityAnswers.asMap().entries.map((entry) {
       final idx = entry.key + 1;
       final answer = entry.value;
@@ -864,7 +864,7 @@ Provide a comprehensive answer:
     if (community.summary.isEmpty) return null;
     
     // Truncate summary to prevent token overflow
-    final maxSummaryChars = 1500;
+    const maxSummaryChars = 1500;
     final truncatedSummary = community.summary.length > maxSummaryChars
         ? '${community.summary.substring(0, maxSummaryChars)}...'
         : community.summary;
@@ -883,7 +883,7 @@ Provide a brief answer (2-3 sentences):
       final response = await llmCallback(prompt);
       
       // Since we selected by embedding similarity, assign high base score
-      final baseScore = 90;
+      const baseScore = 90;
       
       return CommunityAnswer(
         communityId: community.id,
@@ -931,7 +931,7 @@ Provide a brief answer (2-3 sentences):
     {int topK = 3}
   ) async {
     // Truncate query if needed (embedding model: 512 tokens max ~1800 chars safe limit)
-    final maxChars = 1800;
+    const maxChars = 1800;
     final truncatedQuery = query.length > maxChars 
         ? query.substring(0, maxChars) 
         : query;
