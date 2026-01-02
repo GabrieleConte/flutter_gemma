@@ -1217,10 +1217,7 @@ class SystemDataConnector(
                     
                     if (path != null) {
                         val file = java.io.File(path)
-                        if (mimeType?.contains("pdf") == true) {
-                            Log.w(TAG, "PDF content extraction not supported on Android")
-                            return null
-                        }
+                        // PDF extraction is now supported via readFileContent
                         return readFileContent(file, max)
                     }
                 }
@@ -1250,10 +1247,9 @@ class SystemDataConnector(
     private fun readFileContent(file: java.io.File, maxLength: Int): String? {
         try {
             if (file.exists() && file.canRead()) {
-                // Check if it's a PDF
+                // Check if it's a PDF - extract text using PdfBox
                 if (file.extension.lowercase() == "pdf") {
-                    Log.w(TAG, "PDF content extraction not supported on Android")
-                    return null
+                    return extractPdfText(file, maxLength)
                 }
                 
                 val content = file.readText()
@@ -1263,6 +1259,63 @@ class SystemDataConnector(
             Log.e(TAG, "Error reading file content: ${e.message}")
         }
         return null
+    }
+    
+    // PdfBox initialization flag
+    private var pdfBoxInitialized = false
+    
+    /**
+     * Initialize PdfBox-Android library.
+     */
+    private fun initPdfBox() {
+        if (!pdfBoxInitialized) {
+            try {
+                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                pdfBoxInitialized = true
+                Log.d(TAG, "PdfBox-Android initialized in SystemDataConnector")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize PdfBox-Android: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Extract text from a PDF file using PdfBox-Android library.
+     */
+    private fun extractPdfText(file: java.io.File, maxLength: Int): String? {
+        try {
+            initPdfBox()
+            
+            Log.d(TAG, "Extracting text from PDF using PdfBox: ${file.name}")
+            
+            val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(file)
+            
+            try {
+                val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+                stripper.sortByPosition = true
+                
+                val text = stripper.getText(document)
+                val trimmedText = text.trim()
+                
+                if (trimmedText.isEmpty()) {
+                    Log.w(TAG, "PdfBox extracted empty text from: ${file.name}")
+                    return null
+                }
+                
+                Log.d(TAG, "PdfBox extracted ${trimmedText.length} chars from: ${file.name}")
+                
+                return if (trimmedText.length > maxLength) {
+                    trimmedText.take(maxLength)
+                } else {
+                    trimmedText
+                }
+            } finally {
+                document.close()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "PdfBox extraction failed for ${file.name}: ${e.message}")
+            return null
+        }
     }
 
     // MARK: - Photo Thumbnail

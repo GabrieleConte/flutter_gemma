@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UniformTypeIdentifiers
+import PDFKit
 
 @available(iOS 13.0, *)
 public class FlutterGemmaPlugin: NSObject, FlutterPlugin {
@@ -1599,11 +1600,11 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
                         }
                     }
 
-                    // Check if it's a PDF
+                    // Check if it's a PDF - extract text using PDFKit
                     if url.pathExtension.lowercased() == "pdf" {
-                        print("[PLUGIN] PDF content extraction not supported")
+                        let pdfContent = self?.extractPdfText(from: url, maxLength: maxLen)
                         DispatchQueue.main.async {
-                            completion(.success(nil))
+                            completion(.success(pdfContent))
                         }
                         return
                     }
@@ -1620,9 +1621,9 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
                 // Check if it's a file:// URL
                 if documentId.hasPrefix("file://"), let url = URL(string: documentId) {
                     if url.pathExtension.lowercased() == "pdf" {
-                        print("[PLUGIN] PDF content extraction not supported")
+                        let pdfContent = self?.extractPdfText(from: url, maxLength: maxLen)
                         DispatchQueue.main.async {
-                            completion(.success(nil))
+                            completion(.success(pdfContent))
                         }
                         return
                     }
@@ -1840,5 +1841,88 @@ extension PlatformServiceImpl: UIDocumentPickerDelegate {
             documentPickerCompletion = nil
             completion(.success([]))
         }
+    }
+    
+    // MARK: - PDF Text Extraction
+    
+    /// Extract text from a PDF file using PDFKit
+    private func extractPdfText(from url: URL, maxLength: Int) -> String? {
+        print("[PLUGIN] Extracting text from PDF: \(url.lastPathComponent)")
+        
+        guard let pdfDocument = PDFDocument(url: url) else {
+            print("[PLUGIN] Failed to open PDF document")
+            return nil
+        }
+        
+        var fullText = ""
+        let pageCount = pdfDocument.pageCount
+        
+        for pageIndex in 0..<pageCount {
+            guard let page = pdfDocument.page(at: pageIndex) else { continue }
+            
+            if let pageText = page.string {
+                fullText += pageText
+                fullText += "\n"
+            }
+            
+            // Stop early if we've exceeded maxLength
+            if fullText.count >= maxLength {
+                break
+            }
+        }
+        
+        let trimmedText = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedText.isEmpty {
+            print("[PLUGIN] No text extracted from PDF (may be image-only)")
+            return nil
+        }
+        
+        print("[PLUGIN] Extracted \(trimmedText.count) chars from PDF")
+        
+        // Validate extracted content is readable
+        guard let validatedText = validatePdfContent(trimmedText) else {
+            return nil
+        }
+        
+        if validatedText.count > maxLength {
+            return String(validatedText.prefix(maxLength))
+        }
+        
+        return validatedText
+    }
+    
+    /// Validate extracted PDF content is readable text, not garbage
+    private func validatePdfContent(_ content: String) -> String? {
+        if content.isEmpty { return nil }
+        
+        // Count printable characters
+        let printableChars = CharacterSet.alphanumerics
+            .union(.whitespaces)
+            .union(.punctuationCharacters)
+        
+        let printableCount = content.unicodeScalars.filter { printableChars.contains($0) }.count
+        let readabilityRatio = Float(printableCount) / Float(content.count)
+        
+        // If less than 60% readable, it's likely garbage
+        if readabilityRatio < 0.6 {
+            print("[PLUGIN] PDF content rejected: only \(Int(readabilityRatio * 100))% readable")
+            return nil
+        }
+        
+        // Check for minimum meaningful content (at least some words)
+        let wordPattern = try? NSRegularExpression(pattern: "\\b[a-zA-Z]{2,}\\b")
+        let wordCount = wordPattern?.numberOfMatches(
+            in: content, 
+            range: NSRange(content.startIndex..., in: content)
+        ) ?? 0
+        
+        if wordCount < 3 {
+            print("[PLUGIN] PDF content rejected: only \(wordCount) recognizable words")
+            return nil
+        }
+        
+        print("[PLUGIN] PDF content validated: \(content.count) chars, \(Int(readabilityRatio * 100))% readable, \(wordCount) words")
+        return content
     }
 }

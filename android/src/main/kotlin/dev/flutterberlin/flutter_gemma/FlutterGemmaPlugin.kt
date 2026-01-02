@@ -1086,10 +1086,19 @@ private class PlatformServiceImpl(
           val uri = android.net.Uri.parse(documentId)
           val mimeType = context.contentResolver.getType(uri)
           
-          // Don't read PDF content (need special parser)
+          // Extract PDF content using raw parsing
           if (mimeType?.contains("pdf") == true) {
-            Log.w(TAG, "PDF content extraction not supported")
-            callback(Result.success(null))
+            Log.d(TAG, "Extracting text from PDF via content URI")
+            val content = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+              extractTextFromPdfBytes(inputStream.readBytes(), max)
+            }
+            if (content != null && content.isNotEmpty()) {
+              Log.d(TAG, "Extracted ${content.length} chars from PDF")
+              callback(Result.success(content))
+            } else {
+              Log.w(TAG, "No text content extracted from PDF")
+              callback(Result.success(null))
+            }
             return@launch
           }
           
@@ -1210,6 +1219,69 @@ private class PlatformServiceImpl(
       callback(Result.success(IndexingForegroundService.isRunning()))
     } catch (e: Exception) {
       callback(Result.failure(e))
+    }
+  }
+
+  // PdfBox initialization flag
+  private var pdfBoxInitialized = false
+  
+  /**
+   * Initialize PdfBox-Android library.
+   * Must be called before using PDF extraction.
+   */
+  private fun initPdfBox() {
+    if (!pdfBoxInitialized) {
+      try {
+        com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+        pdfBoxInitialized = true
+        Log.d(TAG, "PdfBox-Android initialized successfully")
+      } catch (e: Exception) {
+        Log.e(TAG, "Failed to initialize PdfBox-Android: ${e.message}")
+      }
+    }
+  }
+
+  /**
+   * Extract text from PDF using PdfBox-Android library.
+   * This properly handles compressed streams, CIDFonts, and ToUnicode CMaps.
+   */
+  private fun extractTextFromPdfBytes(bytes: ByteArray, maxLength: Int): String? {
+    try {
+      initPdfBox()
+      
+      Log.d(TAG, "Extracting text from PDF using PdfBox-Android (${bytes.size} bytes)")
+      
+      val inputStream = java.io.ByteArrayInputStream(bytes)
+      val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream)
+      
+      try {
+        val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+        stripper.sortByPosition = true
+        
+        val text = stripper.getText(document)
+        val trimmedText = text.trim()
+        
+        if (trimmedText.isEmpty()) {
+          Log.w(TAG, "PdfBox extracted empty text (PDF may be image-only)")
+          return null
+        }
+        
+        Log.d(TAG, "PdfBox extracted ${trimmedText.length} characters from PDF")
+        
+        // Truncate if needed
+        val result = if (trimmedText.length > maxLength) {
+          trimmedText.take(maxLength)
+        } else {
+          trimmedText
+        }
+        
+        return result
+      } finally {
+        document.close()
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "PdfBox extraction failed: ${e.message}", e)
+      return null
     }
   }
 }

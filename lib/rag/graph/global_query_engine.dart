@@ -398,14 +398,14 @@ class GlobalQueryEngine {
         ? '${community.summary.substring(0, maxSummaryChars)}...'
         : community.summary;
     
-    final prompt = '''Based on this summary, answer the question.
+    final prompt = '''Answer ONLY using this summary. Do NOT add external information.
 
 Summary:
 $truncatedSummary
 
 Question: $query
 
-Provide a brief answer (2-3 sentences):
+Answer in 1-2 sentences using ONLY the summary. If insufficient, say "Not enough information.":
 ''';
 
     try {
@@ -427,7 +427,6 @@ Provide a brief answer (2-3 sentences):
       return null;
     }
   }
-
   /// Reduce phase: Synthesize global answer from community answers
   Future<String> _generateGlobalAnswer(
     String query,
@@ -448,14 +447,19 @@ Provide a brief answer (2-3 sentences):
       return 'Context $idx: $truncated';
     }).join('\n\n');
     
-    // Simplified prompt to reduce token count
-    final prompt = '''Synthesize these contexts to answer the question.
+    // Grounded prompt - no external knowledge
+    final prompt = '''Combine these contexts to answer. Use ONLY information provided.
 
 $answersContext
 
 Question: $query
 
-Provide a comprehensive answer:
+Rules:
+- Use ONLY the contexts above
+- 2-3 sentences maximum
+- If contexts don't answer, say so
+
+Answer:
 ''';
 
     return await llmCallback(prompt);

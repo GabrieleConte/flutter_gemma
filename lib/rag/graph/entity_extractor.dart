@@ -466,8 +466,16 @@ class LLMEntityExtractor implements EntityExtractor {
       );
     }
 
+    // Truncate text to avoid exceeding token limits
+    // Gemma models typically have 1024 token limit, reserve ~300 for prompt template
+    // Rough estimate: 4 chars per token, so ~2500 chars for text
+    const maxTextLength = 2500;
+    final truncatedText = text.length > maxTextLength 
+        ? '${text.substring(0, maxTextLength)}...[truncated]'
+        : text;
+
     final prompt = ExtractionPrompts.entityExtractionPrompt(
-      text,
+      truncatedText,
       config.entityTypes,
     );
     

@@ -194,12 +194,15 @@ class HybridQueryEngine {
     // Truncate query if too long
     final shortQuery = query.length > 100 ? '${query.substring(0, 100)}...' : query;
     
-    // Very short prompt to stay under 1024 tokens (~400 tokens max for prompt)
-    final prompt = '''Answer based on this data:
+    // Grounded prompt - only use provided data, no hallucination
+    final prompt = '''Answer ONLY using this data. Do NOT add external information.
+
+Data:
 $entityContext
 
 Q: $shortQuery
-A (1 sentence):''';
+
+Answer in 1 sentence using ONLY the data above. If insufficient, say "No relevant data found.":''';
 
     try {
       final response = await llmCallback!(prompt);
@@ -235,17 +238,20 @@ A (1 sentence):''';
     }).join('\n');
     
     final communityContext = result.communities.isNotEmpty
-        ? '\n\nRelated context:\n${result.communities.first.community.summary}'
+        ? '\n\nContext:\n${result.communities.first.community.summary}'
         : '';
     
-    final prompt = '''Based on the following information from your personal data, answer the question briefly and directly.
+    final prompt = '''Answer ONLY using the information below. Do NOT add external knowledge.
 
-Relevant entities:
+Entities:
 $entityContext$communityContext
 
 Question: $query
 
-Provide a short, focused answer (1-2 sentences). If the information doesn't fully answer the question, say what you can based on what's available.
+Rules:
+- Use ONLY entities/context above
+- 1-2 sentences maximum
+- If insufficient data, say so
 
 Answer:''';
 
