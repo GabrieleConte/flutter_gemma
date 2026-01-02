@@ -27,6 +27,8 @@ class SystemDataConnector {
             return checkCallLogPermission()
         case .notifications:
             return .notDetermined // Not implemented yet
+        case .files:
+            return checkFilesPermission()
         }
     }
 
@@ -43,6 +45,8 @@ class SystemDataConnector {
             requestCallLogPermission(completion: completion)
         case .notifications:
             completion(.denied) // Not implemented yet
+        case .files:
+            requestFilesPermission(completion: completion)
         }
     }
 
@@ -401,6 +405,204 @@ class SystemDataConnector {
         // Regular telephony call history is not accessible for privacy reasons
         print("⚠️ Call log is not accessible on iOS due to platform restrictions")
         return []
+    }
+
+    // MARK: - Files Permission
+
+    private func checkFilesPermission() -> PermissionStatus {
+        // iOS uses sandboxed file access - apps can access their own container
+        // For accessing iCloud/Files app, additional entitlements are needed
+        // For now, we return granted since we can access app sandbox
+        return .granted
+    }
+
+    private func requestFilesPermission(completion: @escaping (PermissionStatus) -> Void) {
+        // iOS sandboxed file access doesn't require explicit permission
+        completion(.granted)
+    }
+
+    // MARK: - Documents
+
+    /// Fetch documents from the app's sandbox
+    /// Note: iOS apps can only access their own sandbox unless using document picker
+    func fetchDocuments(sinceTimestamp: Int?, limit: Int?, allowedExtensions: [String]?) throws -> [DocumentResult] {
+        print("📄 Fetching documents from app sandbox")
+        
+        var results: [DocumentResult] = []
+        let maxCount = limit ?? 100
+        
+        // Get the documents directory
+        let fileManager = FileManager.default
+        guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return []
+        }
+        
+        let extensions = allowedExtensions ?? ["txt", "md", "pdf", "rtf", "html"]
+        
+        // Get all files in documents directory
+        if let enumerator = fileManager.enumerator(at: documentsURL, includingPropertiesForKeys: [
+            .isRegularFileKey,
+            .nameKey,
+            .fileSizeKey,
+            .creationDateKey,
+            .contentModificationDateKey
+        ]) {
+            var count = 0
+            while let fileURL = enumerator.nextObject() as? URL, count < maxCount {
+                do {
+                    let resourceValues = try fileURL.resourceValues(forKeys: [
+                        .isRegularFileKey,
+                        .nameKey,
+                        .fileSizeKey,
+                        .creationDateKey,
+                        .contentModificationDateKey
+                    ])
+                    
+                    guard resourceValues.isRegularFile == true else { continue }
+                    
+                    let ext = fileURL.pathExtension.lowercased()
+                    guard extensions.contains(ext) else { continue }
+                    
+                    let name = resourceValues.name ?? fileURL.lastPathComponent
+                    let size = Int64(resourceValues.fileSize ?? 0)
+                    let createdDate = resourceValues.creationDate ?? Date()
+                    let modifiedDate = resourceValues.contentModificationDate ?? Date()
+                    
+                    // Check sinceTimestamp
+                    if let since = sinceTimestamp {
+                        let sinceDate = Date(timeIntervalSince1970: TimeInterval(since) / 1000.0)
+                        if modifiedDate < sinceDate { continue }
+                    }
+                    
+                    let docType: DocumentType
+                    switch ext {
+                    case "txt":
+                        docType = .plainText
+                    case "md", "markdown":
+                        docType = .markdown
+                    case "pdf":
+                        docType = .pdf
+                    case "rtf":
+                        docType = .rtf
+                    case "html", "htm":
+                        docType = .html
+                    default:
+                        docType = .other
+                    }
+                    
+                    // Get text preview for text-based files
+                    var textPreview: String? = nil
+                    if docType == .plainText || docType == .markdown || docType == .html {
+                        if let content = try? String(contentsOf: fileURL, encoding: .utf8) {
+                            textPreview = String(content.prefix(500))
+                        }
+                    }
+                    
+                    let result = DocumentResult(
+                        id: fileURL.absoluteString,
+                        name: name,
+                        path: fileURL.path,
+                        documentType: docType,
+                        mimeType: mimeType(for: ext),
+                        fileSize: size,
+                        createdDate: Int64(createdDate.timeIntervalSince1970 * 1000),
+                        modifiedDate: Int64(modifiedDate.timeIntervalSince1970 * 1000),
+                        textPreview: textPreview
+                    )
+                    
+                    results.append(result)
+                    count += 1
+                } catch {
+                    print("Error reading file attributes: \(error)")
+                }
+            }
+        }
+        
+        print("📄 Found \(results.count) documents")
+        return results
+    }
+
+    /// Read document content
+    func readDocumentContent(documentId: String, maxLength: Int?) throws -> String? {
+        guard let fileURL = URL(string: documentId) else {
+            return nil
+        }
+        
+        let ext = fileURL.pathExtension.lowercased()
+        
+        // For PDF files, we would need PDFKit - return nil for now
+        if ext == "pdf" {
+            print("⚠️ PDF content extraction requires PDFKit integration")
+            return nil
+        }
+        
+        guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return nil
+        }
+        
+        if let max = maxLength, content.count > max {
+            return String(content.prefix(max))
+        }
+        
+        return content
+    }
+
+    /// Get MIME type for file extension
+    private func mimeType(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "txt":
+            return "text/plain"
+        case "md", "markdown":
+            return "text/markdown"
+        case "pdf":
+            return "application/pdf"
+        case "rtf":
+            return "application/rtf"
+        case "html", "htm":
+            return "text/html"
+        default:
+            return "application/octet-stream"
+        }
+    }
+
+    // MARK: - Photo Thumbnail
+
+    /// Get a thumbnail for a photo
+    func getPhotoThumbnail(photoId: String, maxWidth: Int, maxHeight: Int) throws -> Data? {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            throw SystemDataError.permissionDenied("Photos permission not granted")
+        }
+
+        // Parse the photo ID
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [photoId], options: nil).firstObject else {
+            return nil
+        }
+
+        var resultData: Data? = nil
+        let semaphore = DispatchSemaphore(value: 0)
+
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
+
+        let targetSize = CGSize(width: maxWidth, height: maxHeight)
+
+        PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: .aspectFit,
+            options: options
+        ) { image, _ in
+            if let image = image, let data = image.jpegData(compressionQuality: 0.85) {
+                resultData = data
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+        return resultData
     }
 }
 

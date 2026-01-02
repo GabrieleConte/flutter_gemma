@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import UniformTypeIdentifiers
 
 @available(iOS 13.0, *)
 public class FlutterGemmaPlugin: NSObject, FlutterPlugin {
@@ -1477,6 +1478,230 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
         }
     }
 
+    // Document picker completion handler
+    private var documentPickerCompletion: ((Result<[DocumentResult], Error>) -> Void)?
+
+    func pickDocuments(
+        allowedExtensions: [String]?,
+        allowMultiple: Bool?,
+        completion: @escaping (Result<[DocumentResult], Error>) -> Void
+    ) {
+        print("[PLUGIN] Opening document picker")
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                completion(.failure(PigeonError(code: "PluginDeallocated", message: "Plugin was deallocated", details: nil)))
+                return
+            }
+
+            guard let rootVC = UIApplication.shared.keyWindow?.rootViewController else {
+                completion(.failure(PigeonError(code: "NoRootVC", message: "No root view controller", details: nil)))
+                return
+            }
+
+            // Store completion handler
+            self.documentPickerCompletion = completion
+
+            // Build UTTypes from extensions
+            var contentTypes: [UTType] = []
+            let extensions = allowedExtensions ?? ["txt", "md", "pdf", "rtf", "html"]
+
+            for ext in extensions {
+                switch ext.lowercased() {
+                case "txt":
+                    contentTypes.append(.plainText)
+                case "md", "markdown":
+                    contentTypes.append(UTType(filenameExtension: "md") ?? .text)
+                case "pdf":
+                    contentTypes.append(.pdf)
+                case "rtf":
+                    contentTypes.append(.rtf)
+                case "html", "htm":
+                    contentTypes.append(.html)
+                case "*":
+                    contentTypes.append(.item)
+                default:
+                    if let type = UTType(filenameExtension: ext) {
+                        contentTypes.append(type)
+                    }
+                }
+            }
+
+            if contentTypes.isEmpty {
+                contentTypes = [.item]
+            }
+
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes)
+            picker.allowsMultipleSelection = allowMultiple ?? false
+            picker.delegate = self
+
+            rootVC.present(picker, animated: true)
+        }
+    }
+
+    func fetchDocuments(
+        sinceTimestamp: Int64?,
+        limit: Int64?,
+        allowedExtensions: [String]?,
+        completion: @escaping (Result<[DocumentResult], Error>) -> Void
+    ) {
+        print("[PLUGIN] Fetching documents - Note: iOS file access is sandboxed")
+
+        if systemDataConnector == nil {
+            systemDataConnector = SystemDataConnector()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let documents = try self.systemDataConnector!.fetchDocuments(
+                    sinceTimestamp: sinceTimestamp != nil ? Int(sinceTimestamp!) : nil,
+                    limit: limit != nil ? Int(limit!) : nil,
+                    allowedExtensions: allowedExtensions
+                )
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Fetched \(documents.count) documents")
+                    completion(.success(documents))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to fetch documents: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "FetchDocumentsFailed",
+                        message: "Failed to fetch documents: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
+    func readDocumentContent(
+        documentId: String,
+        maxLength: Int64?,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
+        print("[PLUGIN] Reading document content for id: \(documentId)")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let maxLen = maxLength.map { Int($0) } ?? Int.max
+
+                // Check if documentId is a bookmark (base64 encoded)
+                if let bookmarkData = Data(base64Encoded: documentId) {
+                    var isStale = false
+                    let url = try URL(resolvingBookmarkData: bookmarkData, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale)
+
+                    let didStartAccess = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if didStartAccess {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    // Check if it's a PDF
+                    if url.pathExtension.lowercased() == "pdf" {
+                        print("[PLUGIN] PDF content extraction not supported")
+                        DispatchQueue.main.async {
+                            completion(.success(nil))
+                        }
+                        return
+                    }
+
+                    let content = try String(contentsOf: url, encoding: .utf8)
+                    let truncated = content.count > maxLen ? String(content.prefix(maxLen)) : content
+
+                    DispatchQueue.main.async {
+                        completion(.success(truncated))
+                    }
+                    return
+                }
+
+                // Check if it's a file:// URL
+                if documentId.hasPrefix("file://"), let url = URL(string: documentId) {
+                    if url.pathExtension.lowercased() == "pdf" {
+                        print("[PLUGIN] PDF content extraction not supported")
+                        DispatchQueue.main.async {
+                            completion(.success(nil))
+                        }
+                        return
+                    }
+
+                    let content = try String(contentsOf: url, encoding: .utf8)
+                    let truncated = content.count > maxLen ? String(content.prefix(maxLen)) : content
+
+                    DispatchQueue.main.async {
+                        completion(.success(truncated))
+                    }
+                    return
+                }
+
+                // Fall back to SystemDataConnector
+                if self?.systemDataConnector == nil {
+                    self?.systemDataConnector = SystemDataConnector()
+                }
+
+                let content = try self?.systemDataConnector?.readDocumentContent(
+                    documentId: documentId,
+                    maxLength: maxLength != nil ? Int(maxLength!) : nil
+                )
+
+                DispatchQueue.main.async {
+                    completion(.success(content ?? nil))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to read document content: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "ReadDocumentFailed",
+                        message: "Failed to read document content: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
+    func getPhotoThumbnail(
+        photoId: String,
+        maxWidth: Int64?,
+        maxHeight: Int64?,
+        completion: @escaping (Result<FlutterStandardTypedData?, Error>) -> Void
+    ) {
+        print("[PLUGIN] Getting photo thumbnail for id: \(photoId)")
+
+        if systemDataConnector == nil {
+            systemDataConnector = SystemDataConnector()
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let thumbnailData = try self.systemDataConnector!.getPhotoThumbnail(
+                    photoId: photoId,
+                    maxWidth: maxWidth != nil ? Int(maxWidth!) : 512,
+                    maxHeight: maxHeight != nil ? Int(maxHeight!) : 512
+                )
+
+                DispatchQueue.main.async {
+                    if let data = thumbnailData {
+                        completion(.success(FlutterStandardTypedData(bytes: data)))
+                    } else {
+                        completion(.success(nil))
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to get photo thumbnail: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "GetThumbnailFailed",
+                        message: "Failed to get photo thumbnail: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
     func analyzePhoto(
         photoId: String,
         imageBytes: FlutterStandardTypedData,
@@ -1513,5 +1738,107 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
     public func onCancel(withArguments arguments: Any?) -> FlutterError? {
         self.eventSink = nil
         return nil
+    }
+}
+
+// MARK: - UIDocumentPickerDelegate
+@available(iOS 14.0, *)
+extension PlatformServiceImpl: UIDocumentPickerDelegate {
+    public func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        print("[PLUGIN] Document picker selected \(urls.count) files")
+
+        guard let completion = documentPickerCompletion else {
+            print("[PLUGIN] No completion handler for document picker")
+            return
+        }
+        documentPickerCompletion = nil
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var documents: [DocumentResult] = []
+
+            for url in urls {
+                // Start accessing security-scoped resource
+                let didStartAccess = url.startAccessingSecurityScopedResource()
+
+                defer {
+                    if didStartAccess {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                do {
+                    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                    let fileSize = attributes[.size] as? Int64 ?? 0
+                    let modifiedDate = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+                    let createdDate = (attributes[.creationDate] as? Date)?.timeIntervalSince1970 ?? modifiedDate
+
+                    let name = url.lastPathComponent
+                    let ext = url.pathExtension.lowercased()
+
+                    let docType: DocumentType
+                    let mimeType: String?
+                    switch ext {
+                    case "txt":
+                        docType = .plainText
+                        mimeType = "text/plain"
+                    case "md", "markdown":
+                        docType = .markdown
+                        mimeType = "text/markdown"
+                    case "pdf":
+                        docType = .pdf
+                        mimeType = "application/pdf"
+                    case "rtf":
+                        docType = .rtf
+                        mimeType = "application/rtf"
+                    case "html", "htm":
+                        docType = .html
+                        mimeType = "text/html"
+                    default:
+                        docType = .other
+                        mimeType = nil
+                    }
+
+                    // Read text preview for text-based files
+                    var textPreview: String? = nil
+                    if docType == .plainText || docType == .markdown || docType == .html {
+                        if let content = try? String(contentsOf: url, encoding: .utf8) {
+                            textPreview = String(content.prefix(500))
+                        }
+                    }
+
+                    // Bookmark the URL for persistent access
+                    let bookmarkData = try? url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+                    let documentId = bookmarkData?.base64EncodedString() ?? url.absoluteString
+
+                    let document = DocumentResult(
+                        id: documentId,
+                        name: name,
+                        path: url.absoluteString,
+                        documentType: docType,
+                        mimeType: mimeType,
+                        fileSize: fileSize,
+                        createdDate: Int64(createdDate * 1000),
+                        modifiedDate: Int64(modifiedDate * 1000),
+                        textPreview: textPreview
+                    )
+                    documents.append(document)
+                } catch {
+                    print("[PLUGIN] Error processing file \(url): \(error)")
+                }
+            }
+
+            DispatchQueue.main.async {
+                print("[PLUGIN] Returning \(documents.count) documents from picker")
+                completion(.success(documents))
+            }
+        }
+    }
+
+    public func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        print("[PLUGIN] Document picker cancelled")
+        if let completion = documentPickerCompletion {
+            documentPickerCompletion = nil
+            completion(.success([]))
+        }
     }
 }

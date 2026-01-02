@@ -80,6 +80,7 @@ enum PermissionType: Int {
   case notifications = 2
   case photos = 3
   case callLog = 4
+  case files = 5
 }
 
 enum PermissionStatus: Int {
@@ -87,6 +88,16 @@ enum PermissionStatus: Int {
   case denied = 1
   case restricted = 2
   case notDetermined = 3
+}
+
+/// Document types supported for extraction
+enum DocumentType: Int {
+  case plainText = 0
+  case markdown = 1
+  case pdf = 2
+  case rtf = 3
+  case html = 4
+  case other = 5
 }
 
 enum CallType: Int {
@@ -594,6 +605,58 @@ struct PhotoResult {
 }
 
 /// Generated class from Pigeon that represents data sent in messages.
+struct DocumentResult {
+  var id: String
+  var name: String
+  var path: String
+  var documentType: DocumentType
+  var mimeType: String? = nil
+  var fileSize: Int64
+  var createdDate: Int64
+  var modifiedDate: Int64
+  var textPreview: String? = nil
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> DocumentResult? {
+    let id = pigeonVar_list[0] as! String
+    let name = pigeonVar_list[1] as! String
+    let path = pigeonVar_list[2] as! String
+    let documentType = pigeonVar_list[3] as! DocumentType
+    let mimeType: String? = nilOrValue(pigeonVar_list[4])
+    let fileSize = pigeonVar_list[5] as! Int64
+    let createdDate = pigeonVar_list[6] as! Int64
+    let modifiedDate = pigeonVar_list[7] as! Int64
+    let textPreview: String? = nilOrValue(pigeonVar_list[8])
+
+    return DocumentResult(
+      id: id,
+      name: name,
+      path: path,
+      documentType: documentType,
+      mimeType: mimeType,
+      fileSize: fileSize,
+      createdDate: createdDate,
+      modifiedDate: modifiedDate,
+      textPreview: textPreview
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      name,
+      path,
+      documentType,
+      mimeType,
+      fileSize,
+      createdDate,
+      modifiedDate,
+      textPreview,
+    ]
+  }
+}
+
+/// Generated class from Pigeon that represents data sent in messages.
 struct CallLogResult {
   var id: String
   var name: String? = nil
@@ -833,44 +896,52 @@ private class PigeonInterfacePigeonCodecReader: FlutterStandardReader {
     case 132:
       let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
       if let enumResultAsInt = enumResultAsInt {
-        return CallType(rawValue: enumResultAsInt)
+        return DocumentType(rawValue: enumResultAsInt)
       }
       return nil
     case 133:
-      return RetrievalResult.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return CallType(rawValue: enumResultAsInt)
+      }
+      return nil
     case 134:
-      return VectorStoreStats.fromList(self.readValue() as! [Any?])
+      return RetrievalResult.fromList(self.readValue() as! [Any?])
     case 135:
-      return EntityResult.fromList(self.readValue() as! [Any?])
+      return VectorStoreStats.fromList(self.readValue() as! [Any?])
     case 136:
-      return EntityWithEmbedding.fromList(self.readValue() as! [Any?])
+      return EntityResult.fromList(self.readValue() as! [Any?])
     case 137:
-      return RelationshipResult.fromList(self.readValue() as! [Any?])
+      return EntityWithEmbedding.fromList(self.readValue() as! [Any?])
     case 138:
-      return CommunityResult.fromList(self.readValue() as! [Any?])
+      return RelationshipResult.fromList(self.readValue() as! [Any?])
     case 139:
-      return GraphStats.fromList(self.readValue() as! [Any?])
+      return CommunityResult.fromList(self.readValue() as! [Any?])
     case 140:
-      return ContactResult.fromList(self.readValue() as! [Any?])
+      return GraphStats.fromList(self.readValue() as! [Any?])
     case 141:
-      return CalendarEventResult.fromList(self.readValue() as! [Any?])
+      return ContactResult.fromList(self.readValue() as! [Any?])
     case 142:
-      return GraphQueryResult.fromList(self.readValue() as! [Any?])
+      return CalendarEventResult.fromList(self.readValue() as! [Any?])
     case 143:
-      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
+      return GraphQueryResult.fromList(self.readValue() as! [Any?])
     case 144:
-      return CommunityWithScoreResult.fromList(self.readValue() as! [Any?])
+      return EntityWithScoreResult.fromList(self.readValue() as! [Any?])
     case 145:
-      return PhotoResult.fromList(self.readValue() as! [Any?])
+      return CommunityWithScoreResult.fromList(self.readValue() as! [Any?])
     case 146:
-      return CallLogResult.fromList(self.readValue() as! [Any?])
+      return PhotoResult.fromList(self.readValue() as! [Any?])
     case 147:
-      return DetectedFace.fromList(self.readValue() as! [Any?])
+      return DocumentResult.fromList(self.readValue() as! [Any?])
     case 148:
-      return DetectedObject.fromList(self.readValue() as! [Any?])
+      return CallLogResult.fromList(self.readValue() as! [Any?])
     case 149:
-      return DetectedText.fromList(self.readValue() as! [Any?])
+      return DetectedFace.fromList(self.readValue() as! [Any?])
     case 150:
+      return DetectedObject.fromList(self.readValue() as! [Any?])
+    case 151:
+      return DetectedText.fromList(self.readValue() as! [Any?])
+    case 152:
       return PhotoAnalysisResult.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -889,62 +960,68 @@ private class PigeonInterfacePigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? PermissionStatus {
       super.writeByte(131)
       super.writeValue(value.rawValue)
-    } else if let value = value as? CallType {
+    } else if let value = value as? DocumentType {
       super.writeByte(132)
       super.writeValue(value.rawValue)
-    } else if let value = value as? RetrievalResult {
+    } else if let value = value as? CallType {
       super.writeByte(133)
-      super.writeValue(value.toList())
-    } else if let value = value as? VectorStoreStats {
+      super.writeValue(value.rawValue)
+    } else if let value = value as? RetrievalResult {
       super.writeByte(134)
       super.writeValue(value.toList())
-    } else if let value = value as? EntityResult {
+    } else if let value = value as? VectorStoreStats {
       super.writeByte(135)
       super.writeValue(value.toList())
-    } else if let value = value as? EntityWithEmbedding {
+    } else if let value = value as? EntityResult {
       super.writeByte(136)
       super.writeValue(value.toList())
-    } else if let value = value as? RelationshipResult {
+    } else if let value = value as? EntityWithEmbedding {
       super.writeByte(137)
       super.writeValue(value.toList())
-    } else if let value = value as? CommunityResult {
+    } else if let value = value as? RelationshipResult {
       super.writeByte(138)
       super.writeValue(value.toList())
-    } else if let value = value as? GraphStats {
+    } else if let value = value as? CommunityResult {
       super.writeByte(139)
       super.writeValue(value.toList())
-    } else if let value = value as? ContactResult {
+    } else if let value = value as? GraphStats {
       super.writeByte(140)
       super.writeValue(value.toList())
-    } else if let value = value as? CalendarEventResult {
+    } else if let value = value as? ContactResult {
       super.writeByte(141)
       super.writeValue(value.toList())
-    } else if let value = value as? GraphQueryResult {
+    } else if let value = value as? CalendarEventResult {
       super.writeByte(142)
       super.writeValue(value.toList())
-    } else if let value = value as? EntityWithScoreResult {
+    } else if let value = value as? GraphQueryResult {
       super.writeByte(143)
       super.writeValue(value.toList())
-    } else if let value = value as? CommunityWithScoreResult {
+    } else if let value = value as? EntityWithScoreResult {
       super.writeByte(144)
       super.writeValue(value.toList())
-    } else if let value = value as? PhotoResult {
+    } else if let value = value as? CommunityWithScoreResult {
       super.writeByte(145)
       super.writeValue(value.toList())
-    } else if let value = value as? CallLogResult {
+    } else if let value = value as? PhotoResult {
       super.writeByte(146)
       super.writeValue(value.toList())
-    } else if let value = value as? DetectedFace {
+    } else if let value = value as? DocumentResult {
       super.writeByte(147)
       super.writeValue(value.toList())
-    } else if let value = value as? DetectedObject {
+    } else if let value = value as? CallLogResult {
       super.writeByte(148)
       super.writeValue(value.toList())
-    } else if let value = value as? DetectedText {
+    } else if let value = value as? DetectedFace {
       super.writeByte(149)
       super.writeValue(value.toList())
-    } else if let value = value as? PhotoAnalysisResult {
+    } else if let value = value as? DetectedObject {
       super.writeByte(150)
+      super.writeValue(value.toList())
+    } else if let value = value as? DetectedText {
+      super.writeByte(151)
+      super.writeValue(value.toList())
+    } else if let value = value as? PhotoAnalysisResult {
+      super.writeByte(152)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -1016,6 +1093,12 @@ protocol PlatformService {
   func fetchCalendarEvents(sinceTimestamp: Int64?, startDate: Int64?, endDate: Int64?, limit: Int64?, completion: @escaping (Result<[CalendarEventResult], Error>) -> Void)
   func fetchPhotos(sinceTimestamp: Int64?, limit: Int64?, includeLocation: Bool?, completion: @escaping (Result<[PhotoResult], Error>) -> Void)
   func fetchCallLog(sinceTimestamp: Int64?, limit: Int64?, completion: @escaping (Result<[CallLogResult], Error>) -> Void)
+  /// Opens a document picker for the user to select files.
+  /// Returns a list of documents the user selected.
+  func pickDocuments(allowedExtensions: [String]?, allowMultiple: Bool?, completion: @escaping (Result<[DocumentResult], Error>) -> Void)
+  func fetchDocuments(sinceTimestamp: Int64?, limit: Int64?, allowedExtensions: [String]?, completion: @escaping (Result<[DocumentResult], Error>) -> Void)
+  func readDocumentContent(documentId: String, maxLength: Int64?, completion: @escaping (Result<String?, Error>) -> Void)
+  func getPhotoThumbnail(photoId: String, maxWidth: Int64?, maxHeight: Int64?, completion: @escaping (Result<FlutterStandardTypedData?, Error>) -> Void)
   func analyzePhoto(photoId: String, imageBytes: FlutterStandardTypedData, detectFaces: Bool?, detectObjects: Bool?, detectText: Bool?, completion: @escaping (Result<PhotoAnalysisResult, Error>) -> Void)
   func startIndexingForegroundService(completion: @escaping (Result<Void, Error>) -> Void)
   func stopIndexingForegroundService(completion: @escaping (Result<Void, Error>) -> Void)
@@ -1855,6 +1938,82 @@ class PlatformServiceSetup {
       }
     } else {
       fetchCallLogChannel.setMessageHandler(nil)
+    }
+    /// Opens a document picker for the user to select files.
+    /// Returns a list of documents the user selected.
+    let pickDocumentsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.pickDocuments\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      pickDocumentsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let allowedExtensionsArg: [String]? = nilOrValue(args[0])
+        let allowMultipleArg: Bool? = nilOrValue(args[1])
+        api.pickDocuments(allowedExtensions: allowedExtensionsArg, allowMultiple: allowMultipleArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      pickDocumentsChannel.setMessageHandler(nil)
+    }
+    let fetchDocumentsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchDocuments\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      fetchDocumentsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let sinceTimestampArg: Int64? = nilOrValue(args[0])
+        let limitArg: Int64? = nilOrValue(args[1])
+        let allowedExtensionsArg: [String]? = nilOrValue(args[2])
+        api.fetchDocuments(sinceTimestamp: sinceTimestampArg, limit: limitArg, allowedExtensions: allowedExtensionsArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      fetchDocumentsChannel.setMessageHandler(nil)
+    }
+    let readDocumentContentChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.readDocumentContent\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      readDocumentContentChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let documentIdArg = args[0] as! String
+        let maxLengthArg: Int64? = nilOrValue(args[1])
+        api.readDocumentContent(documentId: documentIdArg, maxLength: maxLengthArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      readDocumentContentChannel.setMessageHandler(nil)
+    }
+    let getPhotoThumbnailChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getPhotoThumbnail\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getPhotoThumbnailChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let photoIdArg = args[0] as! String
+        let maxWidthArg: Int64? = nilOrValue(args[1])
+        let maxHeightArg: Int64? = nilOrValue(args[2])
+        api.getPhotoThumbnail(photoId: photoIdArg, maxWidth: maxWidthArg, maxHeight: maxHeightArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getPhotoThumbnailChannel.setMessageHandler(nil)
     }
     let analyzePhotoChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.analyzePhoto\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

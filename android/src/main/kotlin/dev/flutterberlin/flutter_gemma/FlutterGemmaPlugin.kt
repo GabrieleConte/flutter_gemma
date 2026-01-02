@@ -2,6 +2,7 @@ package dev.flutterberlin.flutter_gemma
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -15,7 +16,9 @@ import io.flutter.plugin.common.PluginRegistry
 import kotlinx.coroutines.*
 
 /** FlutterGemmaPlugin */
-class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, PluginRegistry.RequestPermissionsResultListener {
+class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, 
+    PluginRegistry.RequestPermissionsResultListener,
+    PluginRegistry.ActivityResultListener {
   /// The MethodChannel that will the communication between Flutter and native Android
   ///
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
@@ -76,15 +79,22 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, PluginRegistry.RequestPe
     return service?.onRequestPermissionsResult(requestCode, permissions, grantResults) ?: false
   }
 
+  // ActivityResultListener - forward activity results to service
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    return service?.onActivityResult(requestCode, resultCode, data) ?: false
+  }
+
   // ActivityAware implementation for permission handling
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {
     activityBinding = binding
     binding.addRequestPermissionsResultListener(this)
+    binding.addActivityResultListener(this)
     service?.setActivity(binding.activity)
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
     activityBinding?.removeRequestPermissionsResultListener(this)
+    activityBinding?.removeActivityResultListener(this)
     activityBinding = null
     service?.setActivity(null)
   }
@@ -92,11 +102,13 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, PluginRegistry.RequestPe
   override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
     activityBinding = binding
     binding.addRequestPermissionsResultListener(this)
+    binding.addActivityResultListener(this)
     service?.setActivity(binding.activity)
   }
 
   override fun onDetachedFromActivity() {
     activityBinding?.removeRequestPermissionsResultListener(this)
+    activityBinding?.removeActivityResultListener(this)
     activityBinding = null
     service?.setActivity(null)
   }
@@ -120,6 +132,12 @@ private class PlatformServiceImpl(
   private var graphStore: GraphStore? = null
   private var systemDataConnector: SystemDataConnector? = null
 
+  // Document picker callback
+  companion object {
+    const val REQUEST_CODE_PICK_DOCUMENTS = 2001
+  }
+  private var pendingDocumentPickerCallback: ((Result<List<DocumentResult>>) -> Unit)? = null
+
   fun setActivity(activity: Activity?) {
     this.activity = activity
     systemDataConnector?.setActivity(activity)
@@ -128,6 +146,117 @@ private class PlatformServiceImpl(
   // Forward permission results to SystemDataConnector
   fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
     return systemDataConnector?.onRequestPermissionsResult(requestCode, permissions, grantResults) ?: false
+  }
+
+  // Handle activity results (document picker)
+  fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    if (requestCode == REQUEST_CODE_PICK_DOCUMENTS) {
+      Log.d(TAG, "Document picker result: resultCode=$resultCode")
+      val callback = pendingDocumentPickerCallback
+      pendingDocumentPickerCallback = null
+      
+      if (callback == null) {
+        Log.w(TAG, "No pending callback for document picker")
+        return true
+      }
+
+      if (resultCode != Activity.RESULT_OK || data == null) {
+        callback(Result.success(emptyList()))
+        return true
+      }
+
+      scope.launch {
+        try {
+          val documents = mutableListOf<DocumentResult>()
+          
+          // Handle single or multiple selection
+          val clipData = data.clipData
+          if (clipData != null) {
+            // Multiple files selected
+            for (i in 0 until clipData.itemCount) {
+              val uri = clipData.getItemAt(i).uri
+              val doc = processDocumentUri(uri)
+              if (doc != null) documents.add(doc)
+            }
+          } else {
+            // Single file selected
+            val uri = data.data
+            if (uri != null) {
+              val doc = processDocumentUri(uri)
+              if (doc != null) documents.add(doc)
+            }
+          }
+
+          Log.d(TAG, "Processed ${documents.size} documents from picker")
+          callback(Result.success(documents))
+        } catch (e: Exception) {
+          Log.e(TAG, "Error processing picked documents: ${e.message}")
+          callback(Result.failure(e))
+        }
+      }
+      return true
+    }
+    return false
+  }
+
+  private fun processDocumentUri(uri: android.net.Uri): DocumentResult? {
+    val contentResolver = context.contentResolver
+    
+    // Take persistent permission for the URI
+    try {
+      val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+      contentResolver.takePersistableUriPermission(uri, takeFlags)
+    } catch (e: Exception) {
+      Log.w(TAG, "Could not take persistable permission for $uri: ${e.message}")
+    }
+
+    // Query document metadata
+    val cursor = contentResolver.query(uri, null, null, null, null)
+    cursor?.use {
+      if (it.moveToFirst()) {
+        val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+        val sizeIndex = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+        
+        val name = if (nameIndex >= 0) it.getString(nameIndex) else uri.lastPathSegment ?: "Unknown"
+        val size = if (sizeIndex >= 0) it.getLong(sizeIndex) else 0L
+        val mimeType = contentResolver.getType(uri)
+        
+        val extension = name.substringAfterLast('.', "").lowercase()
+        val docType = when {
+          mimeType?.contains("text/plain") == true || extension == "txt" -> DocumentType.PLAIN_TEXT
+          mimeType?.contains("text/markdown") == true || extension == "md" -> DocumentType.MARKDOWN
+          mimeType?.contains("pdf") == true || extension == "pdf" -> DocumentType.PDF
+          mimeType?.contains("rtf") == true || extension == "rtf" -> DocumentType.RTF
+          mimeType?.contains("html") == true || extension in listOf("html", "htm") -> DocumentType.HTML
+          else -> DocumentType.OTHER
+        }
+
+        // Read text preview for text-based documents
+        var textPreview: String? = null
+        if (docType in listOf(DocumentType.PLAIN_TEXT, DocumentType.MARKDOWN, DocumentType.HTML)) {
+          try {
+            contentResolver.openInputStream(uri)?.use { inputStream ->
+              textPreview = inputStream.bufferedReader().readText().take(500)
+            }
+          } catch (e: Exception) {
+            Log.w(TAG, "Could not read preview for $name: ${e.message}")
+          }
+        }
+
+        return DocumentResult(
+          id = uri.toString(),  // Use URI as ID for content resolver access
+          name = name,
+          path = uri.toString(),
+          documentType = docType,
+          mimeType = mimeType,
+          fileSize = size,
+          createdDate = System.currentTimeMillis(),
+          modifiedDate = System.currentTimeMillis(),
+          textPreview = textPreview
+        )
+      }
+    }
+    return null
   }
 
   override fun createModel(
@@ -868,6 +997,135 @@ private class PlatformServiceImpl(
         }
         val calls = systemDataConnector!!.fetchCallLog(sinceTimestamp, limit)
         callback(Result.success(calls))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun pickDocuments(
+    allowedExtensions: List<String>?,
+    allowMultiple: Boolean?,
+    callback: (Result<List<DocumentResult>>) -> Unit
+  ) {
+    Log.d(TAG, "pickDocuments called, allowedExtensions=$allowedExtensions, allowMultiple=$allowMultiple")
+    
+    val currentActivity = activity
+    if (currentActivity == null) {
+      callback(Result.failure(IllegalStateException("No activity attached")))
+      return
+    }
+
+    // Store callback for when picker returns
+    pendingDocumentPickerCallback = callback
+
+    // Build MIME types from extensions
+    val mimeTypes = (allowedExtensions ?: listOf("txt", "md", "pdf", "rtf", "html")).mapNotNull { ext ->
+      when (ext.lowercase()) {
+        "txt" -> "text/plain"
+        "md", "markdown" -> "text/markdown"
+        "pdf" -> "application/pdf"
+        "rtf" -> "application/rtf"
+        "html", "htm" -> "text/html"
+        "*" -> "*/*"
+        else -> null
+      }
+    }.ifEmpty { listOf("*/*") }.toTypedArray()
+
+    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = "*/*"
+      putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+      if (allowMultiple == true) {
+        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+      }
+      // Request persistent access
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+    }
+
+    try {
+      currentActivity.startActivityForResult(intent, REQUEST_CODE_PICK_DOCUMENTS)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to launch document picker: ${e.message}")
+      pendingDocumentPickerCallback = null
+      callback(Result.failure(e))
+    }
+  }
+
+  override fun fetchDocuments(
+    sinceTimestamp: Long?,
+    limit: Long?,
+    allowedExtensions: List<String>?,
+    callback: (Result<List<DocumentResult>>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val documents = systemDataConnector!!.fetchDocuments(sinceTimestamp, limit, allowedExtensions)
+        callback(Result.success(documents))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun readDocumentContent(
+    documentId: String,
+    maxLength: Long?,
+    callback: (Result<String?>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        val max = maxLength?.toInt() ?: Int.MAX_VALUE
+        
+        // Check if documentId is a content:// URI (from document picker)
+        if (documentId.startsWith("content://")) {
+          val uri = android.net.Uri.parse(documentId)
+          val mimeType = context.contentResolver.getType(uri)
+          
+          // Don't read PDF content (need special parser)
+          if (mimeType?.contains("pdf") == true) {
+            Log.w(TAG, "PDF content extraction not supported")
+            callback(Result.success(null))
+            return@launch
+          }
+          
+          val content = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            val text = inputStream.bufferedReader().readText()
+            if (text.length > max) text.take(max) else text
+          }
+          callback(Result.success(content))
+          return@launch
+        }
+        
+        // Fall back to SystemDataConnector for file-based IDs
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val content = systemDataConnector!!.readDocumentContent(documentId, maxLength)
+        callback(Result.success(content))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getPhotoThumbnail(
+    photoId: String,
+    maxWidth: Long?,
+    maxHeight: Long?,
+    callback: (Result<ByteArray?>) -> Unit
+  ) {
+    scope.launch {
+      try {
+        if (systemDataConnector == null) {
+          systemDataConnector = SystemDataConnector(context, activity)
+        }
+        val thumbnail = systemDataConnector!!.getPhotoThumbnail(photoId, maxWidth, maxHeight)
+        callback(Result.success(thumbnail))
       } catch (e: Exception) {
         callback(Result.failure(e))
       }

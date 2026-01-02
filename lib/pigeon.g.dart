@@ -31,6 +31,7 @@ enum PermissionType {
   notifications,
   photos,
   callLog,
+  files,
 }
 
 enum PermissionStatus {
@@ -38,6 +39,16 @@ enum PermissionStatus {
   denied,
   restricted,
   notDetermined,
+}
+
+/// Document types supported for extraction
+enum DocumentType {
+  plainText,
+  markdown,
+  pdf,
+  rtf,
+  html,
+  other,
 }
 
 enum CallType {
@@ -614,6 +625,67 @@ class PhotoResult {
   }
 }
 
+class DocumentResult {
+  DocumentResult({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.documentType,
+    this.mimeType,
+    required this.fileSize,
+    required this.createdDate,
+    required this.modifiedDate,
+    this.textPreview,
+  });
+
+  String id;
+
+  String name;
+
+  String path;
+
+  DocumentType documentType;
+
+  String? mimeType;
+
+  int fileSize;
+
+  int createdDate;
+
+  int modifiedDate;
+
+  String? textPreview;
+
+  Object encode() {
+    return <Object?>[
+      id,
+      name,
+      path,
+      documentType,
+      mimeType,
+      fileSize,
+      createdDate,
+      modifiedDate,
+      textPreview,
+    ];
+  }
+
+  static DocumentResult decode(Object result) {
+    result as List<Object?>;
+    return DocumentResult(
+      id: result[0]! as String,
+      name: result[1]! as String,
+      path: result[2]! as String,
+      documentType: result[3]! as DocumentType,
+      mimeType: result[4] as String?,
+      fileSize: result[5]! as int,
+      createdDate: result[6]! as int,
+      modifiedDate: result[7]! as int,
+      textPreview: result[8] as String?,
+    );
+  }
+}
+
 class CallLogResult {
   CallLogResult({
     required this.id,
@@ -881,62 +953,68 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is PermissionStatus) {
       buffer.putUint8(131);
       writeValue(buffer, value.index);
-    }    else if (value is CallType) {
+    }    else if (value is DocumentType) {
       buffer.putUint8(132);
       writeValue(buffer, value.index);
-    }    else if (value is RetrievalResult) {
+    }    else if (value is CallType) {
       buffer.putUint8(133);
-      writeValue(buffer, value.encode());
-    }    else if (value is VectorStoreStats) {
+      writeValue(buffer, value.index);
+    }    else if (value is RetrievalResult) {
       buffer.putUint8(134);
       writeValue(buffer, value.encode());
-    }    else if (value is EntityResult) {
+    }    else if (value is VectorStoreStats) {
       buffer.putUint8(135);
       writeValue(buffer, value.encode());
-    }    else if (value is EntityWithEmbedding) {
+    }    else if (value is EntityResult) {
       buffer.putUint8(136);
       writeValue(buffer, value.encode());
-    }    else if (value is RelationshipResult) {
+    }    else if (value is EntityWithEmbedding) {
       buffer.putUint8(137);
       writeValue(buffer, value.encode());
-    }    else if (value is CommunityResult) {
+    }    else if (value is RelationshipResult) {
       buffer.putUint8(138);
       writeValue(buffer, value.encode());
-    }    else if (value is GraphStats) {
+    }    else if (value is CommunityResult) {
       buffer.putUint8(139);
       writeValue(buffer, value.encode());
-    }    else if (value is ContactResult) {
+    }    else if (value is GraphStats) {
       buffer.putUint8(140);
       writeValue(buffer, value.encode());
-    }    else if (value is CalendarEventResult) {
+    }    else if (value is ContactResult) {
       buffer.putUint8(141);
       writeValue(buffer, value.encode());
-    }    else if (value is GraphQueryResult) {
+    }    else if (value is CalendarEventResult) {
       buffer.putUint8(142);
       writeValue(buffer, value.encode());
-    }    else if (value is EntityWithScoreResult) {
+    }    else if (value is GraphQueryResult) {
       buffer.putUint8(143);
       writeValue(buffer, value.encode());
-    }    else if (value is CommunityWithScoreResult) {
+    }    else if (value is EntityWithScoreResult) {
       buffer.putUint8(144);
       writeValue(buffer, value.encode());
-    }    else if (value is PhotoResult) {
+    }    else if (value is CommunityWithScoreResult) {
       buffer.putUint8(145);
       writeValue(buffer, value.encode());
-    }    else if (value is CallLogResult) {
+    }    else if (value is PhotoResult) {
       buffer.putUint8(146);
       writeValue(buffer, value.encode());
-    }    else if (value is DetectedFace) {
+    }    else if (value is DocumentResult) {
       buffer.putUint8(147);
       writeValue(buffer, value.encode());
-    }    else if (value is DetectedObject) {
+    }    else if (value is CallLogResult) {
       buffer.putUint8(148);
       writeValue(buffer, value.encode());
-    }    else if (value is DetectedText) {
+    }    else if (value is DetectedFace) {
       buffer.putUint8(149);
       writeValue(buffer, value.encode());
-    }    else if (value is PhotoAnalysisResult) {
+    }    else if (value is DetectedObject) {
       buffer.putUint8(150);
+      writeValue(buffer, value.encode());
+    }    else if (value is DetectedText) {
+      buffer.putUint8(151);
+      writeValue(buffer, value.encode());
+    }    else if (value is PhotoAnalysisResult) {
+      buffer.putUint8(152);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -957,42 +1035,47 @@ class _PigeonCodec extends StandardMessageCodec {
         return value == null ? null : PermissionStatus.values[value];
       case 132: 
         final int? value = readValue(buffer) as int?;
-        return value == null ? null : CallType.values[value];
+        return value == null ? null : DocumentType.values[value];
       case 133: 
-        return RetrievalResult.decode(readValue(buffer)!);
+        final int? value = readValue(buffer) as int?;
+        return value == null ? null : CallType.values[value];
       case 134: 
-        return VectorStoreStats.decode(readValue(buffer)!);
+        return RetrievalResult.decode(readValue(buffer)!);
       case 135: 
-        return EntityResult.decode(readValue(buffer)!);
+        return VectorStoreStats.decode(readValue(buffer)!);
       case 136: 
-        return EntityWithEmbedding.decode(readValue(buffer)!);
+        return EntityResult.decode(readValue(buffer)!);
       case 137: 
-        return RelationshipResult.decode(readValue(buffer)!);
+        return EntityWithEmbedding.decode(readValue(buffer)!);
       case 138: 
-        return CommunityResult.decode(readValue(buffer)!);
+        return RelationshipResult.decode(readValue(buffer)!);
       case 139: 
-        return GraphStats.decode(readValue(buffer)!);
+        return CommunityResult.decode(readValue(buffer)!);
       case 140: 
-        return ContactResult.decode(readValue(buffer)!);
+        return GraphStats.decode(readValue(buffer)!);
       case 141: 
-        return CalendarEventResult.decode(readValue(buffer)!);
+        return ContactResult.decode(readValue(buffer)!);
       case 142: 
-        return GraphQueryResult.decode(readValue(buffer)!);
+        return CalendarEventResult.decode(readValue(buffer)!);
       case 143: 
-        return EntityWithScoreResult.decode(readValue(buffer)!);
+        return GraphQueryResult.decode(readValue(buffer)!);
       case 144: 
-        return CommunityWithScoreResult.decode(readValue(buffer)!);
+        return EntityWithScoreResult.decode(readValue(buffer)!);
       case 145: 
-        return PhotoResult.decode(readValue(buffer)!);
+        return CommunityWithScoreResult.decode(readValue(buffer)!);
       case 146: 
-        return CallLogResult.decode(readValue(buffer)!);
+        return PhotoResult.decode(readValue(buffer)!);
       case 147: 
-        return DetectedFace.decode(readValue(buffer)!);
+        return DocumentResult.decode(readValue(buffer)!);
       case 148: 
-        return DetectedObject.decode(readValue(buffer)!);
+        return CallLogResult.decode(readValue(buffer)!);
       case 149: 
-        return DetectedText.decode(readValue(buffer)!);
+        return DetectedFace.decode(readValue(buffer)!);
       case 150: 
+        return DetectedObject.decode(readValue(buffer)!);
+      case 151: 
+        return DetectedText.decode(readValue(buffer)!);
+      case 152: 
         return PhotoAnalysisResult.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
@@ -2154,6 +2237,106 @@ class PlatformService {
       );
     } else {
       return (pigeonVar_replyList[0] as List<Object?>?)!.cast<CallLogResult>();
+    }
+  }
+
+  /// Opens a document picker for the user to select files.
+  /// Returns a list of documents the user selected.
+  Future<List<DocumentResult>> pickDocuments({List<String>? allowedExtensions, bool? allowMultiple}) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.pickDocuments$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[allowedExtensions, allowMultiple]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<DocumentResult>();
+    }
+  }
+
+  Future<List<DocumentResult>> fetchDocuments({int? sinceTimestamp, int? limit, List<String>? allowedExtensions, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.fetchDocuments$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[sinceTimestamp, limit, allowedExtensions]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as List<Object?>?)!.cast<DocumentResult>();
+    }
+  }
+
+  Future<String?> readDocumentContent({required String documentId, int? maxLength}) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.readDocumentContent$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[documentId, maxLength]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return (pigeonVar_replyList[0] as String?);
+    }
+  }
+
+  Future<Uint8List?> getPhotoThumbnail({required String photoId, int? maxWidth, int? maxHeight, }) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.flutter_gemma.PlatformService.getPhotoThumbnail$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_channel.send(<Object?>[photoId, maxWidth, maxHeight]) as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return (pigeonVar_replyList[0] as Uint8List?);
     }
   }
 

@@ -158,15 +158,15 @@ void main() {
       expect(community.size, 3);
     });
 
-    test('LouvainCommunityDetector handles empty input', () async {
-      final detector = LouvainCommunityDetector();
+    test('LeidenCommunityDetector handles empty input', () async {
+      final detector = LeidenCommunityDetector();
       final result = await detector.detectCommunities([], []);
 
       expect(result.communities, isEmpty);
       expect(result.hierarchyDepth, 0);
     });
 
-    test('LouvainCommunityDetector detects communities', () async {
+    test('LeidenCommunityDetector detects communities', () async {
       final entities = [
         GraphEntity(
             id: 'e1', name: 'A', type: 'PERSON', lastModified: DateTime.now()),
@@ -183,7 +183,7 @@ void main() {
             id: 'r2', sourceId: 'e2', targetId: 'e3', type: 'KNOWS'),
       ];
 
-      final detector = LouvainCommunityDetector(
+      final detector = LeidenCommunityDetector(
         config: CommunityDetectionConfig(minCommunitySize: 1),
       );
       final result = await detector.detectCommunities(entities, relationships);

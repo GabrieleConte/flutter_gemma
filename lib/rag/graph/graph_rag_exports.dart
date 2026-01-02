@@ -104,7 +104,7 @@ export 'community_detection.dart'
         CommunityDetectionConfig,
         DetectedCommunity,
         CommunityDetectionResult,
-        LouvainCommunityDetector,
+        LeidenCommunityDetector,
         CommunitySummarizer,
         CommunitySummary;
 

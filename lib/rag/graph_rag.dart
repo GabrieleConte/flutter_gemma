@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../pigeon.g.dart';
 import 'connectors/data_connector.dart';
@@ -56,6 +57,7 @@ class GraphRAG {
   final PlatformService _platform;
   final Future<String> Function(String prompt) _llmCallback;
   final Future<List<double>> Function(String text) _embeddingCallback;
+  final Future<String> Function(String prompt, Uint8List imageBytes)? _visionLlmCallback;
   
   late final NativeGraphRepository _repository;
   late final ConnectorManager _connectorManager;
@@ -70,10 +72,12 @@ class GraphRAG {
     required PlatformService platform,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
   })  : _config = config,
         _platform = platform,
         _llmCallback = llmCallback,
-        _embeddingCallback = embeddingCallback;
+        _embeddingCallback = embeddingCallback,
+        _visionLlmCallback = visionLlmCallback;
 
   /// Whether GraphRAG is initialized
   bool get isInitialized => _initialized;
@@ -136,6 +140,9 @@ class GraphRAG {
     _connectorManager.registerConnector(
       CallLogConnector(_platform),
     );
+    _connectorManager.registerConnector(
+      DocumentsConnector(_platform),
+    );
 
     // Setup entity extractor
     _extractor = LLMEntityExtractor(
@@ -159,6 +166,7 @@ class GraphRAG {
       connectorManager: _connectorManager,
       llmCallback: _llmCallback,
       embeddingCallback: _embeddingCallback,
+      visionLlmCallback: _visionLlmCallback,
       config: _config.indexingConfig,
     );
 
@@ -538,6 +546,159 @@ class GraphRAG {
     );
   }
 
+  // === Document Content Indexing ===
+  
+  /// Index a single document by extracting entities and relationships
+  /// This is the recommended method for indexing user-selected documents
+  Future<void> indexDocumentContent({
+    required String documentId,
+    required String name,
+    required String content,
+    String? mimeType,
+  }) async {
+    _checkInitialized();
+    
+    if (content.isEmpty) {
+      return;
+    }
+    
+    // Create source ID based on document
+    final sourceId = 'document_$documentId';
+    
+    // Extract entities from document content
+    final extraction = await _extractor.extractFromText(
+      content,
+      sourceId: sourceId,
+      sourceType: 'DOCUMENT',
+    );
+    
+    // Generate entity ID for document
+    String normalizeId(String name, String type) {
+      final normalized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+      final typePrefix = type.isNotEmpty ? '${type.toLowerCase()}_' : '';
+      return '$typePrefix$normalized';
+    }
+    
+    final now = DateTime.now();
+    
+    // Add extracted entities to graph
+    for (final entity in extraction.entities) {
+      final embedding = await _embeddingCallback(
+        '${entity.name} ${entity.description ?? ""}',
+      );
+      
+      final graphEntity = GraphEntity(
+        id: normalizeId(entity.name, entity.type),
+        name: entity.name,
+        type: entity.type,
+        description: entity.description,
+        embedding: embedding,
+        metadata: {'sourceId': sourceId},
+        lastModified: now,
+      );
+      
+      // Try to add, if it fails (duplicate), update instead
+      try {
+        await _repository.addEntity(graphEntity);
+      } catch (_) {
+        await _repository.updateEntity(
+          graphEntity.id,
+          name: graphEntity.name,
+          type: graphEntity.type,
+          embedding: embedding,
+          description: graphEntity.description,
+          metadata: graphEntity.metadata,
+          lastModified: now,
+        );
+      }
+    }
+    
+    // Add relationships
+    for (final rel in extraction.relationships) {
+      final graphRelationship = GraphRelationship(
+        id: '${normalizeId(rel.sourceEntity, '')}_${rel.type.toLowerCase()}_${normalizeId(rel.targetEntity, '')}',
+        sourceId: normalizeId(rel.sourceEntity, ''),
+        targetId: normalizeId(rel.targetEntity, ''),
+        type: rel.type,
+        weight: rel.weight,
+        metadata: {'description': rel.description},
+      );
+      
+      // Try to add relationship, ignore if it already exists
+      try {
+        await _repository.addRelationship(graphRelationship);
+      } catch (_) {
+        // Relationship already exists, that's fine
+      }
+    }
+    
+    // Create document entity and link to "You"
+    final documentEmbedding = await _embeddingCallback(
+      '$name ${content.length > 200 ? content.substring(0, 200) : content}',
+    );
+    
+    final documentEntity = GraphEntity(
+      id: normalizeId(name, 'DOCUMENT'),
+      name: name,
+      type: 'DOCUMENT',
+      description: content.length > 500 ? '${content.substring(0, 500)}...' : content,
+      embedding: documentEmbedding,
+      metadata: {
+        'sourceId': sourceId,
+        'mimeType': mimeType ?? 'text/plain',
+        'documentId': documentId,
+      },
+      lastModified: now,
+    );
+    
+    try {
+      await _repository.addEntity(documentEntity);
+    } catch (_) {
+      await _repository.updateEntity(
+        documentEntity.id,
+        name: documentEntity.name,
+        type: documentEntity.type,
+        embedding: documentEmbedding,
+        description: documentEntity.description,
+        metadata: documentEntity.metadata,
+        lastModified: now,
+      );
+    }
+    
+    // Link document to "You" (the user's SELF entity)
+    final youId = 'self_you';
+    final youEntity = await _repository.getEntity(youId);
+    if (youEntity == null) {
+      // Create "You" entity if it doesn't exist
+      final youEmbedding = await _embeddingCallback('You - personal user self');
+      final you = GraphEntity(
+        id: youId,
+        name: 'You',
+        type: 'SELF',
+        description: 'The user',
+        embedding: youEmbedding,
+        metadata: {},
+        lastModified: now,
+      );
+      await _repository.addEntity(you);
+    }
+    
+    // Create relationship: You -> HAS_DOCUMENT -> Document
+    final documentRel = GraphRelationship(
+      id: '${youId}_has_document_${documentEntity.id}',
+      sourceId: youId,
+      targetId: documentEntity.id,
+      type: 'HAS_DOCUMENT',
+      weight: 1.0,
+      metadata: {},
+    );
+    try {
+      await _repository.addRelationship(documentRel);
+    } catch (_) {
+      // Relationship already exists
+    }
+  }
+
   // === Community Detection ===
 
   /// Run community detection on current graph
@@ -556,7 +717,7 @@ class GraphRAG {
       relationships.addAll(await _repository.getRelationships(entity.id));
     }
     
-    final detector = LouvainCommunityDetector(
+    final detector = LeidenCommunityDetector(
       config: _config.communityConfig,
     );
     
@@ -586,6 +747,7 @@ class GraphRAGFactory {
     required PlatformService platform,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
     bool autoIndex = false,
   }) {
     return GraphRAG(
@@ -596,6 +758,7 @@ class GraphRAGFactory {
       platform: platform,
       llmCallback: llmCallback,
       embeddingCallback: embeddingCallback,
+      visionLlmCallback: visionLlmCallback,
     );
   }
 
@@ -605,12 +768,14 @@ class GraphRAGFactory {
     required PlatformService platform,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
   }) {
     return GraphRAG(
       config: config,
       platform: platform,
       llmCallback: llmCallback,
       embeddingCallback: embeddingCallback,
+      visionLlmCallback: visionLlmCallback,
     );
   }
 }

@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
 import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel;
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart';
+import 'package:flutter_gemma/rag/connectors/data_connector.dart' show Document, DocumentsConnector;
 import 'package:path_provider/path_provider.dart';
 
 /// Service for managing GraphRAG operations in the example app
@@ -18,6 +20,7 @@ class GraphRAGService {
   
   // LLM and embedding callbacks
   InferenceChat? _chat;
+  InferenceChat? _visionChat;
   EmbeddingModel? _embeddingModel;
   
   /// Whether the service is initialized
@@ -42,9 +45,17 @@ class GraphRAGService {
       currentProgress?.status == IndexingStatus.running;
 
   /// Initialize the GraphRAG service with LLM and embedding model
+  /// 
+  /// [chat] - The main chat model for text generation
+  /// [embeddingModel] - The embedding model for semantic search
+  /// [visionChat] - Optional vision-capable chat model for image captioning
+  ///                If provided and enableImageCaptioning is true in config,
+  ///                photos will be analyzed using vision LLM
   Future<void> initialize({
     required InferenceChat chat,
     required EmbeddingModel embeddingModel,
+    InferenceChat? visionChat,
+    bool enableImageCaptioning = false,
   }) async {
     if (_isInitialized) {
       debugPrint('[GraphRAGService] Already initialized');
@@ -54,6 +65,7 @@ class GraphRAGService {
     try {
       debugPrint('[GraphRAGService] Initializing...');
       _chat = chat;
+      _visionChat = visionChat;
       _embeddingModel = embeddingModel;
       
       // Get database path
@@ -61,13 +73,29 @@ class GraphRAGService {
       final dbPath = '${directory.path}/graph_rag.db';
       debugPrint('[GraphRAGService] Database path: $dbPath');
       
-      // Create GraphRAG instance
-      _graphRag = GraphRAGFactory.create(
+      // Determine vision callback based on whether vision chat is provided
+      Future<String> Function(String, Uint8List)? visionCallback;
+      if (visionChat != null && enableImageCaptioning) {
+        visionCallback = _generateVisionResponse;
+        debugPrint('[GraphRAGService] Vision LLM enabled for image captioning');
+      }
+      
+      // Create GraphRAG config with image captioning setting
+      final config = GraphRAGConfig(
         databasePath: dbPath,
+        indexingConfig: IndexingConfig(
+          enableImageCaptioning: enableImageCaptioning && visionChat != null,
+        ),
+        autoIndex: false,
+      );
+      
+      // Create GraphRAG instance
+      _graphRag = GraphRAGFactory.createWithConfig(
+        config: config,
         platform: PlatformService(),
         llmCallback: _generateLLMResponse,
         embeddingCallback: _generateEmbedding,
-        autoIndex: false, // We'll control indexing manually
+        visionLlmCallback: visionCallback,
       );
       
       await _graphRag!.initialize();
@@ -82,6 +110,35 @@ class GraphRAGService {
       debugPrint('[GraphRAGService] Stack: $stack');
       rethrow;
     }
+  }
+  
+  /// Generate vision LLM response using the vision chat model
+  Future<String> _generateVisionResponse(String prompt, Uint8List imageBytes) async {
+    if (_visionChat == null) {
+      throw StateError('Vision chat model not initialized');
+    }
+    
+    debugPrint('[GraphRAGService] Generating vision response for prompt (${prompt.length} chars)');
+    
+    // Clear history before each call
+    await _visionChat!.clearHistory();
+    
+    // Add query with image
+    await _visionChat!.addQuery(Message.withImage(
+      text: prompt,
+      imageBytes: imageBytes,
+      isUser: true,
+    ));
+    
+    final response = await _visionChat!.generateChatResponse();
+    
+    String responseText = '';
+    if (response is TextResponse) {
+      responseText = response.token;
+    }
+    
+    debugPrint('[GraphRAGService] Vision response: ${responseText.substring(0, responseText.length.clamp(0, 100))}...');
+    return responseText;
   }
   
   /// Generate LLM response using the chat model
@@ -195,8 +252,17 @@ class GraphRAGService {
     try {
       final callLogResult = await _graphRag!.requestPermissions('callLog');
       results.addAll(callLogResult);
+      await Future.delayed(const Duration(milliseconds: 500));
     } catch (e) {
       debugPrint('[GraphRAGService] Call log permission request failed: $e');
+    }
+    
+    // Documents (files)
+    try {
+      final documentsResult = await _graphRag!.requestPermissions('documents');
+      results.addAll(documentsResult);
+    } catch (e) {
+      debugPrint('[GraphRAGService] Documents permission request failed: $e');
     }
     
     return results;
@@ -447,6 +513,70 @@ class GraphRAGService {
     return relationships;
   }
   
+  /// Open a document picker for user to select files to index.
+  /// This is the recommended way to get documents on Android 10+ and iOS.
+  /// Returns the list of selected documents.
+  Future<List<Document>> pickDocuments({bool allowMultiple = true}) async {
+    _checkInitialized();
+    
+    final documentsConnector = _graphRag!.connectors.getConnector('documents');
+    if (documentsConnector == null) {
+      throw StateError('Documents connector not found');
+    }
+    
+    // Cast to DocumentsConnector to access pickDocuments
+    final connector = documentsConnector as DocumentsConnector;
+    final documents = await connector.pickDocuments(allowMultiple: allowMultiple);
+    
+    debugPrint('[GraphRAGService] User selected ${documents.length} documents');
+    return documents;
+  }
+  
+  /// Index specific documents from a list (e.g., from pickDocuments)
+  /// This bypasses the automatic fetch and indexes only the provided documents
+  Future<void> indexDocuments(List<Document> documents) async {
+    _checkInitialized();
+    
+    if (documents.isEmpty) {
+      debugPrint('[GraphRAGService] No documents to index');
+      return;
+    }
+    
+    debugPrint('[GraphRAGService] Indexing ${documents.length} selected documents...');
+    
+    // Get the documents connector
+    final documentsConnector = _graphRag!.connectors.getConnector('documents');
+    if (documentsConnector == null) {
+      throw StateError('Documents connector not found');
+    }
+    
+    final connector = documentsConnector as DocumentsConnector;
+    
+    // Read and index each document
+    for (final doc in documents) {
+      try {
+        final content = await connector.readContent(doc.id);
+        if (content != null && content.isNotEmpty) {
+          debugPrint('[GraphRAGService] Indexing document: ${doc.name} (${content.length} chars)');
+          
+          // Index the document through the indexing service
+          await _graphRag!.indexDocumentContent(
+            documentId: doc.id,
+            name: doc.name,
+            content: content,
+            mimeType: doc.mimeType,
+          );
+        } else {
+          debugPrint('[GraphRAGService] Skipping empty document: ${doc.name}');
+        }
+      } catch (e) {
+        debugPrint('[GraphRAGService] Error indexing document ${doc.name}: $e');
+      }
+    }
+    
+    debugPrint('[GraphRAGService] Finished indexing selected documents');
+  }
+  
   /// Dispose resources
   Future<void> dispose() async {
     if (_graphRag != null) {
@@ -454,6 +584,7 @@ class GraphRAGService {
       _graphRag = null;
     }
     _chat = null;
+    _visionChat = null;
     _embeddingModel = null;
     _isInitialized = false;
     _error = null;

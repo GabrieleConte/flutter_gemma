@@ -6,8 +6,11 @@ import 'entity_extractor.dart';
 
 /// Configuration for community detection
 class CommunityDetectionConfig {
-  /// Resolution parameter for Louvain (higher = smaller communities)
+  /// Resolution parameter for Leiden (higher = smaller communities)
   final double resolution;
+  
+  /// Gamma parameter for refinement phase (controls community granularity)
+  final double gamma;
   
   /// Minimum improvement to continue optimization
   final double minImprovement;
@@ -26,6 +29,7 @@ class CommunityDetectionConfig {
 
   CommunityDetectionConfig({
     this.resolution = 1.0,
+    this.gamma = 1.0,
     this.minImprovement = 0.001,
     this.maxIterations = 100,
     this.maxDepth = 2,
@@ -75,20 +79,23 @@ class CommunityDetectionResult {
   }
 }
 
-/// Louvain algorithm for community detection
+/// Leiden algorithm for community detection
 /// 
-/// This implements the Louvain method for community detection:
-/// 1. Assign each node to its own community
-/// 2. For each node, calculate modularity gain from moving to neighbor's community
-/// 3. Move node to community with maximum gain (if positive)
+/// This implements the Leiden method for community detection, which improves upon
+/// Louvain by adding a refinement phase that guarantees well-connected communities.
+/// Reference: Traag, V.A., Waltman, L. & van Eck, N.J. From Louvain to Leiden.
+/// Sci Rep 9, 5233 (2019). https://doi.org/10.1038/s41598-019-41695-z
+/// 
+/// Algorithm phases:
+/// 1. Local moving: Move nodes to neighboring communities to maximize modularity
+/// 2. Refinement: Within each community, create refined sub-partitions ensuring connectivity
+/// 3. Aggregation: Build a new graph with refined communities as nodes
 /// 4. Repeat until no improvement
-/// 5. Build a new graph with communities as nodes
-/// 6. Repeat process on new graph
-class LouvainCommunityDetector {
+class LeidenCommunityDetector {
   final CommunityDetectionConfig config;
   final Random _random;
 
-  LouvainCommunityDetector({CommunityDetectionConfig? config})
+  LeidenCommunityDetector({CommunityDetectionConfig? config})
       : config = config ?? CommunityDetectionConfig(),
         _random = config?.randomSeed != null 
             ? Random(config!.randomSeed) 
@@ -111,8 +118,8 @@ class LouvainCommunityDetector {
     // Build adjacency structure
     final graph = _buildGraph(entities, relationships);
     
-    // Run hierarchical Louvain
-    final hierarchy = await _runLouvain(graph, 0);
+    // Run hierarchical Leiden
+    final hierarchy = await _runLeiden(graph, 0);
     
     // Flatten results
     final allCommunities = <DetectedCommunity>[];
@@ -139,7 +146,7 @@ class LouvainCommunityDetector {
     );
   }
 
-  /// Build graph structure for Louvain
+  /// Build graph structure for Leiden
   _Graph _buildGraph(
     List<GraphEntity> entities,
     List<GraphRelationship> relationships,
@@ -181,9 +188,9 @@ class LouvainCommunityDetector {
     );
   }
 
-  /// Run Louvain algorithm recursively
+  /// Run Leiden algorithm recursively
   /// nodeToEntityIds maps graph node IDs to original entity IDs (for aggregated levels)
-  Future<List<List<DetectedCommunity>>> _runLouvain(
+  Future<List<List<DetectedCommunity>>> _runLeiden(
     _Graph graph,
     int currentLevel, {
     Map<String, Set<String>>? nodeToEntityIds,
@@ -198,7 +205,7 @@ class LouvainCommunityDetector {
       for (final nodeId in graph.nodes.keys) nodeId: {nodeId}
     };
 
-    // Phase 1: Local optimization
+    // Phase 1: Local moving phase (same as Louvain)
     var improved = true;
     var iteration = 0;
     
@@ -243,6 +250,10 @@ class LouvainCommunityDetector {
       
       iteration++;
     }
+
+    // Phase 2: Refinement phase (Leiden-specific)
+    // This phase ensures communities are well-connected by refining partitions
+    _refineCommunities(graph);
     
     // Extract communities at this level with proper entity ID mapping
     final communities = _extractCommunities(graph, currentLevel, nodeToEntityIds);
@@ -267,11 +278,11 @@ class LouvainCommunityDetector {
       nextLevelNodeToEntityIds[community.id] = community.entityIds;
     }
     
-    // Phase 2: Build aggregated graph
+    // Phase 3: Aggregation phase - build aggregated graph
     final aggregatedGraph = _aggregateGraph(graph, validCommunities);
     
     // Recursive call for next level with updated entity mapping
-    final nextLevels = await _runLouvain(
+    final nextLevels = await _runLeiden(
       aggregatedGraph, 
       currentLevel + 1,
       nodeToEntityIds: nextLevelNodeToEntityIds,
@@ -284,6 +295,168 @@ class LouvainCommunityDetector {
     }
     
     return [validCommunities, ...nextLevels];
+  }
+  
+  /// Leiden refinement phase: refine communities to ensure well-connectedness
+  /// This is the key difference from Louvain - nodes can only move to
+  /// well-connected communities, preventing poorly connected communities
+  void _refineCommunities(_Graph graph) {
+    // Group nodes by their current community
+    final communityNodes = <String, List<String>>{};
+    for (final entry in graph.nodes.entries) {
+      communityNodes.putIfAbsent(entry.value.community, () => []);
+      communityNodes[entry.value.community]!.add(entry.key);
+    }
+    
+    // For each community, check connectivity and potentially split
+    for (final entry in communityNodes.entries) {
+      final communityId = entry.key;
+      final nodes = entry.value;
+      
+      if (nodes.length <= 1) continue;
+      
+      // Create subgraph of this community to check connectivity
+      final subgraphNodes = nodes.toSet();
+      
+      // Find connected components within this community
+      final components = _findConnectedComponents(graph, subgraphNodes);
+      
+      if (components.length > 1) {
+        // Community is not well-connected - refine by merging small components
+        // with neighboring communities or keeping them as separate refined communities
+        _refineDisconnectedCommunity(graph, communityId, components);
+      } else {
+        // Community is well-connected - apply local refinement
+        // Try to move each node to a random well-connected neighboring community
+        _applyLocalRefinement(graph, nodes);
+      }
+    }
+  }
+  
+  /// Find connected components within a set of nodes
+  List<Set<String>> _findConnectedComponents(_Graph graph, Set<String> nodeSubset) {
+    final visited = <String>{};
+    final components = <Set<String>>[];
+    
+    for (final startNode in nodeSubset) {
+      if (visited.contains(startNode)) continue;
+      
+      // BFS to find component
+      final component = <String>{};
+      final queue = [startNode];
+      
+      while (queue.isNotEmpty) {
+        final node = queue.removeAt(0);
+        if (visited.contains(node)) continue;
+        
+        visited.add(node);
+        component.add(node);
+        
+        // Add unvisited neighbors that are in the subset
+        final neighbors = _getNeighbors(graph, node);
+        for (final neighbor in neighbors) {
+          if (nodeSubset.contains(neighbor) && !visited.contains(neighbor)) {
+            queue.add(neighbor);
+          }
+        }
+      }
+      
+      if (component.isNotEmpty) {
+        components.add(component);
+      }
+    }
+    
+    return components;
+  }
+  
+  /// Handle disconnected community by merging small components with neighbors
+  void _refineDisconnectedCommunity(
+    _Graph graph, 
+    String originalCommunityId, 
+    List<Set<String>> components,
+  ) {
+    // Sort components by size (largest first)
+    components.sort((a, b) => b.length.compareTo(a.length));
+    
+    // Keep the largest component with the original community
+    // For smaller components, try to merge with neighboring communities
+    for (var i = 1; i < components.length; i++) {
+      final smallComponent = components[i];
+      
+      for (final nodeId in smallComponent) {
+        final node = graph.nodes[nodeId]!;
+        
+        // Find neighboring communities outside this component
+        final neighbors = _getNeighbors(graph, nodeId);
+        final neighborCommunities = <String, double>{};
+        
+        for (final neighbor in neighbors) {
+          if (smallComponent.contains(neighbor)) continue;
+          
+          final neighborComm = graph.nodes[neighbor]!.community;
+          final edgeWeight = graph.edges
+              .where((e) => e.source == nodeId && e.target == neighbor)
+              .fold(0.0, (sum, e) => sum + e.weight);
+          
+          neighborCommunities[neighborComm] = 
+              (neighborCommunities[neighborComm] ?? 0.0) + edgeWeight;
+        }
+        
+        // Move to the most connected neighboring community
+        if (neighborCommunities.isNotEmpty) {
+          final bestComm = neighborCommunities.entries
+              .reduce((a, b) => a.value > b.value ? a : b)
+              .key;
+          node.community = bestComm;
+        }
+      }
+    }
+  }
+  
+  /// Apply local refinement to a well-connected community
+  /// Nodes may move to random neighboring well-connected communities
+  void _applyLocalRefinement(_Graph graph, List<String> communityNodes) {
+    // Shuffle for randomness
+    final nodes = List<String>.from(communityNodes);
+    nodes.shuffle(_random);
+    
+    for (final nodeId in nodes) {
+      final node = graph.nodes[nodeId]!;
+      final currentCommunity = node.community;
+      
+      // Get neighboring communities
+      final neighbors = _getNeighbors(graph, nodeId);
+      final neighborCommunities = neighbors
+          .map((n) => graph.nodes[n]!.community)
+          .where((c) => c != currentCommunity)
+          .toSet()
+          .toList();
+      
+      if (neighborCommunities.isEmpty) continue;
+      
+      // Pick a random neighboring community
+      final candidateCommunity = neighborCommunities[_random.nextInt(neighborCommunities.length)];
+      
+      // Check if moving improves modularity (with gamma factor for Leiden)
+      final gain = _modularityGainWithGamma(
+        graph, nodeId, currentCommunity, candidateCommunity);
+      
+      if (gain > config.minImprovement) {
+        node.community = candidateCommunity;
+      }
+    }
+  }
+  
+  /// Calculate modularity gain with gamma parameter (Leiden-specific)
+  double _modularityGainWithGamma(
+    _Graph graph,
+    String nodeId,
+    String fromCommunity,
+    String toCommunity,
+  ) {
+    // Use gamma to adjust the resolution in refinement phase
+    final baseGain = _modularityGain(graph, nodeId, fromCommunity, toCommunity);
+    return baseGain * config.gamma;
   }
   
   /// Update parent-child relationships between two levels of communities

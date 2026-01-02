@@ -19,6 +19,7 @@ enum PermissionType {
   notifications,
   photos,
   callLog,
+  files,
 }
 
 enum PermissionStatus {
@@ -278,6 +279,38 @@ abstract class PlatformService {
     int? limit,
   });
 
+  // === Document Methods ===
+
+  /// Opens a document picker for the user to select files.
+  /// Returns a list of documents the user selected.
+  @async
+  List<DocumentResult> pickDocuments({
+    List<String>? allowedExtensions,
+    bool? allowMultiple,
+  });
+
+  @async
+  List<DocumentResult> fetchDocuments({
+    int? sinceTimestamp,
+    int? limit,
+    List<String>? allowedExtensions,
+  });
+
+  @async
+  String? readDocumentContent({
+    required String documentId,
+    int? maxLength,
+  });
+
+  // === Photo Thumbnail Methods ===
+
+  @async
+  Uint8List? getPhotoThumbnail({
+    required String photoId,
+    int? maxWidth,
+    int? maxHeight,
+  });
+
   // === MediaPipe Analysis Methods ===
 
   @async
@@ -533,6 +566,42 @@ class PhotoResult {
     this.mimeType,
     this.fileSize,
     this.thumbnailBytes,
+  });
+}
+
+// === Document Data Classes ===
+
+/// Document types supported for extraction
+enum DocumentType {
+  plainText,  // .txt
+  markdown,   // .md
+  pdf,        // .pdf
+  rtf,        // .rtf
+  html,       // .html
+  other,
+}
+
+class DocumentResult {
+  final String id;
+  final String name;
+  final String path;
+  final DocumentType documentType;
+  final String? mimeType;
+  final int fileSize;
+  final int createdDate;
+  final int modifiedDate;
+  final String? textPreview; // First N chars of content for quick display
+
+  DocumentResult({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.documentType,
+    this.mimeType,
+    required this.fileSize,
+    required this.createdDate,
+    required this.modifiedDate,
+    this.textPreview,
   });
 }
 

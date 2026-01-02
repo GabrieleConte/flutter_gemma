@@ -22,6 +22,7 @@ enum DataPermissionType {
   calendar,
   photos,
   callLog,
+  files,
 }
 
 /// Represents a contact from the system
@@ -687,6 +688,157 @@ class CallLogConnector implements DataConnector {
     final status = await _platform.checkPermission(PermissionType.callLog);
     // If restricted, it means the platform doesn't support this feature
     return status != PermissionStatus.restricted;
+  }
+
+  @override
+  DateTime? get lastSyncTime => _lastSyncTime;
+}
+
+/// Represents a document from the device file system
+class Document {
+  final String id;
+  final String name;
+  final String path;
+  final DocumentType documentType;
+  final String? mimeType;
+  final int fileSize;
+  final DateTime createdDate;
+  final DateTime modifiedDate;
+  final String? textPreview;
+
+  Document({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.documentType,
+    this.mimeType,
+    required this.fileSize,
+    required this.createdDate,
+    required this.modifiedDate,
+    this.textPreview,
+  });
+
+  /// Document type based on extension
+  static DocumentType typeFromExtension(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'txt':
+        return DocumentType.plainText;
+      case 'md':
+      case 'markdown':
+        return DocumentType.markdown;
+      case 'pdf':
+        return DocumentType.pdf;
+      case 'rtf':
+        return DocumentType.rtf;
+      case 'html':
+      case 'htm':
+        return DocumentType.html;
+      default:
+        return DocumentType.other;
+    }
+  }
+
+  factory Document.fromDocumentResult(DocumentResult result) {
+    return Document(
+      id: result.id,
+      name: result.name,
+      path: result.path,
+      documentType: result.documentType,
+      mimeType: result.mimeType,
+      fileSize: result.fileSize,
+      createdDate: DateTime.fromMillisecondsSinceEpoch(result.createdDate),
+      modifiedDate: DateTime.fromMillisecondsSinceEpoch(result.modifiedDate),
+      textPreview: result.textPreview,
+    );
+  }
+
+  @override
+  String toString() => 'Document(id: $id, name: $name, type: $documentType)';
+}
+
+/// Native documents connector for accessing device files
+/// Supports plain text files (.txt, .md) and PDFs
+class DocumentsConnector implements DataConnector {
+  final PlatformService _platform;
+  DateTime? _lastSyncTime;
+
+  @override
+  final String dataType = 'documents';
+
+  @override
+  final List<DataPermissionType> requiredPermissions = [
+    DataPermissionType.files
+  ];
+
+  @override
+  final ConnectorConfig config;
+
+  /// File extensions to include
+  final List<String> allowedExtensions;
+
+  DocumentsConnector(
+    this._platform, {
+    ConnectorConfig? config,
+    this.allowedExtensions = const ['txt', 'md', 'pdf', 'rtf', 'html'],
+  }) : config = config ?? ConnectorConfig(batchSize: 50);
+
+  @override
+  Future<Map<DataPermissionType, DataPermissionStatus>> checkPermissions() async {
+    final status = await _platform.checkPermission(PermissionType.files);
+    return {
+      DataPermissionType.files: _mapPermissionStatus(status),
+    };
+  }
+
+  @override
+  Future<Map<DataPermissionType, DataPermissionStatus>> requestPermissions() async {
+    final status = await _platform.requestPermission(PermissionType.files);
+    return {
+      DataPermissionType.files: _mapPermissionStatus(status),
+    };
+  }
+
+  @override
+  Future<bool> hasRequiredPermissions() async {
+    final perms = await checkPermissions();
+    return perms[DataPermissionType.files] == DataPermissionStatus.granted;
+  }
+
+  @override
+  Future<List<Document>> fetch({DateTime? since, int? limit}) async {
+    final sinceTimestamp = since?.millisecondsSinceEpoch;
+    final results = await _platform.fetchDocuments(
+      sinceTimestamp: sinceTimestamp,
+      limit: limit ?? config.batchSize,
+      allowedExtensions: allowedExtensions,
+    );
+
+    _lastSyncTime = DateTime.now();
+    config.onProgress?.call(1.0, 'Fetched ${results.length} documents');
+
+    return results.map((r) => Document.fromDocumentResult(r)).toList();
+  }
+
+  /// Opens a document picker for the user to select files.
+  /// This is the recommended way to get documents on Android 10+ and iOS.
+  Future<List<Document>> pickDocuments({bool allowMultiple = true}) async {
+    final results = await _platform.pickDocuments(
+      allowedExtensions: allowedExtensions,
+      allowMultiple: allowMultiple,
+    );
+
+    config.onProgress?.call(1.0, 'Selected ${results.length} documents');
+
+    return results.map((r) => Document.fromDocumentResult(r)).toList();
+  }
+
+  /// Read the full content of a document
+  Future<String?> readContent(String documentId, {int? maxLength}) async {
+    return await _platform.readDocumentContent(
+      documentId: documentId,
+      maxLength: maxLength,
+    );
   }
 
   @override

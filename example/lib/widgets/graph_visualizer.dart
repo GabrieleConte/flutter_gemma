@@ -159,7 +159,7 @@ class GraphVisualizer extends StatefulWidget {
     required this.entities,
     required this.relationships,
     this.onEntityTap,
-    this.clusterThreshold = 20,
+    this.clusterThreshold = 10,
     this.enableClustering = true,
   });
 
@@ -487,6 +487,29 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       orElse: () => _nodes.first,
     );
 
+    // Connect UNCLUSTERED entities directly to "You"
+    // These are entities that didn't get grouped into a cluster
+    for (final entity in unclustered) {
+      // Skip "You" itself
+      if (entity.type == 'SELF') continue;
+      
+      // Check if this entity already has an edge to "You" from relationships
+      final alreadyConnected = _edges.any(
+        (e) =>
+            (e.sourceId == entity.id && e.targetId == youNode.id) ||
+            (e.sourceId == youNode.id && e.targetId == entity.id),
+      );
+      
+      if (!alreadyConnected) {
+        _edges.add(GraphEdge(
+          sourceId: youNode.id,
+          targetId: entity.id,
+          type: 'RELATED_TO',
+          weight: 0.4,
+        ));
+      }
+    }
+
     // For collapsed clusters, create edge from cluster to "You"
     for (final cluster in _clusters.values) {
       final edgeExists = _edges.any(
@@ -555,6 +578,33 @@ class _GraphVisualizerState extends State<GraphVisualizer>
               weight: rel.weight,
             ))
         .toList();
+
+    // Connect all entities to "You" if not already connected
+    final youNode = _nodes.firstWhere(
+      (n) => n.type == 'SELF',
+      orElse: () => _nodes.first,
+    );
+
+    for (final entity in widget.entities) {
+      // Skip "You" itself
+      if (entity.type == 'SELF') continue;
+
+      // Check if this entity already has an edge to "You"
+      final alreadyConnected = _edges.any(
+        (e) =>
+            (e.sourceId == entity.id && e.targetId == youNode.id) ||
+            (e.sourceId == youNode.id && e.targetId == entity.id),
+      );
+
+      if (!alreadyConnected) {
+        _edges.add(GraphEdge(
+          sourceId: youNode.id,
+          targetId: entity.id,
+          type: 'RELATED_TO',
+          weight: 0.4,
+        ));
+      }
+    }
   }
 
   void _toggleCluster(String clusterId) {

@@ -27,6 +27,7 @@ class SystemDataConnector(
         const val PERMISSION_REQUEST_NOTIFICATIONS = 1003
         const val PERMISSION_REQUEST_PHOTOS = 1004
         const val PERMISSION_REQUEST_CALL_LOG = 1005
+        const val PERMISSION_REQUEST_FILES = 1006
         private const val TAG = "SystemDataConnector"
     }
 
@@ -36,6 +37,7 @@ class SystemDataConnector(
     private var pendingNotificationsCallback: ((PermissionStatus) -> Unit)? = null
     private var pendingPhotosCallback: ((PermissionStatus) -> Unit)? = null
     private var pendingCallLogCallback: ((PermissionStatus) -> Unit)? = null
+    private var pendingFilesCallback: ((PermissionStatus) -> Unit)? = null
 
     fun setActivity(activity: Activity?) {
         this.activity = activity
@@ -101,6 +103,17 @@ class SystemDataConnector(
                 pendingCallLogCallback = null
                 true
             }
+            PERMISSION_REQUEST_FILES -> {
+                val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    PermissionStatus.GRANTED
+                } else {
+                    PermissionStatus.DENIED
+                }
+                Log.d(TAG, "Files permission result: $status")
+                pendingFilesCallback?.invoke(status)
+                pendingFilesCallback = null
+                true
+            }
             else -> false
         }
     }
@@ -114,6 +127,7 @@ class SystemDataConnector(
             PermissionType.NOTIFICATIONS -> checkNotificationsPermission()
             PermissionType.PHOTOS -> checkPhotosPermission()
             PermissionType.CALL_LOG -> checkCallLogPermission()
+            PermissionType.FILES -> checkFilesPermission()
         }
         Log.d(TAG, "checkPermission($type) = $status")
         return status
@@ -132,6 +146,7 @@ class SystemDataConnector(
             PermissionType.NOTIFICATIONS -> requestNotificationsPermission(activity, callback)
             PermissionType.PHOTOS -> requestPhotosPermission(activity, callback)
             PermissionType.CALL_LOG -> requestCallLogPermission(activity, callback)
+            PermissionType.FILES -> requestFilesPermission(activity, callback)
         }
     }
 
@@ -602,6 +617,66 @@ class SystemDataConnector(
         )
     }
 
+    // MARK: - Files Permission
+
+    private fun checkFilesPermission(): PermissionStatus {
+        // On Android 13+ (API 33), READ_EXTERNAL_STORAGE no longer grants access to most files
+        // Instead, we use scoped storage which grants access to app-specific directories automatically
+        // For user documents, we'll scan app's external files directory
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // On Android 13+, we use scoped storage - no permission needed for app directories
+            // Grant access automatically since we'll only access app-specific or Downloads directory
+            PermissionStatus.GRANTED
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11-12: Scoped storage with limited MediaStore access
+            PermissionStatus.GRANTED
+        } else {
+            // Android 10 and below: Need READ_EXTERNAL_STORAGE
+            when (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                PackageManager.PERMISSION_GRANTED -> PermissionStatus.GRANTED
+                PackageManager.PERMISSION_DENIED -> {
+                    if (activity != null && 
+                        ActivityCompat.shouldShowRequestPermissionRationale(activity!!, Manifest.permission.READ_EXTERNAL_STORAGE)) {
+                        PermissionStatus.DENIED
+                    } else {
+                        PermissionStatus.NOT_DETERMINED
+                    }
+                }
+                else -> PermissionStatus.NOT_DETERMINED
+            }
+        }
+    }
+
+    private fun requestFilesPermission(activity: Activity, callback: (PermissionStatus) -> Unit) {
+        // On Android 13+, we don't need runtime permission for scoped storage
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Log.d(TAG, "Android 13+: Using scoped storage, no permission needed")
+            callback(PermissionStatus.GRANTED)
+            return
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Log.d(TAG, "Android 11-12: Using scoped storage, no permission needed")
+            callback(PermissionStatus.GRANTED)
+            return
+        }
+        
+        // Android 10 and below
+        val permission = Manifest.permission.READ_EXTERNAL_STORAGE
+        
+        if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
+            callback(PermissionStatus.GRANTED)
+            return
+        }
+        
+        pendingFilesCallback = callback
+        ActivityCompat.requestPermissions(
+            activity, 
+            arrayOf(permission), 
+            PERMISSION_REQUEST_FILES
+        )
+    }
+
     // MARK: - Photos
 
     fun fetchPhotos(sinceTimestamp: Long?, limit: Long?, includeLocation: Boolean?): List<PhotoResult> {
@@ -811,5 +886,426 @@ class SystemDataConnector(
 
         Log.d(TAG, "fetchCallLog completed, returning ${results.size} calls")
         return results
+    }
+
+    // MARK: - Documents
+
+    fun fetchDocuments(sinceTimestamp: Long?, limit: Long?, allowedExtensions: List<String>?): List<DocumentResult> {
+        Log.d(TAG, "fetchDocuments called, sinceTimestamp=$sinceTimestamp, limit=$limit")
+        
+        if (checkFilesPermission() != PermissionStatus.GRANTED) {
+            throw SecurityException("Files permission not granted")
+        }
+
+        val results = mutableListOf<DocumentResult>()
+        var count = 0
+        val maxCount = limit?.toInt() ?: 100
+        val extensions = allowedExtensions ?: listOf("txt", "md", "pdf", "rtf", "html")
+        
+        // On Android 11+ (API 30), use MediaStore to query Downloads and Documents
+        // Direct file access to shared storage is not allowed in scoped storage
+        Log.d(TAG, "Using MediaStore approach for shared storage access")
+        
+        // Always use MediaStore for shared storage (Downloads, Documents)
+        fetchDocumentsViaMediaStore(sinceTimestamp, maxCount, extensions, results)
+        
+        // Also scan app's private external files directory (always accessible)
+        val externalFilesDir = context.getExternalFilesDir(null)
+        if (externalFilesDir != null && externalFilesDir.exists()) {
+            Log.d(TAG, "Also scanning app's external files dir: ${externalFilesDir.absolutePath}")
+            scanDirectoryForDocuments(externalFilesDir, extensions, sinceTimestamp, maxCount, results)
+        }
+
+        Log.d(TAG, "fetchDocuments completed, returning ${results.size} documents")
+        return results.take(maxCount)
+    }
+    
+    private fun scanDirectoryForDocuments(
+        directory: java.io.File,
+        extensions: List<String>,
+        sinceTimestamp: Long?,
+        maxCount: Int,
+        results: MutableList<DocumentResult>
+    ) {
+        if (!directory.exists() || !directory.canRead()) {
+            Log.d(TAG, "Cannot read directory: ${directory.absolutePath}")
+            return
+        }
+        
+        Log.d(TAG, "Scanning directory: ${directory.absolutePath}")
+        
+        try {
+            val files = directory.listFiles() ?: return
+            
+            for (file in files) {
+                if (results.size >= maxCount) break
+                
+                if (file.isDirectory) {
+                    // Recursively scan subdirectories (limit depth to prevent infinite loops)
+                    scanDirectoryForDocuments(file, extensions, sinceTimestamp, maxCount, results)
+                } else if (file.isFile && file.canRead()) {
+                    val extension = file.extension.lowercase()
+                    if (extensions.any { it.lowercase() == extension }) {
+                        val lastModified = file.lastModified()
+                        
+                        // Check timestamp filter
+                        if (sinceTimestamp != null && lastModified < sinceTimestamp) {
+                            continue
+                        }
+                        
+                        val docType = when (extension) {
+                            "txt" -> DocumentType.PLAIN_TEXT
+                            "md", "markdown" -> DocumentType.MARKDOWN
+                            "pdf" -> DocumentType.PDF
+                            "rtf" -> DocumentType.RTF
+                            "html", "htm" -> DocumentType.HTML
+                            else -> DocumentType.OTHER
+                        }
+                        
+                        val mimeType = when (extension) {
+                            "txt" -> "text/plain"
+                            "md", "markdown" -> "text/markdown"
+                            "pdf" -> "application/pdf"
+                            "rtf" -> "application/rtf"
+                            "html", "htm" -> "text/html"
+                            else -> "application/octet-stream"
+                        }
+                        
+                        // Get text preview for text-based files
+                        var textPreview: String? = null
+                        if (docType == DocumentType.PLAIN_TEXT || docType == DocumentType.MARKDOWN || docType == DocumentType.HTML) {
+                            try {
+                                textPreview = file.readText().take(500)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Could not read preview for ${file.name}: ${e.message}")
+                            }
+                        }
+                        
+                        results.add(DocumentResult(
+                            id = file.absolutePath.hashCode().toString(),
+                            name = file.name,
+                            path = file.absolutePath,
+                            documentType = docType,
+                            mimeType = mimeType,
+                            fileSize = file.length(),
+                            createdDate = lastModified, // File systems don't always track creation time
+                            modifiedDate = lastModified,
+                            textPreview = textPreview
+                        ))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scanning directory ${directory.absolutePath}: ${e.message}")
+        }
+    }
+    
+    private fun fetchDocumentsViaMediaStore(
+        sinceTimestamp: Long?,
+        maxCount: Int,
+        extensions: List<String>,
+        results: MutableList<DocumentResult>
+    ) {
+        val contentResolver: ContentResolver = context.contentResolver
+        var count = 0
+        
+        val projection = arrayOf(
+            android.provider.MediaStore.Files.FileColumns._ID,
+            android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME,
+            android.provider.MediaStore.Files.FileColumns.DATA,
+            android.provider.MediaStore.Files.FileColumns.MIME_TYPE,
+            android.provider.MediaStore.Files.FileColumns.SIZE,
+            android.provider.MediaStore.Files.FileColumns.DATE_ADDED,
+            android.provider.MediaStore.Files.FileColumns.DATE_MODIFIED
+        )
+
+        // Build selection for allowed extensions - use both MIME types AND filename patterns
+        // Some files like .md may not have proper MIME types registered
+        val mimeTypes = extensions.mapNotNull { ext ->
+            when (ext.lowercase()) {
+                "txt" -> "text/plain"
+                "md", "markdown" -> "text/markdown"
+                "pdf" -> "application/pdf"
+                "rtf" -> "application/rtf"
+                "html", "htm" -> "text/html"
+                else -> null
+            }
+        }
+        
+        // Also build filename extension patterns
+        val filenamePatterns = extensions.map { ext -> "%.${ext.lowercase()}" }
+        
+        val selectionBuilder = StringBuilder()
+        val selectionArgsList = mutableListOf<String>()
+        
+        // Query by MIME type OR filename extension
+        selectionBuilder.append("(")
+        
+        // MIME type conditions
+        if (mimeTypes.isNotEmpty()) {
+            selectionBuilder.append("(")
+            mimeTypes.forEachIndexed { index, mimeType ->
+                if (index > 0) selectionBuilder.append(" OR ")
+                selectionBuilder.append("${android.provider.MediaStore.Files.FileColumns.MIME_TYPE} = ?")
+                selectionArgsList.add(mimeType)
+            }
+            selectionBuilder.append(")")
+        }
+        
+        // Filename extension conditions (catches .md files without proper MIME type)
+        if (filenamePatterns.isNotEmpty()) {
+            if (mimeTypes.isNotEmpty()) selectionBuilder.append(" OR ")
+            selectionBuilder.append("(")
+            filenamePatterns.forEachIndexed { index, pattern ->
+                if (index > 0) selectionBuilder.append(" OR ")
+                selectionBuilder.append("${android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?")
+                selectionArgsList.add(pattern)
+            }
+            selectionBuilder.append(")")
+        }
+        
+        selectionBuilder.append(")")
+        
+        if (sinceTimestamp != null) {
+            selectionBuilder.append(" AND ${android.provider.MediaStore.Files.FileColumns.DATE_ADDED} > ?")
+            selectionArgsList.add((sinceTimestamp / 1000).toString())
+        }
+
+        Log.d(TAG, "MediaStore query selection: $selectionBuilder")
+        Log.d(TAG, "MediaStore query args: $selectionArgsList")
+
+        // Query Downloads collection specifically on Android 10+
+        val contentUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        } else {
+            android.provider.MediaStore.Files.getContentUri("external")
+        }
+        
+        Log.d(TAG, "Querying content URI: $contentUri")
+
+        val cursor: Cursor? = contentResolver.query(
+            contentUri,
+            projection,
+            selectionBuilder.toString(),
+            selectionArgsList.toTypedArray(),
+            "${android.provider.MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+        )
+
+        Log.d(TAG, "Documents cursor returned: ${cursor?.count ?: 0} documents")
+
+        cursor?.use {
+            val idIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns._ID)
+            val nameIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val pathIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.DATA)
+            val mimeTypeIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.MIME_TYPE)
+            val sizeIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.SIZE)
+            val dateAddedIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.DATE_ADDED)
+            val dateModifiedIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.DATE_MODIFIED)
+
+            while (it.moveToNext() && count < maxCount) {
+                try {
+                    val docId = it.getLong(idIndex)
+                    val name = it.getString(nameIndex) ?: "Unknown"
+                    val path = it.getString(pathIndex) ?: ""
+                    val mimeType = it.getString(mimeTypeIndex)
+                    val size = it.getLong(sizeIndex)
+                    val dateAdded = it.getLong(dateAddedIndex) * 1000 // Convert to milliseconds
+                    val dateModified = it.getLong(dateModifiedIndex) * 1000
+
+                    val docType = when {
+                        mimeType?.contains("text/plain") == true -> DocumentType.PLAIN_TEXT
+                        mimeType?.contains("text/markdown") == true -> DocumentType.MARKDOWN
+                        mimeType?.contains("pdf") == true -> DocumentType.PDF
+                        mimeType?.contains("rtf") == true -> DocumentType.RTF
+                        mimeType?.contains("html") == true -> DocumentType.HTML
+                        name.endsWith(".txt") -> DocumentType.PLAIN_TEXT
+                        name.endsWith(".md") -> DocumentType.MARKDOWN
+                        name.endsWith(".pdf") -> DocumentType.PDF
+                        name.endsWith(".rtf") -> DocumentType.RTF
+                        name.endsWith(".html") || name.endsWith(".htm") -> DocumentType.HTML
+                        else -> DocumentType.OTHER
+                    }
+
+                    // Get text preview for text files
+                    var textPreview: String? = null
+                    if (docType == DocumentType.PLAIN_TEXT || docType == DocumentType.MARKDOWN || docType == DocumentType.HTML) {
+                        try {
+                            val file = java.io.File(path)
+                            if (file.exists() && file.canRead()) {
+                                textPreview = file.readText().take(500)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not read preview for $path: ${e.message}")
+                        }
+                    }
+
+                    results.add(DocumentResult(
+                        id = docId.toString(),
+                        name = name,
+                        path = path,
+                        documentType = docType,
+                        mimeType = mimeType,
+                        fileSize = size,
+                        createdDate = dateAdded,
+                        modifiedDate = dateModified,
+                        textPreview = textPreview
+                    ))
+
+                    count++
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing document: ${e.message}")
+                }
+            }
+        }
+
+        Log.d(TAG, "MediaStore scan completed, found ${results.size} documents")
+    }
+
+    fun readDocumentContent(documentId: String, maxLength: Long?): String? {
+        Log.d(TAG, "readDocumentContent called for id=$documentId, maxLength=$maxLength")
+        
+        if (checkFilesPermission() != PermissionStatus.GRANTED) {
+            throw SecurityException("Files permission not granted")
+        }
+
+        val max = maxLength?.toInt() ?: Int.MAX_VALUE
+        
+        // On Android 11+, document IDs from scoped storage scan are path hashes
+        // Try to find the file by scanning known directories
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Search for the file in accessible directories
+            val searchDirs = listOfNotNull(
+                context.getExternalFilesDir(null),
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            )
+            
+            for (dir in searchDirs) {
+                val file = findFileByIdHash(dir, documentId)
+                if (file != null) {
+                    return readFileContent(file, max)
+                }
+            }
+        }
+        
+        // Fall back to MediaStore lookup (for older Android or MediaStore-based IDs)
+        val contentResolver: ContentResolver = context.contentResolver
+        
+        // Try to parse as numeric ID for MediaStore
+        val numericId = documentId.toLongOrNull()
+        if (numericId != null) {
+            val projection = arrayOf(
+                android.provider.MediaStore.Files.FileColumns.DATA,
+                android.provider.MediaStore.Files.FileColumns.MIME_TYPE
+            )
+
+            val cursor: Cursor? = contentResolver.query(
+                android.provider.MediaStore.Files.getContentUri("external"),
+                projection,
+                "${android.provider.MediaStore.Files.FileColumns._ID} = ?",
+                arrayOf(documentId),
+                null
+            )
+
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val pathIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.DATA)
+                    val mimeTypeIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.MIME_TYPE)
+                    
+                    val path = it.getString(pathIndex)
+                    val mimeType = it.getString(mimeTypeIndex)
+                    
+                    if (path != null) {
+                        val file = java.io.File(path)
+                        if (mimeType?.contains("pdf") == true) {
+                            Log.w(TAG, "PDF content extraction not supported on Android")
+                            return null
+                        }
+                        return readFileContent(file, max)
+                    }
+                }
+            }
+        }
+
+        Log.w(TAG, "Could not find document with id: $documentId")
+        return null
+    }
+    
+    private fun findFileByIdHash(directory: java.io.File, idHash: String): java.io.File? {
+        if (!directory.exists() || !directory.canRead()) return null
+        
+        val files = directory.listFiles() ?: return null
+        
+        for (file in files) {
+            if (file.isDirectory) {
+                val found = findFileByIdHash(file, idHash)
+                if (found != null) return found
+            } else if (file.absolutePath.hashCode().toString() == idHash) {
+                return file
+            }
+        }
+        return null
+    }
+    
+    private fun readFileContent(file: java.io.File, maxLength: Int): String? {
+        try {
+            if (file.exists() && file.canRead()) {
+                // Check if it's a PDF
+                if (file.extension.lowercase() == "pdf") {
+                    Log.w(TAG, "PDF content extraction not supported on Android")
+                    return null
+                }
+                
+                val content = file.readText()
+                return if (content.length > maxLength) content.take(maxLength) else content
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading file content: ${e.message}")
+        }
+        return null
+    }
+
+    // MARK: - Photo Thumbnail
+
+    fun getPhotoThumbnail(photoId: String, maxWidth: Long?, maxHeight: Long?): ByteArray? {
+        Log.d(TAG, "getPhotoThumbnail called for id=$photoId")
+        
+        if (checkPhotosPermission() != PermissionStatus.GRANTED) {
+            throw SecurityException("Photos permission not granted")
+        }
+
+        val contentResolver: ContentResolver = context.contentResolver
+        
+        try {
+            val uri = android.content.ContentUris.withAppendedId(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                photoId.toLong()
+            )
+            
+            val width = maxWidth?.toInt() ?: 512
+            val height = maxHeight?.toInt() ?: 512
+            
+            val thumbnail = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentResolver.loadThumbnail(uri, android.util.Size(width, height), null)
+            } else {
+                @Suppress("DEPRECATION")
+                android.provider.MediaStore.Images.Thumbnails.getThumbnail(
+                    contentResolver,
+                    photoId.toLong(),
+                    android.provider.MediaStore.Images.Thumbnails.MINI_KIND,
+                    null
+                )
+            }
+            
+            if (thumbnail != null) {
+                val stream = java.io.ByteArrayOutputStream()
+                thumbnail.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, stream)
+                return stream.toByteArray()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting photo thumbnail: ${e.message}")
+        }
+
+        return null
     }
 }

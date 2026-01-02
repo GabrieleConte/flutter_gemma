@@ -67,7 +67,8 @@ enum class PermissionType(val raw: Int) {
   CALENDAR(1),
   NOTIFICATIONS(2),
   PHOTOS(3),
-  CALL_LOG(4);
+  CALL_LOG(4),
+  FILES(5);
 
   companion object {
     fun ofRaw(raw: Int): PermissionType? {
@@ -84,6 +85,22 @@ enum class PermissionStatus(val raw: Int) {
 
   companion object {
     fun ofRaw(raw: Int): PermissionStatus? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
+/** Document types supported for extraction */
+enum class DocumentType(val raw: Int) {
+  PLAIN_TEXT(0),
+  MARKDOWN(1),
+  PDF(2),
+  RTF(3),
+  HTML(4),
+  OTHER(5);
+
+  companion object {
+    fun ofRaw(raw: Int): DocumentType? {
       return values().firstOrNull { it.raw == raw }
     }
   }
@@ -518,6 +535,48 @@ data class PhotoResult (
 }
 
 /** Generated class from Pigeon that represents data sent in messages. */
+data class DocumentResult (
+  val id: String,
+  val name: String,
+  val path: String,
+  val documentType: DocumentType,
+  val mimeType: String? = null,
+  val fileSize: Long,
+  val createdDate: Long,
+  val modifiedDate: Long,
+  val textPreview: String? = null
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): DocumentResult {
+      val id = pigeonVar_list[0] as String
+      val name = pigeonVar_list[1] as String
+      val path = pigeonVar_list[2] as String
+      val documentType = pigeonVar_list[3] as DocumentType
+      val mimeType = pigeonVar_list[4] as String?
+      val fileSize = pigeonVar_list[5] as Long
+      val createdDate = pigeonVar_list[6] as Long
+      val modifiedDate = pigeonVar_list[7] as Long
+      val textPreview = pigeonVar_list[8] as String?
+      return DocumentResult(id, name, path, documentType, mimeType, fileSize, createdDate, modifiedDate, textPreview)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      name,
+      path,
+      documentType,
+      mimeType,
+      fileSize,
+      createdDate,
+      modifiedDate,
+      textPreview,
+    )
+  }
+}
+
+/** Generated class from Pigeon that represents data sent in messages. */
 data class CallLogResult (
   val id: String,
   val name: String? = null,
@@ -713,95 +772,105 @@ private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
       }
       132.toByte() -> {
         return (readValue(buffer) as Long?)?.let {
-          CallType.ofRaw(it.toInt())
+          DocumentType.ofRaw(it.toInt())
         }
       }
       133.toByte() -> {
-        return (readValue(buffer) as? List<Any?>)?.let {
-          RetrievalResult.fromList(it)
+        return (readValue(buffer) as Long?)?.let {
+          CallType.ofRaw(it.toInt())
         }
       }
       134.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          VectorStoreStats.fromList(it)
+          RetrievalResult.fromList(it)
         }
       }
       135.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          EntityResult.fromList(it)
+          VectorStoreStats.fromList(it)
         }
       }
       136.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          EntityWithEmbedding.fromList(it)
+          EntityResult.fromList(it)
         }
       }
       137.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          RelationshipResult.fromList(it)
+          EntityWithEmbedding.fromList(it)
         }
       }
       138.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CommunityResult.fromList(it)
+          RelationshipResult.fromList(it)
         }
       }
       139.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          GraphStats.fromList(it)
+          CommunityResult.fromList(it)
         }
       }
       140.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          ContactResult.fromList(it)
+          GraphStats.fromList(it)
         }
       }
       141.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CalendarEventResult.fromList(it)
+          ContactResult.fromList(it)
         }
       }
       142.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          GraphQueryResult.fromList(it)
+          CalendarEventResult.fromList(it)
         }
       }
       143.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          EntityWithScoreResult.fromList(it)
+          GraphQueryResult.fromList(it)
         }
       }
       144.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CommunityWithScoreResult.fromList(it)
+          EntityWithScoreResult.fromList(it)
         }
       }
       145.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          PhotoResult.fromList(it)
+          CommunityWithScoreResult.fromList(it)
         }
       }
       146.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CallLogResult.fromList(it)
+          PhotoResult.fromList(it)
         }
       }
       147.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          DetectedFace.fromList(it)
+          DocumentResult.fromList(it)
         }
       }
       148.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          DetectedObject.fromList(it)
+          CallLogResult.fromList(it)
         }
       }
       149.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          DetectedText.fromList(it)
+          DetectedFace.fromList(it)
         }
       }
       150.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          DetectedObject.fromList(it)
+        }
+      }
+      151.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          DetectedText.fromList(it)
+        }
+      }
+      152.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           PhotoAnalysisResult.fromList(it)
         }
@@ -823,80 +892,88 @@ private open class PigeonInterfacePigeonCodec : StandardMessageCodec() {
         stream.write(131)
         writeValue(stream, value.raw)
       }
-      is CallType -> {
+      is DocumentType -> {
         stream.write(132)
         writeValue(stream, value.raw)
       }
-      is RetrievalResult -> {
+      is CallType -> {
         stream.write(133)
-        writeValue(stream, value.toList())
+        writeValue(stream, value.raw)
       }
-      is VectorStoreStats -> {
+      is RetrievalResult -> {
         stream.write(134)
         writeValue(stream, value.toList())
       }
-      is EntityResult -> {
+      is VectorStoreStats -> {
         stream.write(135)
         writeValue(stream, value.toList())
       }
-      is EntityWithEmbedding -> {
+      is EntityResult -> {
         stream.write(136)
         writeValue(stream, value.toList())
       }
-      is RelationshipResult -> {
+      is EntityWithEmbedding -> {
         stream.write(137)
         writeValue(stream, value.toList())
       }
-      is CommunityResult -> {
+      is RelationshipResult -> {
         stream.write(138)
         writeValue(stream, value.toList())
       }
-      is GraphStats -> {
+      is CommunityResult -> {
         stream.write(139)
         writeValue(stream, value.toList())
       }
-      is ContactResult -> {
+      is GraphStats -> {
         stream.write(140)
         writeValue(stream, value.toList())
       }
-      is CalendarEventResult -> {
+      is ContactResult -> {
         stream.write(141)
         writeValue(stream, value.toList())
       }
-      is GraphQueryResult -> {
+      is CalendarEventResult -> {
         stream.write(142)
         writeValue(stream, value.toList())
       }
-      is EntityWithScoreResult -> {
+      is GraphQueryResult -> {
         stream.write(143)
         writeValue(stream, value.toList())
       }
-      is CommunityWithScoreResult -> {
+      is EntityWithScoreResult -> {
         stream.write(144)
         writeValue(stream, value.toList())
       }
-      is PhotoResult -> {
+      is CommunityWithScoreResult -> {
         stream.write(145)
         writeValue(stream, value.toList())
       }
-      is CallLogResult -> {
+      is PhotoResult -> {
         stream.write(146)
         writeValue(stream, value.toList())
       }
-      is DetectedFace -> {
+      is DocumentResult -> {
         stream.write(147)
         writeValue(stream, value.toList())
       }
-      is DetectedObject -> {
+      is CallLogResult -> {
         stream.write(148)
         writeValue(stream, value.toList())
       }
-      is DetectedText -> {
+      is DetectedFace -> {
         stream.write(149)
         writeValue(stream, value.toList())
       }
-      is PhotoAnalysisResult -> {
+      is DetectedObject -> {
         stream.write(150)
+        writeValue(stream, value.toList())
+      }
+      is DetectedText -> {
+        stream.write(151)
+        writeValue(stream, value.toList())
+      }
+      is PhotoAnalysisResult -> {
+        stream.write(152)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -954,6 +1031,14 @@ interface PlatformService {
   fun fetchCalendarEvents(sinceTimestamp: Long?, startDate: Long?, endDate: Long?, limit: Long?, callback: (Result<List<CalendarEventResult>>) -> Unit)
   fun fetchPhotos(sinceTimestamp: Long?, limit: Long?, includeLocation: Boolean?, callback: (Result<List<PhotoResult>>) -> Unit)
   fun fetchCallLog(sinceTimestamp: Long?, limit: Long?, callback: (Result<List<CallLogResult>>) -> Unit)
+  /**
+   * Opens a document picker for the user to select files.
+   * Returns a list of documents the user selected.
+   */
+  fun pickDocuments(allowedExtensions: List<String>?, allowMultiple: Boolean?, callback: (Result<List<DocumentResult>>) -> Unit)
+  fun fetchDocuments(sinceTimestamp: Long?, limit: Long?, allowedExtensions: List<String>?, callback: (Result<List<DocumentResult>>) -> Unit)
+  fun readDocumentContent(documentId: String, maxLength: Long?, callback: (Result<String?>) -> Unit)
+  fun getPhotoThumbnail(photoId: String, maxWidth: Long?, maxHeight: Long?, callback: (Result<ByteArray?>) -> Unit)
   fun analyzePhoto(photoId: String, imageBytes: ByteArray, detectFaces: Boolean?, detectObjects: Boolean?, detectText: Boolean?, callback: (Result<PhotoAnalysisResult>) -> Unit)
   fun startIndexingForegroundService(callback: (Result<Unit>) -> Unit)
   fun stopIndexingForegroundService(callback: (Result<Unit>) -> Unit)
@@ -1900,6 +1985,92 @@ interface PlatformService {
             val sinceTimestampArg = args[0] as Long?
             val limitArg = args[1] as Long?
             api.fetchCallLog(sinceTimestampArg, limitArg) { result: Result<List<CallLogResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.pickDocuments$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val allowedExtensionsArg = args[0] as List<String>?
+            val allowMultipleArg = args[1] as Boolean?
+            api.pickDocuments(allowedExtensionsArg, allowMultipleArg) { result: Result<List<DocumentResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.fetchDocuments$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val sinceTimestampArg = args[0] as Long?
+            val limitArg = args[1] as Long?
+            val allowedExtensionsArg = args[2] as List<String>?
+            api.fetchDocuments(sinceTimestampArg, limitArg, allowedExtensionsArg) { result: Result<List<DocumentResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.readDocumentContent$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val documentIdArg = args[0] as String
+            val maxLengthArg = args[1] as Long?
+            api.readDocumentContent(documentIdArg, maxLengthArg) { result: Result<String?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getPhotoThumbnail$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val photoIdArg = args[0] as String
+            val maxWidthArg = args[1] as Long?
+            val maxHeightArg = args[2] as Long?
+            api.getPhotoThumbnail(photoIdArg, maxWidthArg, maxHeightArg) { result: Result<ByteArray?> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

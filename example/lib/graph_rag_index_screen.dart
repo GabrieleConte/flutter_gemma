@@ -153,6 +153,41 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
     }
   }
 
+  bool _isPickingDocuments = false;
+
+  Future<void> _pickAndIndexDocuments() async {
+    if (_isPickingDocuments) return;
+    
+    setState(() => _isPickingDocuments = true);
+    
+    try {
+      _showSnackBar('Opening file picker...');
+      
+      // Pick documents using the native picker
+      final documents = await _service.pickDocuments(allowMultiple: true);
+      
+      if (documents.isEmpty) {
+        _showSnackBar('No documents selected');
+        return;
+      }
+      
+      _showSnackBar('Indexing ${documents.length} documents...');
+      
+      // Index selected documents
+      await _service.indexDocuments(documents);
+      
+      // Reload stats and graph
+      await _loadStats();
+      await _loadGraphData();
+      
+      _showSnackBar('${documents.length} documents indexed! 🎉');
+    } catch (e) {
+      _showSnackBar('Error: $e', isError: true);
+    } finally {
+      setState(() => _isPickingDocuments = false);
+    }
+  }
+
   Future<void> _clearGraph() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -352,6 +387,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         DataPermissionStatus.granted;
     final callLogRestricted = _permissions?[DataPermissionType.callLog] ==
         DataPermissionStatus.restricted;
+    final filesGranted = _permissions?[DataPermissionType.files] ==
+        DataPermissionStatus.granted;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -396,6 +433,10 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                   label: 'Call Log',
                   granted: callLogGranted,
                   restricted: callLogRestricted,
+                ),
+                _PermissionChip(
+                  label: 'Documents',
+                  granted: filesGranted,
                 ),
               ],
             ),
@@ -484,6 +525,22 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
+                TextButton.icon(
+                  onPressed: _isPickingDocuments ? null : _pickAndIndexDocuments,
+                  icon: _isPickingDocuments 
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white70,
+                        ),
+                      )
+                    : const Icon(Icons.file_open, size: 18),
+                  label: Text(_isPickingDocuments ? 'Selecting...' : 'Select Files'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.lightBlue),
+                ),
+                const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: _clearGraph,
                   icon: const Icon(Icons.delete_outline, size: 18),

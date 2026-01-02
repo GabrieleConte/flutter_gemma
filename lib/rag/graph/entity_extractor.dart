@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 /// Extraction result containing entities and relationships
 class ExtractionResult {
@@ -345,6 +346,83 @@ Write a unified summary (2-3 paragraphs) that:
 3. Provides a birds-eye view useful for understanding the entire group
 
 High-level Summary:''';
+  }
+
+  /// Prompt for image captioning using vision LLM
+  /// Reference: https://ai.google.dev/gemma/docs/capabilities/vision/image-interpretation#image-captioning
+  static String imageCaptioningPrompt({
+    String? filename,
+    String? locationName,
+    DateTime? creationDate,
+  }) {
+    final contextInfo = StringBuffer();
+    if (filename != null) contextInfo.writeln('Filename: $filename');
+    if (locationName != null) contextInfo.writeln('Location: $locationName');
+    if (creationDate != null) contextInfo.writeln('Date taken: ${creationDate.toIso8601String()}');
+    
+    final context = contextInfo.isNotEmpty 
+        ? '\n\nContext information:\n$contextInfo' 
+        : '';
+
+    return '''Describe this image in detail. Include:
+1. Main subjects (people, objects, animals)
+2. Activities or actions taking place
+3. Setting or environment
+4. Notable objects or items
+5. Any text visible in the image$context
+
+Provide a detailed caption:''';
+  }
+
+  /// Prompt to extract entities from an image caption
+  static String imageCaptionEntityExtractionPrompt(
+    String caption, {
+    String? filename,
+    String? locationName,
+  }) {
+    return '''Extract named entities from this photo description.
+
+Photo description: $caption
+${filename != null ? 'Filename: $filename' : ''}
+${locationName != null ? 'Location: $locationName' : ''}
+
+Extract entities of these types:
+- PERSON: People mentioned or visible
+- LOCATION: Places, landmarks, venues
+- OBJECT: Notable objects, items, products
+- EVENT: Activities, occasions, gatherings
+- ORGANIZATION: Companies, brands visible
+
+Return JSON:
+{"entities":[{"name":"...","type":"...","description":"..."}],"relationships":[{"source":"...","target":"...","type":"..."}]}
+
+JSON:''';
+  }
+
+  /// Prompt for document text extraction summary
+  static String documentExtractionPrompt(
+    String documentName,
+    String documentType,
+    String? textContent,
+  ) {
+    final contentPreview = textContent != null && textContent.length > 2000
+        ? '${textContent.substring(0, 2000)}...'
+        : textContent ?? 'No text content available';
+
+    return '''Extract entities from this document.
+
+Document: $documentName
+Type: $documentType
+
+Content preview:
+$contentPreview
+
+Extract entities (PERSON, ORGANIZATION, TOPIC, PROJECT, DATE) and relationships.
+
+Return JSON:
+{"entities":[{"name":"...","type":"...","description":"..."}],"relationships":[{"source":"...","target":"...","type":"..."}]}
+
+JSON:''';
   }
 }
 
@@ -808,6 +886,9 @@ class DirectEntityExtractor implements EntityExtractor {
       case 'call':
       case 'calls':
         return _extractFromPhoneCall(data, sourceId, sourceType);
+      case 'document':
+      case 'documents':
+        return _extractFromDocument(data, sourceId, sourceType);
       default:
         // For unknown types, return empty - use LLM extractor instead
         return ExtractionResult(
@@ -1154,6 +1235,159 @@ class DirectEntityExtractor implements EntityExtractor {
     );
   }
 
+  /// Extract entities from a document (text file or PDF)
+  ExtractionResult _extractFromDocument(
+    Map<String, dynamic> document,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+
+    // Extract document entity
+    final documentName = document['name']?.toString() ?? 
+                         document['filename']?.toString() ?? 
+                         'Unknown Document';
+    final documentPath = document['path']?.toString() ?? '';
+    final documentTypeStr = document['documentType']?.toString() ?? 
+                           document['type']?.toString() ?? 
+                           document['mimeType']?.toString() ?? 
+                           'unknown';
+    final fileSize = document['fileSize'] ?? document['size'];
+    final textPreview = document['textPreview'] ?? document['content'];
+
+    entities.add(ExtractedEntity(
+      name: documentName,
+      type: EntityTypes.document,
+      description: textPreview?.toString(),
+      attributes: {
+        'path': documentPath,
+        'documentType': documentTypeStr,
+        if (fileSize != null) 'fileSize': fileSize,
+      },
+      confidence: 1.0,
+    ));
+
+    // Extract created date if available
+    final createdDate = document['createdDate'] ?? document['created'];
+    if (createdDate != null) {
+      final dateStr = _formatDateForEntity(createdDate);
+      if (dateStr.isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: dateStr,
+          type: EntityTypes.date,
+          confidence: 1.0,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: documentName,
+          targetEntity: dateStr,
+          type: 'CREATED_ON',
+          confidence: 1.0,
+        ));
+      }
+    }
+
+    // Extract modified date if different from created
+    final modifiedDate = document['modifiedDate'] ?? document['modified'];
+    if (modifiedDate != null && modifiedDate != createdDate) {
+      final dateStr = _formatDateForEntity(modifiedDate);
+      if (dateStr.isNotEmpty) {
+        // Check if this date entity already exists
+        final existingDate = entities.any((e) => e.name == dateStr);
+        if (!existingDate) {
+          entities.add(ExtractedEntity(
+            name: dateStr,
+            type: EntityTypes.date,
+            confidence: 1.0,
+          ));
+        }
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: documentName,
+          targetEntity: dateStr,
+          type: 'MODIFIED_ON',
+          confidence: 1.0,
+        ));
+      }
+    }
+
+    // Extract topics from filename or text preview (simple keyword extraction)
+    final keywords = _extractKeywordsFromDocument(documentName, textPreview?.toString());
+    for (final keyword in keywords) {
+      entities.add(ExtractedEntity(
+        name: keyword,
+        type: EntityTypes.topic,
+        confidence: 0.7,
+      ));
+
+      relationships.add(ExtractedRelationship(
+        sourceEntity: documentName,
+        targetEntity: keyword,
+        type: 'ABOUT',
+        confidence: 0.7,
+      ));
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Extract simple keywords from document name and content
+  List<String> _extractKeywordsFromDocument(String name, String? content) {
+    final keywords = <String>{};
+    
+    // Extract from filename (remove extension and split by common separators)
+    final nameWithoutExt = name.contains('.') 
+        ? name.substring(0, name.lastIndexOf('.')) 
+        : name;
+    final nameParts = nameWithoutExt.split(RegExp(r'[-_\s]+'));
+    for (final part in nameParts) {
+      if (part.length > 3 && !_isCommonWord(part)) {
+        keywords.add(_capitalizeFirst(part.toLowerCase()));
+      }
+    }
+    
+    // Extract capitalized words from content preview (likely proper nouns)
+    if (content != null && content.isNotEmpty) {
+      final capitalPattern = RegExp(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b');
+      final matches = capitalPattern.allMatches(content).take(5);
+      for (final match in matches) {
+        final word = match.group(1)!;
+        if (word.length > 3 && !_isCommonWord(word)) {
+          keywords.add(word);
+        }
+      }
+    }
+    
+    return keywords.take(5).toList();
+  }
+
+  /// Check if a word is a common word to ignore
+  bool _isCommonWord(String word) {
+    const commonWords = {
+      'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
+      'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day',
+      'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new',
+      'now', 'old', 'see', 'way', 'who', 'did', 'let', 'put',
+      'say', 'she', 'too', 'use', 'that', 'this', 'with',
+      'have', 'from', 'they', 'been', 'will', 'your', 'when',
+      'there', 'which', 'their', 'would', 'about', 'could',
+      'document', 'file', 'text', 'note', 'notes', 'draft',
+    };
+    return commonWords.contains(word.toLowerCase());
+  }
+
+  /// Capitalize first letter
+  String _capitalizeFirst(String s) {
+    if (s.isEmpty) return s;
+    return s[0].toUpperCase() + s.substring(1);
+  }
+
   /// Format date for entity name
   String _formatDateForEntity(dynamic date) {
     DateTime? dt;
@@ -1252,5 +1486,366 @@ class EntityMerger {
         confidence: r.confidence,
       );
     }).toList();
+  }
+}
+
+/// Vision-enhanced entity extractor for images
+/// 
+/// Uses a vision LLM to generate captions for photos, then extracts entities
+/// from those captions. This provides much richer entity extraction than
+/// metadata-only extraction.
+/// 
+/// Reference: https://ai.google.dev/gemma/docs/capabilities/vision/image-interpretation
+class VisionEntityExtractor {
+  /// Callback to generate caption from image using vision LLM
+  final Future<String> Function(String prompt, Uint8List imageBytes) visionLlmCallback;
+  
+  /// Callback to extract entities from text using regular LLM
+  final Future<String> Function(String prompt) llmCallback;
+  
+  /// Callback to generate embeddings
+  final Future<List<double>> Function(String text) embeddingCallback;
+  
+  /// Fallback direct extractor for metadata
+  final DirectEntityExtractor _directExtractor;
+
+  VisionEntityExtractor({
+    required this.visionLlmCallback,
+    required this.llmCallback,
+    required this.embeddingCallback,
+  }) : _directExtractor = DirectEntityExtractor(embeddingCallback: embeddingCallback);
+
+  /// Generate a caption for a photo using vision LLM
+  Future<String> generateCaption(
+    Uint8List imageBytes, {
+    String? filename,
+    String? locationName,
+    DateTime? creationDate,
+  }) async {
+    final prompt = ExtractionPrompts.imageCaptioningPrompt(
+      filename: filename,
+      locationName: locationName,
+      creationDate: creationDate,
+    );
+    
+    try {
+      final caption = await visionLlmCallback(prompt, imageBytes);
+      return caption.trim();
+    } catch (e) {
+      assert(() {
+        print('[VisionEntityExtractor] Caption generation failed: $e');
+        return true;
+      }());
+      return '';
+    }
+  }
+
+  /// Extract entities from a photo using vision-based captioning
+  Future<ExtractionResult> extractFromPhoto(
+    Map<String, dynamic> photoData,
+    Uint8List imageBytes, {
+    required String sourceId,
+    required String sourceType,
+  }) async {
+    // First, get metadata-based extraction as baseline
+    final metadataExtraction = await _directExtractor.extractFromStructured(
+      photoData,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+    
+    // Generate caption from image
+    final filename = photoData['filename']?.toString();
+    final locationName = photoData['locationName']?.toString();
+    final creationDate = photoData['creationDate'];
+    DateTime? dateTime;
+    if (creationDate is DateTime) {
+      dateTime = creationDate;
+    } else if (creationDate is int) {
+      dateTime = DateTime.fromMillisecondsSinceEpoch(creationDate);
+    }
+    
+    final caption = await generateCaption(
+      imageBytes,
+      filename: filename,
+      locationName: locationName,
+      creationDate: dateTime,
+    );
+    
+    if (caption.isEmpty) {
+      // Fall back to metadata-only extraction
+      return metadataExtraction;
+    }
+    
+    // Extract entities from caption
+    final prompt = ExtractionPrompts.imageCaptionEntityExtractionPrompt(
+      caption,
+      filename: filename,
+      locationName: locationName,
+    );
+    
+    try {
+      final response = await llmCallback(prompt);
+      final captionEntities = _parseEntitiesFromResponse(response);
+      
+      // Merge metadata entities with caption entities
+      final allEntities = <ExtractedEntity>[
+        ...metadataExtraction.entities,
+        ...captionEntities.entities,
+      ];
+      
+      final allRelationships = <ExtractedRelationship>[
+        ...metadataExtraction.relationships,
+        ...captionEntities.relationships,
+      ];
+      
+      // Add caption as description to the photo entity
+      final photoEntityIndex = allEntities.indexWhere((e) => e.type == 'PHOTO');
+      if (photoEntityIndex >= 0) {
+        final photoEntity = allEntities[photoEntityIndex];
+        allEntities[photoEntityIndex] = ExtractedEntity(
+          name: photoEntity.name,
+          type: photoEntity.type,
+          description: caption,
+          attributes: photoEntity.attributes,
+          confidence: photoEntity.confidence,
+        );
+      }
+      
+      // Deduplicate entities
+      final deduped = EntityMerger.deduplicateEntities(allEntities);
+      
+      return ExtractionResult(
+        entities: deduped,
+        relationships: allRelationships,
+        sourceId: sourceId,
+        sourceType: sourceType,
+      );
+    } catch (e) {
+      assert(() {
+        print('[VisionEntityExtractor] Entity extraction from caption failed: $e');
+        return true;
+      }());
+      return metadataExtraction;
+    }
+  }
+
+  /// Parse entities from LLM response (simplified version)
+  _ParsedExtraction _parseEntitiesFromResponse(String response) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+    
+    try {
+      // Try to extract JSON
+      var jsonStr = response;
+      if (jsonStr.contains('```json')) {
+        final start = jsonStr.indexOf('```json') + 7;
+        final end = jsonStr.indexOf('```', start);
+        if (end > start) {
+          jsonStr = jsonStr.substring(start, end);
+        }
+      } else if (jsonStr.contains('{')) {
+        final start = jsonStr.indexOf('{');
+        jsonStr = jsonStr.substring(start);
+      }
+      
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      
+      if (json.containsKey('entities')) {
+        final entityList = json['entities'] as List<dynamic>;
+        for (final e in entityList) {
+          if (e is Map<String, dynamic>) {
+            entities.add(ExtractedEntity.fromJson(e));
+          }
+        }
+      }
+      
+      if (json.containsKey('relationships')) {
+        final relList = json['relationships'] as List<dynamic>;
+        for (final r in relList) {
+          if (r is Map<String, dynamic>) {
+            relationships.add(ExtractedRelationship.fromJson(r));
+          }
+        }
+      }
+    } catch (e) {
+      assert(() {
+        print('[VisionEntityExtractor] JSON parsing failed: $e');
+        return true;
+      }());
+    }
+    
+    return _ParsedExtraction(entities: entities, relationships: relationships);
+  }
+}
+
+/// Document entity extractor for text files and PDFs
+/// 
+/// Extracts entities from document content using LLM
+class DocumentEntityExtractor {
+  /// Callback to extract entities from text using LLM
+  final Future<String> Function(String prompt) llmCallback;
+  
+  /// Callback to generate embeddings
+  final Future<List<double>> Function(String text) embeddingCallback;
+
+  DocumentEntityExtractor({
+    required this.llmCallback,
+    required this.embeddingCallback,
+  });
+
+  /// Extract entities from a document
+  Future<ExtractionResult> extractFromDocument(
+    Map<String, dynamic> documentData, {
+    required String sourceId,
+    required String sourceType,
+  }) async {
+    final documentName = documentData['name']?.toString() ?? 
+                         documentData['filename']?.toString() ?? 
+                         'Unknown Document';
+    final documentType = documentData['type']?.toString() ?? 
+                         documentData['mimeType']?.toString() ?? 
+                         'unknown';
+    final textContent = documentData['content']?.toString() ?? 
+                        documentData['text']?.toString();
+    
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+    
+    // Create document entity
+    entities.add(ExtractedEntity(
+      name: documentName,
+      type: EntityTypes.document,
+      attributes: {
+        'documentType': documentType,
+        if (documentData['size'] != null) 'size': documentData['size'],
+        if (documentData['path'] != null) 'path': documentData['path'],
+      },
+      confidence: 1.0,
+    ));
+    
+    // If we have text content, extract entities using LLM
+    if (textContent != null && textContent.isNotEmpty) {
+      final prompt = ExtractionPrompts.documentExtractionPrompt(
+        documentName,
+        documentType,
+        textContent,
+      );
+      
+      try {
+        final response = await llmCallback(prompt);
+        final parsed = _parseEntitiesFromResponse(response);
+        
+        // Add extracted entities and create relationships to document
+        for (final entity in parsed.entities) {
+          entities.add(entity);
+          
+          // Link entity to document
+          relationships.add(ExtractedRelationship(
+            sourceEntity: entity.name,
+            targetEntity: documentName,
+            type: 'MENTIONED_IN',
+            confidence: entity.confidence,
+          ));
+        }
+        
+        relationships.addAll(parsed.relationships);
+      } catch (e) {
+        assert(() {
+          print('[DocumentEntityExtractor] Entity extraction failed: $e');
+          return true;
+        }());
+      }
+    }
+    
+    // Extract date if available
+    final createdDate = documentData['createdDate'] ?? documentData['created'];
+    if (createdDate != null) {
+      final dateStr = _formatDate(createdDate);
+      if (dateStr.isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: dateStr,
+          type: EntityTypes.date,
+          confidence: 1.0,
+        ));
+        
+        relationships.add(ExtractedRelationship(
+          sourceEntity: documentName,
+          targetEntity: dateStr,
+          type: 'CREATED_ON',
+          confidence: 1.0,
+        ));
+      }
+    }
+    
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Parse entities from LLM response
+  _ParsedExtraction _parseEntitiesFromResponse(String response) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+    
+    try {
+      var jsonStr = response;
+      if (jsonStr.contains('```json')) {
+        final start = jsonStr.indexOf('```json') + 7;
+        final end = jsonStr.indexOf('```', start);
+        if (end > start) {
+          jsonStr = jsonStr.substring(start, end);
+        }
+      } else if (jsonStr.contains('{')) {
+        final start = jsonStr.indexOf('{');
+        jsonStr = jsonStr.substring(start);
+      }
+      
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      
+      if (json.containsKey('entities')) {
+        final entityList = json['entities'] as List<dynamic>;
+        for (final e in entityList) {
+          if (e is Map<String, dynamic>) {
+            entities.add(ExtractedEntity.fromJson(e));
+          }
+        }
+      }
+      
+      if (json.containsKey('relationships')) {
+        final relList = json['relationships'] as List<dynamic>;
+        for (final r in relList) {
+          if (r is Map<String, dynamic>) {
+            relationships.add(ExtractedRelationship.fromJson(r));
+          }
+        }
+      }
+    } catch (e) {
+      assert(() {
+        print('[DocumentEntityExtractor] JSON parsing failed: $e');
+        return true;
+      }());
+    }
+    
+    return _ParsedExtraction(entities: entities, relationships: relationships);
+  }
+
+  String _formatDate(dynamic date) {
+    DateTime? dt;
+    if (date is DateTime) {
+      dt = date;
+    } else if (date is int) {
+      dt = DateTime.fromMillisecondsSinceEpoch(date);
+    } else if (date is String) {
+      dt = DateTime.tryParse(date);
+    }
+    
+    if (dt != null) {
+      return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+    }
+    return '';
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../../pigeon.g.dart';
 import '../connectors/data_connector.dart';
@@ -112,6 +113,11 @@ class IndexingConfig {
   
   /// Link prediction configuration
   final LinkPredictionConfig? linkPredictionConfig;
+  
+  /// Whether to enable image captioning using vision LLM
+  /// When enabled, photos will be analyzed using the vision model to
+  /// generate descriptive captions for richer entity extraction
+  final bool enableImageCaptioning;
 
   IndexingConfig({
     this.batchSize = 10,
@@ -123,6 +129,7 @@ class IndexingConfig {
     this.reindexInterval,
     this.enableLinkPrediction = true,
     this.linkPredictionConfig,
+    this.enableImageCaptioning = false,
   });
 }
 
@@ -133,12 +140,13 @@ class BackgroundIndexingService {
   final ConnectorManager connectorManager;
   final IndexingConfig config;
   
-  late final LouvainCommunityDetector _communityDetector;
+  late final LeidenCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
   late final LinkPredictor? _linkPredictor;
   late final EmbeddingSimilarityLinkPredictor? _embeddingSimilarityPredictor;
   late final DirectEntityExtractor _directExtractor;
   late final Future<List<double>> Function(String text) _embeddingCallback;
+  late final Future<String> Function(String prompt, Uint8List imageBytes)? _visionLlmCallback;
   final PlatformService _platform = PlatformService();
   
   /// Data types that should use direct extraction (no LLM)
@@ -147,6 +155,7 @@ class BackgroundIndexingService {
     'CALENDAR', 'CALENDAR_EVENT', 'EVENT',
     'PHOTO', 'PHOTOS',
     'PHONE_CALL', 'PHONE_CALLS', 'CALL', 'CALLS',
+    'DOCUMENT', 'DOCUMENTS',
   };
   
   IndexingProgress _progress = IndexingProgress(
@@ -169,16 +178,18 @@ class BackgroundIndexingService {
     required this.connectorManager,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
     _embeddingCallback = embeddingCallback;
+    _visionLlmCallback = visionLlmCallback;
     
     // Initialize direct extractor for structured data (no LLM)
     _directExtractor = DirectEntityExtractor(
       embeddingCallback: embeddingCallback,
     );
     
-    _communityDetector = LouvainCommunityDetector(
+    _communityDetector = LeidenCommunityDetector(
       config: CommunityDetectionConfig(maxDepth: this.config.maxCommunityDepth),
     );
     
@@ -472,10 +483,17 @@ class BackgroundIndexingService {
         // Choose extraction method based on data type
         // Use direct extraction for structured data (fast, no LLM)
         // Use LLM extraction for free-text data (notes, documents)
-        final ExtractionResult extraction;
+        ExtractionResult extraction;
         final isStructuredData = _structuredDataTypes.contains(dataType.toUpperCase());
+        final isPhotoWithCaptioning = (dataType.toUpperCase() == 'PHOTO' || 
+                                       dataType.toUpperCase() == 'PHOTOS') &&
+                                      config.enableImageCaptioning &&
+                                      _visionLlmCallback != null;
         
-        if (isStructuredData) {
+        if (isPhotoWithCaptioning) {
+          // Vision-enhanced photo extraction with image captioning
+          extraction = await _extractPhotoWithVision(itemMap, item, sourceId, dataType);
+        } else if (isStructuredData) {
           // Fast path: direct extraction without LLM
           extraction = await _directExtractor.extractFromStructured(
             itemMap,
@@ -647,6 +665,71 @@ class BackgroundIndexingService {
         }());
       }
     }
+  }
+
+  /// Extract photo with vision-based captioning
+  /// Uses the vision LLM to generate a caption, then extracts entities from it
+  Future<ExtractionResult> _extractPhotoWithVision(
+    Map<String, dynamic> itemMap,
+    dynamic item,
+    String sourceId,
+    String dataType,
+  ) async {
+    // First, try to get thumbnail bytes from the photo
+    Uint8List? imageBytes;
+    
+    if (item is Photo && item.id.isNotEmpty) {
+      // Try to fetch thumbnail from platform
+      try {
+        imageBytes = await _platform.getPhotoThumbnail(
+          photoId: item.id,
+          maxWidth: 512,
+          maxHeight: 512,
+        );
+      } catch (e) {
+        assert(() {
+          print('[BackgroundIndexing] Could not get photo thumbnail: $e');
+          return true;
+        }());
+      }
+    }
+    
+    // If we couldn't get image bytes, fall back to direct extraction
+    if (imageBytes == null || imageBytes.isEmpty) {
+      final extraction = await _directExtractor.extractFromStructured(
+        itemMap,
+        sourceId: sourceId,
+        sourceType: dataType,
+      );
+      assert(() {
+        print('[BackgroundIndexing] Vision fallback - no image bytes, using direct extraction');
+        return true;
+      }());
+      return extraction;
+    }
+    
+    // Create vision extractor and extract entities
+    final visionExtractor = VisionEntityExtractor(
+      visionLlmCallback: _visionLlmCallback!,
+      llmCallback: extractor is LLMEntityExtractor 
+          ? (extractor as LLMEntityExtractor).llmCallback
+          : (prompt) async => '', // Fallback if not LLM extractor
+      embeddingCallback: _embeddingCallback,
+    );
+    
+    final extraction = await visionExtractor.extractFromPhoto(
+      itemMap,
+      imageBytes,
+      sourceId: sourceId,
+      sourceType: dataType,
+    );
+    
+    assert(() {
+      print('[BackgroundIndexing] Vision extraction: ${extraction.entities.length} entities from photo with captioning');
+      return true;
+    }());
+    
+    return extraction;
   }
   
   /// Phase 0: Initialize the "You" central node
@@ -1129,6 +1212,46 @@ class BackgroundIndexingService {
       };
     }
     
+    if (item is Photo) {
+      return {
+        'id': item.id,
+        'filename': item.filename,
+        'width': item.width,
+        'height': item.height,
+        'creationDate': item.creationDate.millisecondsSinceEpoch,
+        'modificationDate': item.modificationDate.millisecondsSinceEpoch,
+        'latitude': item.latitude,
+        'longitude': item.longitude,
+        'locationName': item.locationName,
+        'mediaType': item.mediaType,
+      };
+    }
+    
+    if (item is PhoneCall) {
+      return {
+        'id': item.id,
+        'contactName': item.contactName,
+        'phoneNumber': item.phoneNumber,
+        'callType': item.callType.toString(),
+        'timestamp': item.timestamp.millisecondsSinceEpoch,
+        'duration': item.duration.inSeconds,
+      };
+    }
+    
+    if (item is Document) {
+      return {
+        'id': item.id,
+        'name': item.name,
+        'path': item.path,
+        'documentType': item.documentType.toString(),
+        'mimeType': item.mimeType,
+        'fileSize': item.fileSize,
+        'createdDate': item.createdDate.millisecondsSinceEpoch,
+        'modifiedDate': item.modifiedDate.millisecondsSinceEpoch,
+        'textPreview': item.textPreview,
+      };
+    }
+    
     return {'_raw': item.toString()};
   }
 
@@ -1139,6 +1262,9 @@ class BackgroundIndexingService {
     }
     if (item is Contact) return item.id;
     if (item is CalendarEvent) return item.id;
+    if (item is Photo) return item.id;
+    if (item is PhoneCall) return item.id;
+    if (item is Document) return item.id;
     return DateTime.now().millisecondsSinceEpoch.toString();
   }
 
