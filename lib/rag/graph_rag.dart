@@ -11,6 +11,7 @@ import 'graph/cypher_parser.dart';
 import 'graph/hybrid_query_engine.dart';
 import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
+import 'graph/link_prediction.dart';
 
 /// Configuration for GraphRAG
 class GraphRAGConfig {
@@ -632,6 +633,30 @@ class GraphRAG {
       }
     }
     
+    // Create co-occurrence relationships between all entities from the same document
+    // This ensures entities extracted from the same file are connected
+    final extractedEntityIds = extraction.entities
+        .map((e) => normalizeId(e.name, e.type))
+        .toList();
+    
+    for (var i = 0; i < extractedEntityIds.length; i++) {
+      for (var j = i + 1; j < extractedEntityIds.length; j++) {
+        final coOccurRel = GraphRelationship(
+          id: '${extractedEntityIds[i]}_co_occurs_${extractedEntityIds[j]}',
+          sourceId: extractedEntityIds[i],
+          targetId: extractedEntityIds[j],
+          type: 'CO_OCCURS_IN',
+          weight: 0.5, // Lower weight than explicit relationships
+          metadata: {'sourceDocument': name, 'sourceId': sourceId},
+        );
+        try {
+          await _repository.addRelationship(coOccurRel);
+        } catch (_) {
+          // Relationship already exists
+        }
+      }
+    }
+    
     // Create document entity and link to "You"
     final documentEmbedding = await _embeddingCallback(
       '$name ${content.length > 200 ? content.substring(0, 200) : content}',
@@ -666,20 +691,13 @@ class GraphRAG {
     }
     
     // Link document to "You" (the user's SELF entity)
-    final youId = 'self_you';
+    // Use YouEntity.id for consistency with the rest of the codebase
+    final youId = YouEntity.id; // 'you_central_node'
     final youEntity = await _repository.getEntity(youId);
     if (youEntity == null) {
-      // Create "You" entity if it doesn't exist
+      // Create "You" entity using the YouEntity helper for consistency
       final youEmbedding = await _embeddingCallback('You - personal user self');
-      final you = GraphEntity(
-        id: youId,
-        name: 'You',
-        type: 'SELF',
-        description: 'The user',
-        embedding: youEmbedding,
-        metadata: {},
-        lastModified: now,
-      );
+      final you = YouEntity.create(embedding: youEmbedding);
       await _repository.addEntity(you);
     }
     
@@ -688,7 +706,7 @@ class GraphRAG {
       id: '${youId}_has_document_${documentEntity.id}',
       sourceId: youId,
       targetId: documentEntity.id,
-      type: 'HAS_DOCUMENT',
+      type: YouRelationshipTypes.ownsDocument,
       weight: 1.0,
       metadata: {},
     );

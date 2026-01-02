@@ -311,18 +311,23 @@ Your JSON:''';
     List<String> entityDescriptions,
     List<String> relationships,
   ) {
-    return '''Generate a comprehensive summary for a community of related entities.
+    return '''Summarize ONLY the entities and relationships provided below. Do NOT add any external information, speculation, or details not explicitly mentioned.
 
-Entities in this community:
+Entities:
 ${entityNames.asMap().entries.map((e) => '- ${e.value}: ${entityDescriptions.length > e.key ? entityDescriptions[e.key] : ""}').join('\n')}
 
 Relationships:
 ${relationships.map((r) => '- $r').join('\n')}
 
-Write a coherent summary (2-3 paragraphs) that:
-1. Identifies the main theme or connection between these entities
-2. Describes the key relationships and interactions
-3. Highlights any notable patterns or important details
+IMPORTANT RULES:
+- Use ONLY the information provided above
+- Do NOT invent or assume any details not explicitly stated
+- Do NOT add background information about entities
+- Keep the summary factual and grounded
+
+Write a brief, factual summary (1-2 short paragraphs) describing:
+1. What these entities have in common
+2. How they are connected based on the relationships listed
 
 Summary:''';
   }
@@ -333,19 +338,22 @@ Summary:''';
     List<String> childSummaries,
     int level,
   ) {
-    return '''You are creating a summary of a high-level community that contains multiple sub-communities.
-
-This is a Level $level community. Synthesize the following sub-community summaries into a coherent high-level summary.
+    return '''Synthesize ONLY the sub-community summaries provided below into a unified summary. Do NOT add external information.
 
 Sub-community summaries:
 ${childSummaries.asMap().entries.map((e) => '--- Sub-community ${e.key + 1} ---\n${e.value}').join('\n\n')}
 
-Write a unified summary (2-3 paragraphs) that:
-1. Identifies the overarching theme connecting all sub-communities
-2. Highlights the most important patterns and relationships at this higher level
-3. Provides a birds-eye view useful for understanding the entire group
+IMPORTANT RULES:
+- Use ONLY information from the summaries above
+- Do NOT invent details or add speculation
+- Do NOT include information not present in the sub-community summaries
+- Keep the summary factual and grounded
 
-High-level Summary:''';
+Write a brief unified summary (1-2 short paragraphs) that:
+1. Identifies the common theme across these sub-communities
+2. Summarizes the key connections mentioned
+
+Unified Summary:''';
   }
 
   /// Prompt for image captioning using vision LLM
