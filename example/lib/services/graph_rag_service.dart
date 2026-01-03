@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
 import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel;
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart';
-import 'package:flutter_gemma/rag/connectors/data_connector.dart' show Document, DocumentsConnector;
 import 'package:path_provider/path_provider.dart';
 
 /// Service for managing GraphRAG operations in the example app

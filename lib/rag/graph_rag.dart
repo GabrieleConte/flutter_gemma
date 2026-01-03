@@ -692,7 +692,7 @@ class GraphRAG {
     
     // Link document to "You" (the user's SELF entity)
     // Use YouEntity.id for consistency with the rest of the codebase
-    final youId = YouEntity.id; // 'you_central_node'
+    const youId = YouEntity.id; // 'you_central_node'
     final youEntity = await _repository.getEntity(youId);
     if (youEntity == null) {
       // Create "You" entity using the YouEntity helper for consistency
