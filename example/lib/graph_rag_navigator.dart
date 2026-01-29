@@ -122,9 +122,10 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       }
 
       // Now get the active model - used for both main chat and extraction
+      // Use CPU backend for emulator compatibility (GPU/OpenCL not available)
       final model = await FlutterGemma.getActiveModel(
         maxTokens: _inferenceModel.maxTokens,
-        preferredBackend: _inferenceModel.preferredBackend,
+        preferredBackend: PreferredBackend.cpu,
       );
 
       // Create main chat for text generation

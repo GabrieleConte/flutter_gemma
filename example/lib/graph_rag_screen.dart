@@ -94,10 +94,10 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
         await installer.fromNetwork(inferenceModel.url, token: token).install();
       }
       
-      // Use GPU backend for better performance with larger model
+      // Use CPU backend for emulator compatibility (GPU/OpenCL not available)
       final model = await FlutterGemma.getActiveModel(
         maxTokens: inferenceModel.maxTokens,
-        preferredBackend: inferenceModel.preferredBackend,
+        preferredBackend: PreferredBackend.cpu,
       );
       
       final chat = await model.createChat(
