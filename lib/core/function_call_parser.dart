@@ -92,10 +92,11 @@ class FunctionCallParser {
       // Explicit routing by model type using Dart 3 switch expression
       return switch (modelType) {
         ModelType.functionGemma => _parseFunctionGemmaCall(content),
-        // All other models use JSON-based formats
+        // All other models use JSON-based formats, with Python call fallback
         _ => _parseToolCodeBlock(content) ??
              _parseMarkdownBlock(content) ??
-             _parseDirectJson(content),
+             _parseDirectJson(content) ??
+             _parsePythonFunctionCall(content),
       };
     } catch (e) {
       debugPrint('FunctionCallParser: Error parsing function call: $e');
@@ -243,6 +244,74 @@ class FunctionCallParser {
     }
 
     return FunctionCallResponse(name: functionName, args: params);
+  }
+
+  /// Parse Python-style function calls like:
+  /// validate_relationship(relationship_type="FAMILY_MEMBER", is_valid=True, confidence=0.95)
+  /// This handles Gemma models that output Python code instead of JSON
+  static FunctionCallResponse? _parsePythonFunctionCall(String content) {
+    // Look for function call pattern: function_name(args)
+    // Can be anywhere in the content (often in markdown code blocks)
+    final funcCallRegex = RegExp(
+      r'(\w+)\s*\(\s*([^)]+)\s*\)',
+      multiLine: true,
+    );
+
+    for (final match in funcCallRegex.allMatches(content)) {
+      final functionName = match.group(1)!;
+      final argsStr = match.group(2)!;
+
+      // Skip common Python patterns that aren't our function calls
+      if (functionName == 'def' || 
+          functionName == 'print' || 
+          functionName == 'return' ||
+          functionName == 'str' ||
+          functionName == 'int' ||
+          functionName == 'float' ||
+          functionName == 'bool' ||
+          functionName == 'list' ||
+          functionName == 'dict') {
+        continue;
+      }
+
+      // Parse keyword arguments: key="value" or key=value
+      final params = <String, dynamic>{};
+      // Match patterns like: key="value", key='value', key=True, key=0.95
+      final kwargRegex = RegExp(
+        r'''(\w+)\s*=\s*("[^"]*"|'[^']*'|True|False|None|[\d.]+)''',
+      );
+
+      for (final kwMatch in kwargRegex.allMatches(argsStr)) {
+        final key = kwMatch.group(1)!;
+        var value = kwMatch.group(2)!;
+
+        // Parse the value
+        dynamic parsedValue;
+        if (value == 'True') {
+          parsedValue = true;
+        } else if (value == 'False') {
+          parsedValue = false;
+        } else if (value == 'None') {
+          parsedValue = null;
+        } else if (value.startsWith('"') || value.startsWith("'")) {
+          // String value - remove quotes
+          parsedValue = value.substring(1, value.length - 1);
+        } else {
+          // Try to parse as number
+          parsedValue = double.tryParse(value) ?? value;
+        }
+
+        params[key] = parsedValue;
+      }
+
+      // Only return if we found at least one parameter
+      if (params.isNotEmpty) {
+        debugPrint('FunctionCallParser: Found Python function call: $functionName($params)');
+        return FunctionCallResponse(name: functionName, args: params);
+      }
+    }
+
+    return null;
   }
 
   /// Fast check for balanced braces without full JSON parsing

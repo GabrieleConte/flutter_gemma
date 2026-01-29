@@ -121,4 +121,76 @@ void main() {
       );
     });
   });
+
+  group('Python Function Call Parser', () {
+    test('parses Python function call with keyword arguments', () {
+      const input = '''
+```python
+validate_relationship(relationship_type="FAMILY_MEMBER", is_valid=True, confidence=0.95)
+```
+''';
+
+      final result = FunctionCallParser.parse(input, modelType: ModelType.gemmaIt);
+
+      expect(result, isNotNull);
+      expect(result!.name, equals('validate_relationship'));
+      expect(result.args['relationship_type'], equals('FAMILY_MEMBER'));
+      expect(result.args['is_valid'], equals(true));
+      expect(result.args['confidence'], equals(0.95));
+    });
+
+    test('parses Python function call without markdown block', () {
+      const input = 'validate_relationship(relationship_type="COLLEAGUE", is_valid=False, confidence=0.3)';
+
+      final result = FunctionCallParser.parse(input, modelType: ModelType.gemmaIt);
+
+      expect(result, isNotNull);
+      expect(result!.name, equals('validate_relationship'));
+      expect(result.args['relationship_type'], equals('COLLEAGUE'));
+      expect(result.args['is_valid'], equals(false));
+      expect(result.args['confidence'], equals(0.3));
+    });
+
+    test('parses Python function call with single quotes', () {
+      const input = "validate_relationship(relationship_type='FRIEND', is_valid=True, confidence=0.8)";
+
+      final result = FunctionCallParser.parse(input, modelType: ModelType.gemmaIt);
+
+      expect(result, isNotNull);
+      expect(result!.name, equals('validate_relationship'));
+      expect(result.args['relationship_type'], equals('FRIEND'));
+      expect(result.args['is_valid'], equals(true));
+    });
+
+    test('skips Python built-in functions', () {
+      const input = 'print("hello")';
+
+      final result = FunctionCallParser.parse(input, modelType: ModelType.gemmaIt);
+
+      expect(result, isNull);
+    });
+
+    test('finds function call in mixed content', () {
+      const input = '''
+**Analysis:**
+The semantic similarity score of 82% strongly suggests a close relationship.
+
+**Call to `validate_relationship`:**
+
+```python
+def validate_relationship(relationship_type, is_valid, confidence):
+  pass
+
+validate_relationship(relationship_type="FAMILY_MEMBER", is_valid=True, confidence=0.95)
+```
+''';
+
+      final result = FunctionCallParser.parse(input, modelType: ModelType.gemmaIt);
+
+      expect(result, isNotNull);
+      expect(result!.name, equals('validate_relationship'));
+      expect(result.args['relationship_type'], equals('FAMILY_MEMBER'));
+      expect(result.args['is_valid'], equals(true));
+    });
+  });
 }
