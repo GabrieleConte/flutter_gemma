@@ -6,9 +6,9 @@
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/flutter_gemma)
 
-**The plugin supports not only Gemma, but also other models. Here's the full list of supported models:** [Gemma 2B](https://huggingface.co/google/gemma-2b-it) & [Gemma 7B](https://huggingface.co/google/gemma-7b-it), [Gemma-2 2B](https://huggingface.co/google/gemma-2-2b-it), [Gemma-3 1B](https://huggingface.co/litert-community/Gemma3-1B-IT), [Gemma 3 270M](https://huggingface.co/litert-community/gemma-3-270m-it), [Gemma 3 Nano 2B](https://huggingface.co/google/gemma-3n-E2B-it-litert-preview), [Gemma 3 Nano 4B](https://huggingface.co/google/gemma-3n-E4B-it-litert-preview), [TinyLlama 1.1B](https://huggingface.co/litert-community/TinyLlama-1.1B-Chat-v1.0), [Hammer 2.1 0.5B](https://huggingface.co/litert-community/Hammer2.1-0.5b), [Llama 3.2 1B](https://huggingface.co/litert-community/Llama-3.2-1B-Instruct), Phi-2, Phi-3 , [Phi-4](https://huggingface.co/litert-community/Phi-4-mini-instruct), [DeepSeek](https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B), [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct), Falcon-RW-1B, StableLM-3B.
+**The plugin supports not only Gemma, but also other models. Here's the full list of supported models:** [Gemma3n E2B/E4B](https://huggingface.co/google/gemma-3n-E2B-it-litert-preview), [FastVLM 0.5B](https://huggingface.co/litert-community/FastVLM-0.5B), [Gemma-3 1B](https://huggingface.co/litert-community/Gemma3-1B-IT), [Gemma 3 270M](https://huggingface.co/litert-community/gemma-3-270m-it), [FunctionGemma 270M](https://huggingface.co/sasha-denisov/function-gemma-270M-it), [Qwen3 0.6B](https://huggingface.co/litert-community/Qwen3-0.6B), [Qwen 2.5](https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct), [Phi-4 Mini](https://huggingface.co/litert-community/Phi-4-mini-instruct), [DeepSeek R1](https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B), [SmolLM 135M](https://huggingface.co/litert-community/SmolLM-135M-Instruct).
 
-*Note: Currently, the flutter_gemma plugin supports Gemma-3, Gemma 3 270M, Gemma 3 Nano (with **multimodal vision support**), TinyLlama, Hammer 2.1, Llama 3.2, Phi-4, DeepSeek and Qwen2.5.
+*Note: The flutter_gemma plugin supports Gemma3n (with **multimodal vision support**), FastVLM (vision), Gemma-3, FunctionGemma, Qwen3, Qwen 2.5, Phi-4, DeepSeek R1 and SmolLM. Desktop platforms (macOS, Windows, Linux) require `.litertlm` model format.
 
 [Gemma](https://ai.google.dev/gemma) is a family of lightweight, state-of-the art open models built from the same research and technology used to create the Gemini models
 
@@ -27,8 +27,9 @@ There is an example of using:
 ## Features
 
 - **Local Execution:** Run Gemma models directly on user devices for enhanced privacy and offline functionality.
-- **Platform Support:** Compatible with iOS, Android, and Web platforms.
-- **🖼️ Multimodal Support:** Text + Image input with Gemma 3 Nano vision models 
+- **Platform Support:** Compatible with iOS, Android, Web, macOS, Windows, and Linux platforms.
+- **🖥️ Desktop Support:** Native desktop apps with GPU acceleration via LiteRT-LM (gRPC architecture).
+- **🖼️ Multimodal Support:** Text + Image input with Gemma3n vision models 
 - **🛠️ Function Calling:** Enable your models to call external functions and integrate with other services (supported by select models)
 - **🧠 Thinking Mode:** View the reasoning process of DeepSeek models with <think> blocks 
 - **🛑 Stop Generation:** Cancel text generation mid-process on Android devices 
@@ -69,16 +70,16 @@ The example app offers a curated list of models, each suited for different tasks
 
 | Model Family | Best For | Function Calling | Thinking Mode | Vision | Languages | Size |
 |---|---|:---:|:---:|:---:|---|---|
-| **Gemma 3 Nano** | On-device multimodal chat and image analysis. | ✅ | ❌ | ✅ | Multilingual | 3-6GB |
-| **Phi-4 Mini** | Advanced reasoning and instruction following. | ✅ | ❌ | ❌ | Multilingual | 3.9GB |
-| **DeepSeek R1** | High-performance reasoning and code generation. | ✅ | ✅ | ❌ | Multilingual | 1.7GB |
-| **Qwen 2.5** | Strong multilingual chat and instruction following. | ✅ | ❌ | ❌ | Multilingual | 1.6GB |
-| **Hammer 2.1** | Lightweight action model for tool usage. | ✅ | ❌ | ❌ | Multilingual | 0.5GB |
-| **Gemma 3 1B** | Balanced and efficient text generation. | ✅ | ❌ | ❌ | Multilingual | 0.5GB |
-| **Gemma 3 270M**| Ideal for fine-tuning (LoRA) for specific tasks | ❌ | ❌ | ❌ | Multilingual | 0.3GB |
-| **FunctionGemma 270M**| Specialized for function calling on-device | ✅ | ❌ | ❌ | Multilingual | 0.3GB |
-| **TinyLlama 1.1B**| Extremely compact, general-purpose chat. | ❌ | ❌ | ❌ | English-focused | 1.2GB |
-| **Llama 3.2 1B** | Efficient instruction following | ❌ | ❌ | ❌ | Multilingual | 1.1GB |
+| **Gemma3n** | On-device multimodal chat and image analysis | ✅ | ❌ | ✅ | Multilingual | 3-6GB |
+| **FastVLM 0.5B** | Fast vision-language inference | ❌ | ❌ | ✅ | Multilingual | 0.5GB |
+| **Phi-4 Mini** | Advanced reasoning and instruction following | ✅ | ❌ | ❌ | Multilingual | 3.9GB |
+| **DeepSeek R1** | High-performance reasoning and code generation | ✅ | ✅ | ❌ | Multilingual | 1.7GB |
+| **Qwen3 0.6B** | Compact multilingual chat with function calling | ✅ | ❌ | ❌ | Multilingual | 586MB |
+| **Qwen 2.5** | Strong multilingual chat and instruction following | ✅ | ❌ | ❌ | Multilingual | 0.5-1.6GB |
+| **Gemma 3 1B** | Balanced and efficient text generation | ❌ | ❌ | ❌ | Multilingual | 0.5GB |
+| **Gemma 3 270M** | Ideal for fine-tuning (LoRA) for specific tasks | ❌ | ❌ | ❌ | Multilingual | 0.3GB |
+| **FunctionGemma 270M** | Specialized for function calling on-device | ✅ | ❌ | ❌ | Multilingual | 284MB |
+| **SmolLM 135M** | Ultra-compact, resource-constrained devices | ❌ | ❌ | ❌ | English | 135MB |
 
 ## ModelType Reference
 
@@ -86,13 +87,11 @@ When installing models, you need to specify the correct `ModelType`. Use this ta
 
 | Model Family | ModelType | Examples |
 |--------------|-----------|----------|
-| **Gemma (all variants)** | `ModelType.gemmaIt` | Gemma 2B, Gemma 7B, Gemma-2 2B, Gemma-3 1B, Gemma 3 270M, Gemma 3 Nano E2B/E4B |
-| **DeepSeek** | `ModelType.deepSeek` | DeepSeek R1, DeepSeek-R1-Distill-Qwen-1.5B |
-| **Qwen** | `ModelType.qwen` | Qwen 2.5 1.5B Instruct |
-| **Llama** | `ModelType.llama` | Llama 3.2 1B, TinyLlama 1.1B |
-| **Hammer** | `ModelType.hammer` | Hammer 2.1 0.5B |
+| **Gemma (all variants)** | `ModelType.gemmaIt` | Gemma 3 1B, Gemma 3 270M, Gemma3n E2B/E4B |
+| **DeepSeek** | `ModelType.deepSeek` | DeepSeek R1 |
+| **Qwen** | `ModelType.qwen` | Qwen3 0.6B, Qwen 2.5 1.5B, Qwen 2.5 0.5B |
 | **FunctionGemma** | `ModelType.functionGemma` | FunctionGemma 270M IT |
-| **Phi / Falcon / StableLM** | `ModelType.general` | Phi-2, Phi-3, Phi-4, Falcon-RW-1B, StableLM-3B |
+| **General** | `ModelType.general` | Phi-4 Mini, FastVLM 0.5B, SmolLM 135M |
 
 **Usage Example:**
 ```dart
@@ -125,7 +124,7 @@ await FlutterGemma.installModel(modelType: ModelType.general)
 > **⚠️ Important:** Complete platform-specific setup before using the plugin.
 
 1. **Download Model and optionally LoRA Weights:** Obtain a pre-trained Gemma model (recommended: 2b or 2b-it) [from Kaggle](https://www.kaggle.com/models/google/gemma/frameworks/tfLite/)
-* For **multimodal support**, download [Gemma 3 Nano models](https://huggingface.co/google/gemma-3n-E2B-it-litert-preview) or [Gemma 3 Nano in LitertLM format](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) that support vision input
+* For **multimodal support**, download [Gemma3n models](https://huggingface.co/google/gemma-3n-E2B-it-litert-preview) or [Gemma3n in LitertLM format](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) that support vision input
 * Optionally, [fine-tune a model for your specific use case]( https://www.kaggle.com/code/juanmerinobermejo/llm-pr-fine-tuning-with-gemma-2b?scriptVersionId=169776634)
 * If you have LoRA weights, you can use them to customize the model's behavior without retraining the entire model.
 * [There is an article that described all approaches](https://medium.com/@denisov.shureg/fine-tuning-gemma-with-lora-for-on-device-inference-android-ios-web-with-separate-lora-weights-f05d1db30d86)
@@ -241,6 +240,84 @@ Add to 'AndroidManifest.xml' above tag `</application>`
   window.LlmInference = LlmInference;
   </script>
 ```
+
+**Desktop (macOS, Windows, Linux)**
+
+> **⚠️ Desktop Model Format**
+>
+> Desktop platforms use **LiteRT-LM format only** (`.litertlm` files).
+> MediaPipe `.task` and `.bin` models used on mobile/web are **NOT compatible** with desktop.
+
+Desktop support uses a different architecture — a bundled JVM gRPC server that communicates with your Flutter app.
+
+| Platform | Architecture | GPU Acceleration | Status |
+|----------|-------------|------------------|--------|
+| macOS | arm64 (Apple Silicon) | Metal | ✅ Ready |
+| macOS | x86_64 (Intel) | - | ❌ Not Supported |
+| Windows | x86_64 | DirectX 12 | ✅ Ready |
+| Windows | arm64 | - | ❌ Not Supported |
+| Linux | x86_64 | Vulkan | ✅ Ready |
+| Linux | arm64 | Vulkan | ✅ Ready |
+
+**macOS Setup:**
+
+Add to `macos/Podfile` in `post_install` block:
+
+```ruby
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_macos_build_settings(target)
+  end
+
+  # Add LiteRT-LM setup script to Runner target
+  main_project = installer.aggregate_targets.first.user_project
+  runner_target = main_project.targets.find { |t| t.name == 'Runner' }
+
+  if runner_target
+    phase_name = 'Setup LiteRT-LM Desktop'
+    existing_phase = runner_target.shell_script_build_phases.find { |p| p.name == phase_name }
+
+    unless existing_phase
+      phase = runner_target.new_shell_script_build_phase(phase_name)
+      phase.shell_script = <<-SCRIPT
+PLUGIN_PATH="${PODS_ROOT}/../Flutter/ephemeral/.symlinks/plugins/flutter_gemma/macos"
+if [ -f "$PLUGIN_PATH/scripts/setup_desktop.sh" ]; then
+  sh "$PLUGIN_PATH/scripts/setup_desktop.sh" "$PLUGIN_PATH" "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app"
+fi
+SCRIPT
+      main_project.save
+    end
+  end
+end
+```
+
+Add to `macos/Runner/DebugProfile.entitlements` and `Release.entitlements`:
+
+```xml
+<key>com.apple.security.cs.disable-library-validation</key>
+<true/>
+```
+
+**Windows Setup:**
+
+No additional configuration required. The plugin automatically:
+- Downloads JRE 21 (cached in `%LOCALAPPDATA%\flutter_gemma\jre\`)
+- Extracts native DLLs from the server JAR
+- Starts gRPC server on dynamic port
+
+**Linux Setup:**
+
+No additional configuration required. Build dependencies:
+```bash
+sudo apt install clang cmake ninja-build libgtk-3-dev
+```
+
+For GPU acceleration, ensure Vulkan drivers are installed:
+```bash
+sudo apt install vulkan-tools libvulkan1
+```
+
+📚 **[Full Desktop Documentation →](DESKTOP_SUPPORT.md)**
 
 ## Quick Start
 
@@ -373,18 +450,19 @@ void main() {
 ```
 
 **Configuration Options:**
-- `huggingFaceToken`: Authentication token for gated models (Gemma 3 Nano, EmbeddingGemma)
+- `huggingFaceToken`: Authentication token for gated models (Gemma3n, EmbeddingGemma)
 - `maxDownloadRetries`: Number of retry attempts for failed downloads (default: 10)
-- `enableWebCache`: **(Web only)** Enable persistent caching via Cache API (default: true)
-  - `true`: Models persist across browser restarts (recommended for production)
-  - `false`: Ephemeral mode, models cleared when closing browser (useful for testing/demos)
+- `webStorageMode`: **(Web only)** Storage strategy for model files (default: `cacheApi`)
+  - `WebStorageMode.cacheApi`: Cache API with Blob URLs (for models <2GB)
+  - `WebStorageMode.streaming`: OPFS streaming (for large models >2GB like E4B, 7B)
+  - `WebStorageMode.none`: No caching (ephemeral mode for testing)
 
 **Example:**
 ```dart
 FlutterGemma.initialize(
   huggingFaceToken: const String.fromEnvironment('HUGGINGFACE_TOKEN'),
   maxDownloadRetries: 10,
-  enableWebCache: false,  // Disable persistent cache (web only)
+  webStorageMode: WebStorageMode.streaming,  // For large models (>2GB)
 );
 ```
 
@@ -468,13 +546,13 @@ await FlutterGemma.installModel(
 ### Which Models Require Authentication?
 
 **Common gated models:**
-- ✅ **Gemma 3 Nano** (E2B, E4B) - `google/` repos are gated
+- ✅ **Gemma3n** (E2B, E4B) - `google/` repos are gated
 - ✅ **Gemma 3 1B** - `litert-community/` requires access
 - ✅ **Gemma 3 270M** - `litert-community/` requires access
 - ✅ **EmbeddingGemma** - `litert-community/` requires access
 
 **Public models (no auth needed):**
-- ❌ **DeepSeek, Qwen2.5, TinyLlama** - Public repos
+- ❌ **DeepSeek, Qwen3, Qwen 2.5, SmolLM, Phi-4, FastVLM** - Public repos
 
 **Get your token:** https://huggingface.co/settings/tokens
 
@@ -651,8 +729,9 @@ await FlutterGemma.installModel(
 ```
 
 **App Size Impact:**
+- SmolLM 135M: ~135MB
 - Gemma 3 270M: ~300MB
-- TinyLlama 1.1B: ~1.2GB
+- Qwen3 0.6B: ~586MB
 - Consider hosting large models for download instead
 
 ### FileSource - External Files (Mobile Only)
@@ -1006,6 +1085,18 @@ final inferenceModel = await FlutterGemmaPlugin.instance.createModel(
   loraRanks: [4, 8], // Optional, LoRA rank configuration for fine-tuned models
 );
 ```
+
+**PreferredBackend Options:**
+
+| Backend | Android | iOS | Web | Desktop |
+|---------|---------|-----|-----|---------|
+| `cpu` | ✅ | ✅ | ❌ | ✅ |
+| `gpu` | ✅ | ✅ | ✅ (required) | ✅ |
+| `npu` | ✅ (.litertlm) | ❌ | ❌ | ❌ |
+
+- **NPU**: Qualcomm AI Engine, MediaTek NeuroPilot, Google Tensor. Up to 25x faster than CPU.
+- **Web**: GPU only (MediaPipe limitation). CPU models will fail to initialize.
+- **Desktop**: GPU uses Metal (macOS), DirectX 12 (Windows), Vulkan (Linux).
 
 6.**Using Sessions for Single Inferences:**
 
@@ -1774,7 +1865,7 @@ chat.generateChatResponseAsync().listen((response) {
     // Use response.token to update your UI incrementally
     
   } else if (response is FunctionCallResponse) {
-    // Model wants to call a function (Gemma 3 Nano, DeepSeek, Qwen2.5)
+    // Model wants to call a function (Gemma3n, DeepSeek, Qwen2.5)
     print('Function: ${response.name}');
     print('Arguments: ${response.args}');
     
@@ -1798,24 +1889,22 @@ chat.generateChatResponseAsync().listen((response) {
 
 ## 🎯 Supported Models
 
-### Text-Only Models
-- [Gemma 2B](https://huggingface.co/google/gemma-2b-it) & [Gemma 7B](https://huggingface.co/google/gemma-7b-it)
-- [Gemma-2 2B](https://huggingface.co/google/gemma-2-2b-it)
-- [Gemma-3 1B](https://huggingface.co/litert-community/Gemma3-1B-IT)
-- [Gemma 3 270M](https://huggingface.co/litert-community/gemma-3-270m-it) - Ultra-compact model
-- [FunctionGemma 270M](https://huggingface.co/google/functiongemma-270m-it) - Specialized function calling model
-- [TinyLlama 1.1B](https://huggingface.co/litert-community/TinyLlama-1.1B-Chat-v1.0) - Lightweight chat model
-- [Hammer 2.1 0.5B](https://huggingface.co/litert-community/Hammer2.1-0.5b) - Action model with function calling
-- [Llama 3.2 1B](https://huggingface.co/litert-community/Llama-3.2-1B-Instruct) - Instruction-tuned model
-- [Phi-4](https://huggingface.co/litert-community/Phi-4-mini-instruct)
-- [DeepSeek](https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B)
-- Phi-2, Phi-3, Falcon-RW-1B, StableLM-3B
+### Platform Support
 
-### 🖼️ Multimodal Models (Vision + Text)
-- [Gemma 3 Nano E2B](https://huggingface.co/google/gemma-3n-E2B-it-litert-preview) - 2B parameters with vision support
-- [Gemma 3 Nano E4B](https://huggingface.co/google/gemma-3n-E4B-it-litert-preview) - 4B parameters with vision support
-- [Gemma 3 Nano E2B LitertLM](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) - 2B parameters with vision support
-- [Gemma 3 Nano E4B LitertLM](https://huggingface.co/google/gemma-3n-E4B-it-litert-lm) - 4B parameters with vision support
+| Model | Size | Desktop | Mobile | Web |
+|-------|------|:-------:|:------:|:---:|
+| [Gemma3n E2B](https://huggingface.co/google/gemma-3n-E2B-it-litert-preview) | 3.1GB | ✅ | ✅ | ✅ |
+| [Gemma3n E4B](https://huggingface.co/google/gemma-3n-E4B-it-litert-preview) | 6.5GB | ✅ | ✅ | ✅ |
+| [FastVLM 0.5B](https://huggingface.co/litert-community/FastVLM-0.5B) | 0.5GB | ✅ | ❌ | ❌ |
+| [Gemma-3 1B](https://huggingface.co/litert-community/Gemma3-1B-IT) | 0.5GB | ✅ | ✅ | ✅ |
+| [Gemma 3 270M](https://huggingface.co/litert-community/gemma-3-270m-it) | 0.3GB | ✅ | ✅ | ✅ |
+| [FunctionGemma 270M](https://huggingface.co/sasha-denisov/function-gemma-270M-it) | 284MB | ✅ | ✅ | ❌ |
+| [Qwen3 0.6B](https://huggingface.co/litert-community/Qwen3-0.6B) | 586MB | ✅ | ✅ | ✅ |
+| [Qwen 2.5 1.5B](https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct) | 1.6GB | ✅ | ✅ | ❌ |
+| [Qwen 2.5 0.5B](https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct) | 0.5GB | ❌ | ✅ | ❌ |
+| [SmolLM 135M](https://huggingface.co/litert-community/SmolLM-135M-Instruct) | 135MB | ❌ | ✅ | ❌ |
+| [Phi-4 Mini](https://huggingface.co/litert-community/Phi-4-mini-instruct) | 3.9GB | ✅ | ✅ | ✅ |
+| [DeepSeek R1](https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B) | 1.7GB | ❌ | ✅ | ❌ |
 
 ### 📊 Text Embedding Models
 
@@ -1846,19 +1935,17 @@ All embedding models generate **768-dimensional vectors**. The numbers in names 
 Function calling is currently supported by the following models:
 
 ### ✅ Models with Function Calling Support
-- **Gemma 3 Nano** models (E2B, E4B) - Full function calling support
-- **FunctionGemma 270M** - Google's specialized function calling model (Android/iOS only)
-- **Hammer 2.1 0.5B** - Action model with strong function calling capabilities
-- **DeepSeek** models - Function calling + thinking mode support
-- **Qwen** models - Full function calling support
+- **Gemma3n** models (E2B, E4B) - Full function calling support
+- **FunctionGemma 270M** - Google's specialized function calling model
+- **DeepSeek R1** - Function calling + thinking mode support
+- **Qwen** models (0.5B, 0.6B, 1.5B) - Full function calling support
 - **Phi-4 Mini** - Advanced reasoning with function calling support
 
 ### ❌ Models WITHOUT Function Calling Support
-- **Gemma 3 1B** models - Text generation only
+- **Gemma 3 1B** - Text generation only
 - **Gemma 3 270M** - Text generation only
-- **TinyLlama 1.1B** - Text generation only
-- **Llama 3.2 1B** - Text generation only
-- **Phi-2, Phi-3** models - Text generation only
+- **SmolLM 135M** - Text generation only
+- **FastVLM 0.5B** - Vision model, no function calling
 
 **Important Notes:**
 - When using unsupported models with tools, the plugin will log a warning and ignore the tools
@@ -1872,7 +1959,7 @@ Function calling is currently supported by the following models:
 | Feature | Android | iOS | Web | Notes |
 |---------|---------|-----|-----|-------|
 | **Text Generation** | ✅ Full | ✅ Full | ✅ Full | All models supported |
-| **Image Input (Multimodal)** | ✅ Full | ✅ Full | ✅ Full | Gemma 3 Nano models |
+| **Image Input (Multimodal)** | ✅ Full | ✅ Full | ✅ Full | Gemma3n models |
 | **Function Calling** | ✅ Full | ✅ Full | ✅ Full | Select models only |
 | **Thinking Mode** | ✅ Full | ✅ Full | ✅ Full | DeepSeek models |
 | **Stop Generation** | ✅ Android only | ❌ Not supported | ❌ Not supported | Cancel mid-process |
@@ -1890,7 +1977,7 @@ Function calling is currently supported by the following models:
 ### Web Platform Specifics
 
 #### Authentication
-- **Required for gated models:** Gemma 3 Nano, Gemma 3 1B/270M, EmbeddingGemma
+- **Required for gated models:** Gemma3n, Gemma 3 1B/270M, EmbeddingGemma
 - **Configuration:** Use `FlutterGemma.initialize(huggingFaceToken: '...')` or pass token per-download
 - **Storage:** Tokens stored in browser memory (not localStorage)
 
@@ -1900,43 +1987,39 @@ Function calling is currently supported by the following models:
 - **FileSource:** Only works with HTTP/HTTPS URLs or `assets/` paths
 - **Local file paths:** ❌ Not supported (browser security restriction)
 
-#### Persistent Caching (NEW in 0.11.10)
+#### Web Storage Modes (v0.12.1+)
 
-**Two Cache Modes:**
+**Three Storage Modes:**
 
-**1. Persistent Mode (default, `enableWebCache: true`):**
-- Downloaded models persist across browser restarts
-- Uses browser Cache API (up to 50% of disk space)
-- Works for all sources (public URLs and HuggingFace gated models)
-- Smart management: 30-day automatic cleanup
-- Zero configuration: Automatically enabled
+**1. Cache API Mode (default, `WebStorageMode.cacheApi`):**
+- Uses browser Cache API with Blob URLs
+- Models persist across browser restarts
+- Best for models <2GB
 
-**2. Ephemeral Mode (`enableWebCache: false`):**
-- Models stored in memory only (InMemoryRepository)
-- Cleared when browser tab/window closes
-- Faster development/testing workflow
-- No persistent storage used
-- Useful for demos, temporary testing, privacy-sensitive scenarios
+**2. Streaming Mode (`WebStorageMode.streaming`):**
+- Uses OPFS with ReadableStream
+- Bypasses browser 2GB ArrayBuffer limit
+- Required for large models (E4B 4GB+, 7B, 27B)
+- Requires Chrome 86+, Edge 86+, Safari 15.2+
+
+**3. Ephemeral Mode (`WebStorageMode.none`):**
+- Models stored in memory only
+- Cleared when browser closes
+- For testing/demos
 
 ```dart
-// Enable persistent caching (default)
-FlutterGemma.initialize(enableWebCache: true);
+// Default: Cache API for small models
+FlutterGemma.initialize(webStorageMode: WebStorageMode.cacheApi);
 
-// Use ephemeral mode (no persistence)
-FlutterGemma.initialize(enableWebCache: false);
+// Streaming for large models (>2GB)
+FlutterGemma.initialize(webStorageMode: WebStorageMode.streaming);
 
-// Check cache statistics (persistent mode only)
-final stats = await FlutterGemma.instance.modelManager.getCacheStats();
-print('Cached models: ${stats['cachedUrls']}');
-print('Storage used: ${stats['storageUsage']} bytes');
-
-// Clear cache if needed (persistent mode only)
-await FlutterGemma.instance.modelManager.clearCache();
+// Check if streaming is supported
+final supported = await FlutterGemma.isStreamingSupported();
 ```
 
 #### Backend Support
-- **GPU only:** Web platform requires GPU backend (MediaPipe limitation)
-- **CPU models:** ❌ Will fail to initialize on web
+- **GPU only:** See [PreferredBackend Options](#preferredbackend-options) table above
 
 #### CORS Configuration
 - **Required for custom servers:** Enable CORS headers on your model hosting server
@@ -1949,7 +2032,7 @@ await FlutterGemma.instance.modelManager.clearCache();
 - **Best models for web:**
   - Gemma 3 270M (300MB)
   - Gemma 3 1B (500MB-1GB)
-  - Gemma 3 Nano E2B (3GB) - requires 6GB+ device RAM
+  - Gemma3n E2B (3GB) - requires 6GB+ device RAM
 
 #### Browser Cache Storage Limits
 
@@ -1977,9 +2060,9 @@ The full and complete example you can find in `example` folder
 ## **Important Considerations**
 
 * **Model Size:** Larger models (such as 7b and 7b-it) might be too resource-intensive for on-device inference.
-* **Function Calling Support:** Gemma 3 Nano and DeepSeek models support function calling. Other models will ignore tools and show a warning.
+* **Function Calling Support:** Gemma3n and DeepSeek models support function calling. Other models will ignore tools and show a warning.
 * **Thinking Mode:** Only DeepSeek models support thinking mode. Enable with `isThinking: true` and `modelType: ModelType.deepSeek`.
-* **Multimodal Models:** Gemma 3 Nano models with vision support require more memory and are recommended for devices with 8GB+ RAM.
+* **Multimodal Models:** Gemma3n models with vision support require more memory and are recommended for devices with 8GB+ RAM.
 * **iOS Memory Requirements:** Large models require memory entitlements in `Runner.entitlements` and minimum iOS 16.0.
 * **LoRA Weights:** They provide efficient customization without the need for full model retraining.
 * **Development vs. Production:** For production apps, do not embed the model or LoRA weights within your assets. Instead, load them once and store them securely on the device or via a network drive.
@@ -1989,7 +2072,7 @@ The full and complete example you can find in `example` folder
 ## **🛟 Troubleshooting**
 
 **Multimodal Issues:**
-- Ensure you're using a multimodal model (Gemma 3 Nano E2B/E4B)
+- Ensure you're using a multimodal model (Gemma3n E2B/E4B)
 - Set `supportImage: true` when creating model and chat
 - Check device memory - multimodal models require more RAM
 

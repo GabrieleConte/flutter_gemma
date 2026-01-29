@@ -29,7 +29,7 @@ android {
         namespace 'dev.flutterberlin.flutter_gemma'
     }
 
-    compileSdk 34
+    compileSdk 36
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
@@ -47,7 +47,7 @@ android {
 
     defaultConfig {
         minSdkVersion 24
-        targetSdk = 34
+        targetSdk = 36
         consumerProguardFiles 'consumer-proguard-rules.pro'
     }
 
@@ -72,6 +72,9 @@ dependencies {
     implementation 'com.google.ai.edge.localagents:localagents-rag:0.3.0'
     implementation 'com.google.guava:guava:33.3.1-android'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0'
+
+    // LiteRT-LM Engine for .litertlm model files
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha01'
 
     // PDF text extraction
     implementation 'com.tom-roush:pdfbox-android:2.0.27.0'

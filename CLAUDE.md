@@ -5,15 +5,15 @@
 # 🚨 CRITICAL RULES - READ FIRST EVERY TIME 🚨
 
 ## Rule 1: NEVER EDIT CODE WITHOUT EXPLICIT APPROVAL ⛔
-- ❌ **FORBIDDEN**: Using Edit/Write tools without user saying "да"/"давай"/"правь"/"ok"
+- ❌ **FORBIDDEN**: Using Edit/Write tools without user saying "yes"/"go ahead"/"ok"
 - ✅ **REQUIRED**: Always propose changes first, show diff/code, **WAIT FOR APPROVAL**
 - ⚠️ **WARNING**: If you edit without approval, user will be VERY upset and you will break trust
 
 **Correct workflow:**
 1. 📝 Describe WHAT you want to change
 2. 📝 Show HOW the code will look (full diff or code snippet)
-3. ⏸️ **STOP AND WAIT** - Ask "ПРАВИТЬ?" or "Могу я применить это?"
-4. ✅ Only after user says "да"/"давай"/"правь" → apply changes
+3. ⏸️ **STOP AND WAIT** - Ask "APPLY?" or "Can I apply this?"
+4. ✅ Only after user says "yes"/"go ahead"/"ok" → apply changes
 
 ## Rule 2: NEVER USE `git checkout` ⛔
 - ❌ **FORBIDDEN**: `git checkout` command for reverting files
@@ -99,9 +99,19 @@ final spec = InferenceModelSpec(
 
 **Runtime accepts configuration each time:**
 - `maxTokens` - Context size (default: 1024)
-- `preferredBackend` - CPU/GPU preference
+- `preferredBackend` - Hardware backend (see PreferredBackend below)
 - `supportImage` - Multimodal support
 - `maxNumImages` - Image limits
+
+**PreferredBackend enum:**
+| Value | Android | iOS | Web | Desktop |
+|-------|---------|-----|-----|---------|
+| `cpu` | ✅ | ✅ | ❌ | ✅ |
+| `gpu` | ✅ | ✅ | ✅ (required) | ✅ |
+| `npu` | ✅ (.litertlm) | ❌ | ❌ | ❌ |
+
+> - **NPU**: Qualcomm, MediaTek, Google Tensor. Up to 25x faster than CPU.
+> - **Web**: GPU only (MediaPipe limitation).
 
 **Usage:**
 ```dart
@@ -515,6 +525,74 @@ use_frameworks! :linkage => :static
 <uses-native-library android:name="libOpenCL-pixel.so" android:required="false"/>
 ```
 
+#### Android LiteRT-LM Engine (v0.12.x+)
+
+Android now supports **dual inference engines** - MediaPipe and LiteRT-LM - with automatic selection based on file extension.
+
+**Engine Selection:**
+| File Extension | Engine | Android | Desktop | Web |
+|----------------|--------|---------|---------|-----|
+| `.task`, `.bin`, `.tflite` | MediaPipe | Yes | No | Yes |
+| `.litertlm` | LiteRT-LM | Yes | Yes | No |
+
+**Architecture:**
+```
+android/src/main/kotlin/dev/flutterberlin/flutter_gemma/
+├── FlutterGemmaPlugin.kt          # Plugin entry point
+├── PlatformService.g.kt           # Pigeon-generated interface
+└── engines/                       # Engine abstraction layer
+    ├── InferenceEngine.kt         # Strategy interface
+    ├── InferenceSession.kt        # Session interface
+    ├── EngineConfig.kt            # Configuration + SessionConfig + FlowFactory
+    ├── EngineFactory.kt           # Factory for engine creation
+    ├── mediapipe/
+    │   ├── MediaPipeEngine.kt     # MediaPipe adapter (wraps LlmInference)
+    │   └── MediaPipeSession.kt    # MediaPipe session adapter
+    └── litertlm/
+        ├── LiteRtLmEngine.kt      # LiteRT-LM implementation
+        └── LiteRtLmSession.kt     # LiteRT-LM session with chunk buffering
+```
+
+**Key Design Decisions:**
+
+1. **Strategy Pattern**: `InferenceEngine` interface allows interchangeable engine implementations
+2. **Adapter Pattern**: `MediaPipeEngine` wraps existing MediaPipe code without modifications
+3. **Chunk Buffering**: LiteRT-LM uses `sendMessage()` not `addQueryChunk()`, so `LiteRtLmSession` buffers chunks in `StringBuilder` and sends complete message on `generateResponse()`
+
+**LiteRT-LM Limitations:**
+
+⚠️ **Token Counting**: LiteRT-LM SDK does not expose tokenizer API. The implementation uses an estimate of ~4 characters per token with a warning log:
+```kotlin
+Log.w(TAG, "sizeInTokens: LiteRT-LM does not support token counting. " +
+        "Using estimate (~4 chars/token): $estimate tokens for ${prompt.length} chars. " +
+        "This may be inaccurate for non-English text.")
+```
+
+⚠️ **Cancellation**: `cancelGeneration()` is not yet supported by LiteRT-LM SDK 0.9.x
+
+**LiteRT-LM Behavioral Differences:**
+
+1. **Chunk Buffering**: Unlike MediaPipe which processes `addQueryChunk()` directly, LiteRT-LM buffers chunks in `StringBuilder` and sends complete message on `generateResponse()`.
+2. **Thread-Safe Accumulation**: Uses `synchronized(promptLock)` for safe concurrent chunk additions.
+3. **Cache Support**: Engine configured with `cacheDir` for faster reloads (~10s cold → ~1-2s cached).
+
+**Dependency (build.gradle):**
+```gradle
+implementation 'com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha01'
+```
+
+**Usage (Dart - no changes required):**
+```dart
+// Engine is automatically selected based on file extension
+await FlutterGemma.installModel(modelType: ModelType.gemmaIt)
+  .fromNetwork('https://example.com/model.litertlm')  // → LiteRtLmEngine
+  .install();
+
+await FlutterGemma.installModel(modelType: ModelType.gemmaIt)
+  .fromNetwork('https://example.com/model.task')      // → MediaPipeEngine
+  .install();
+```
+
 #### Web Configuration
 ```html
 <!-- index.html -->
@@ -524,6 +602,69 @@ window.FilesetResolver = FilesetResolver;
 window.LlmInference = LlmInference;
 </script>
 ```
+
+#### macOS/Desktop Configuration (v0.12.0+)
+
+Desktop platforms (macOS, Windows, Linux) use LiteRT-LM via Kotlin/JVM with gRPC communication.
+
+**Architecture:**
+- **Dart client** → gRPC → **Kotlin/JVM server** → LiteRT-LM native libraries
+- JRE and server JAR are bundled automatically during build
+
+**Automatic Setup (recommended):**
+
+The build script automatically:
+1. Downloads Temurin JRE 21 (cached in `~/.cache/flutter_gemma/jre/`)
+2. Copies JAR from `litertlm-server/build/libs/`
+3. Signs binaries for development
+4. Removes quarantine attributes
+
+Just run:
+```bash
+flutter run -d macos
+```
+
+**Manual Setup (for development):**
+
+1. Build the server:
+```bash
+cd litertlm-server
+./gradlew shadowJar
+```
+
+2. The build phase copies:
+   - JAR → `Contents/Resources/litertlm-server.jar`
+   - JRE → `Contents/Resources/jre/`
+
+**Model Requirements:**
+
+Desktop uses `.litertlm` format (not `.task`):
+```dart
+// Use models with .litertlm extension
+gemma3_1B_litertlm  // 529MB
+qwen3_0_6B          // 586MB (no auth required)
+```
+
+**Entitlements (DebugProfile.entitlements):**
+```xml
+<key>com.apple.security.cs.allow-jit</key>
+<true/>
+<key>com.apple.security.network.client</key>
+<true/>
+<key>com.apple.security.network.server</key>
+<true/>
+<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+<true/>
+<key>com.apple.developer.kernel.increased-memory-limit</key>
+<true/>
+```
+
+**Production Distribution:**
+
+For App Store/notarized distribution:
+1. Sign JRE with Apple Developer ID
+2. Sign extracted native libraries from JAR
+3. Notarize the complete app bundle
 
 ### Memory Management
 
@@ -1017,7 +1158,42 @@ flutter_gemma/
 └── CLAUDE.md              # This file
 ```
 
-## Recent Updates (2025-11-16)
+## Recent Updates (2026-01-18)
+
+### ✅ Android LiteRT-LM Engine (v0.12.x+)
+- **Dual Engine Support** - MediaPipe and LiteRT-LM on Android
+- **Automatic Selection** - Engine chosen by file extension (`.litertlm` → LiteRT-LM, `.task/.bin` → MediaPipe)
+- **Strategy Pattern** - `InferenceEngine` interface with interchangeable implementations
+- **Adapter Pattern** - `MediaPipeEngine` wraps existing code without modifications
+- **Chunk Buffering** - LiteRT-LM session buffers `addQueryChunk()` calls for `sendMessage()` API
+- **Token Estimation** - ~4 chars/token with warning log (LiteRT-LM lacks tokenizer API)
+- **Zero Flutter API Changes** - Transparent to Dart layer
+
+**Key Files:**
+- `android/.../engines/InferenceEngine.kt` - Strategy interface
+- `android/.../engines/EngineFactory.kt` - Factory for engine creation
+- `android/.../engines/mediapipe/` - MediaPipe adapter
+- `android/.../engines/litertlm/` - LiteRT-LM implementation
+
+**Dependency:**
+```gradle
+implementation 'com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha01'
+```
+
+### ✅ Desktop Platform Support (v0.12.0+)
+- **macOS, Windows, Linux** support via LiteRT-LM JVM
+- **gRPC architecture** - Dart client communicates with Kotlin/JVM server
+- **Bundled JRE** - Temurin 21 automatically downloaded and bundled
+- **Automatic setup** - Xcode build phase handles JRE/JAR bundling
+- **Code signing** - Development signing handled automatically
+- **New models added** - Qwen3 0.6B, Gemma 3 1B LiteRT-LM format
+
+**Key Files:**
+- `lib/desktop/flutter_gemma_desktop.dart` - Dart plugin implementation
+- `lib/desktop/grpc_client.dart` - gRPC client
+- `lib/desktop/server_process_manager.dart` - JVM process lifecycle
+- `litertlm-server/` - Kotlin gRPC server
+- `example/macos/scripts/setup_desktop.sh` - Build automation
 
 ### ✅ Web Cache Management Fix (v0.11.10+)
 - **CRITICAL FIX** - Hot restart with enableCache=false no longer crashes

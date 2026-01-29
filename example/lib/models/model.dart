@@ -1,7 +1,17 @@
+// ignore_for_file: unused_element_parameter
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/core/model.dart';
 import 'package:flutter_gemma/pigeon.g.dart';
 import 'base_model.dart';
+
+// Platform detection that's safe for web
+bool get _isDesktop {
+  if (kIsWeb) return false;
+  return defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
+}
 
 enum Model implements InferenceModelInterface {
   // === GEMMA MODELS (Top Priority) ===
@@ -12,6 +22,8 @@ enum Model implements InferenceModelInterface {
         'https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task',
     webUrl:
         'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4-Web.litertlm',
+    desktopUrl:
+        'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm',
     filename: 'gemma-3n-E2B-it-int4.task',
     displayName: 'Gemma 3 Nano E2B IT',
     size: '3.1GB',
@@ -32,6 +44,8 @@ enum Model implements InferenceModelInterface {
         'https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task',
     webUrl:
         'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4-Web.litertlm',
+    desktopUrl:
+        'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm',
     filename: 'gemma-3n-E4B-it-int4.task',
     displayName: 'Gemma 3 Nano E4B IT',
     size: '6.5GB',
@@ -54,6 +68,8 @@ enum Model implements InferenceModelInterface {
         'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.task',
     webUrl:
         'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4-web.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm',
     filename: 'gemma3-1b-it-int4.task',
     displayName: 'Gemma 3 1B IT',
     size: '0.5GB',
@@ -73,6 +89,8 @@ enum Model implements InferenceModelInterface {
         'https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task',
     webUrl:
         'https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8-web.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.litertlm',
     filename: 'gemma3-270m-it-q8.task',
     displayName: 'Gemma 3 270M IT',
     size: '0.3GB',
@@ -85,6 +103,48 @@ enum Model implements InferenceModelInterface {
     topP: 0.95,
     maxTokens: 1024,
     supportsFunctionCalls: false,
+  ),
+
+  // === LiteRT-LM ENGINE MODELS (for testing parity with MediaPipe) ===
+
+  // Gemma 3 Nano E2B LiteRT-LM (same model, different engine)
+  gemma3n_2B_litertlm(
+    baseUrl:
+        'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4.litertlm',
+    filename: 'gemma-3n-E2B-it-int4.litertlm',
+    displayName: 'Gemma 3 Nano E2B IT (LiteRT-LM)',
+    size: '3.1GB',
+    licenseUrl: 'https://huggingface.co/google/gemma-3n-E2B-it-litert-lm',
+    needsAuth: true,
+    preferredBackend: PreferredBackend.gpu,
+    modelType: ModelType.gemmaIt,
+    temperature: 1.0,
+    topK: 64,
+    topP: 0.95,
+    supportImage: true,
+    maxTokens: 4096,
+    maxNumImages: 1,
+    supportsFunctionCalls: true,
+  ),
+
+  // Gemma 3 Nano E4B LiteRT-LM (same model, different engine)
+  gemma3n_4B_litertlm(
+    baseUrl:
+        'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm/resolve/main/gemma-3n-E4B-it-int4.litertlm',
+    filename: 'gemma-3n-E4B-it-int4.litertlm',
+    displayName: 'Gemma 3 Nano E4B IT (LiteRT-LM)',
+    size: '6.5GB',
+    licenseUrl: 'https://huggingface.co/google/gemma-3n-E4B-it-litert-lm',
+    needsAuth: true,
+    preferredBackend: PreferredBackend.gpu,
+    modelType: ModelType.gemmaIt,
+    temperature: 1.0,
+    topK: 64,
+    topP: 0.95,
+    supportImage: true,
+    maxTokens: 4096,
+    maxNumImages: 1,
+    supportsFunctionCalls: true,
   ),
 
   // Local Gemma models (for testing)
@@ -139,6 +199,26 @@ enum Model implements InferenceModelInterface {
 
   // === OTHER MODELS ===
 
+  // Qwen3 0.6B (LiteRT-LM format for web/desktop)
+  qwen3_0_6B(
+    baseUrl:
+        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+    filename: 'Qwen3-0.6B.litertlm',
+    displayName: 'Qwen3 0.6B',
+    size: '586MB',
+    licenseUrl: 'https://huggingface.co/litert-community/Qwen3-0.6B',
+    needsAuth: false,
+    preferredBackend: PreferredBackend.cpu,
+    modelType: ModelType.qwen,
+    temperature: 0.7,
+    topK: 40,
+    topP: 0.95,
+    maxTokens: 4096,
+    supportsFunctionCalls: true,
+  ),
+
   deepseek(
     baseUrl:
         'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task',
@@ -156,10 +236,12 @@ enum Model implements InferenceModelInterface {
     isThinking: true,
   ),
 
-  // Models from JSON - Qwen2.5 1.5B Instruct q8
-  qwen25_1_5B_InstructCpu(
+  // Qwen2.5 1.5B Instruct
+  qwen25_1_5B_Instruct(
     baseUrl:
         'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    desktopUrl:
+        'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     filename: 'Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
     displayName: 'Qwen 2.5 1.5B Instruct',
     size: '1.6GB',
@@ -174,17 +256,35 @@ enum Model implements InferenceModelInterface {
     supportsFunctionCalls: true,
   ),
 
-  // TinyLlama 1.1B Chat
-  tinyLlama_1_1B(
+  // Qwen2.5 0.5B Instruct (mobile only - no litertlm)
+  qwen25_0_5B_Instruct(
     baseUrl:
-        'https://huggingface.co/litert-community/TinyLlama-1.1B-Chat-v1.0/resolve/main/TinyLlama-1.1B-Chat-v1.0_multi-prefill-seq_q8_ekv1280.task',
-    filename: 'TinyLlama-1.1B-Chat-v1.0_multi-prefill-seq_q8_ekv1280.task',
-    displayName: 'TinyLlama 1.1B Chat',
-    size: '1.2GB',
-    licenseUrl: 'https://huggingface.co/litert-community/TinyLlama-1.1B-Chat-v1.0',
+        'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    filename: 'Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    displayName: 'Qwen 2.5 0.5B Instruct',
+    size: '0.5GB',
+    licenseUrl: 'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct',
     needsAuth: false,
     preferredBackend: PreferredBackend.cpu,
-    modelType: ModelType.llama,
+    modelType: ModelType.qwen,
+    temperature: 1.0,
+    topK: 40,
+    topP: 0.95,
+    maxTokens: 1024,
+    supportsFunctionCalls: true,
+  ),
+
+  // SmolLM 135M Instruct (Ultra-small, mobile only)
+  smolLM_135M(
+    baseUrl:
+        'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    filename: 'SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
+    displayName: 'SmolLM 135M Instruct',
+    size: '135MB',
+    licenseUrl: 'https://huggingface.co/litert-community/SmolLM-135M-Instruct',
+    needsAuth: false,
+    preferredBackend: PreferredBackend.cpu,
+    modelType: ModelType.general,
     temperature: 0.7,
     topK: 40,
     topP: 0.9,
@@ -192,41 +292,26 @@ enum Model implements InferenceModelInterface {
     supportsFunctionCalls: false,
   ),
 
-  // Hammer 2.1 0.5B (Action Model with strong function calling)
-  hammer2_1_0_5B(
+  // FastVLM 0.5B (Vision-Language Model, desktop only - litertlm)
+  fastVLM_0_5B(
     baseUrl:
-        'https://huggingface.co/litert-community/Hammer2.1-0.5b/resolve/main/hammer2p1_05b_.task',
-    filename: 'hammer2p1_05b_.task',
-    displayName: 'Hammer 2.1 0.5B Action Model',
+        'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm',
+    desktopUrl:
+        'https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm',
+    filename: 'FastVLM-0.5B.litertlm',
+    displayName: 'FastVLM 0.5B (Vision)',
     size: '0.5GB',
-    licenseUrl: 'https://huggingface.co/litert-community/Hammer2.1-0.5b',
-    needsAuth: true,
-    preferredBackend: PreferredBackend.cpu,
-    modelType: ModelType.hammer,
-    temperature: 0.3,
+    licenseUrl: 'https://huggingface.co/litert-community/FastVLM-0.5B',
+    needsAuth: false,
+    preferredBackend: PreferredBackend.gpu,
+    modelType: ModelType.general,
+    temperature: 0.7,
     topK: 40,
-    topP: 0.8,
-    maxTokens: 1024,
-    supportsFunctionCalls: true,
-  ),
-
-  // Llama 3.2 1B Instruct
-  llama32_1B(
-    baseUrl:
-        'https://huggingface.co/litert-community/Llama-3.2-1B-Instruct/resolve/main/Llama-3.2-1B-Instruct_seq128_q8_ekv1280.tflite',
-    filename: 'Llama-3.2-1B-Instruct_seq128_q8_ekv1280.tflite',
-    displayName: 'Llama 3.2 1B Instruct',
-    size: '1.1GB',
-    licenseUrl: 'https://huggingface.co/litert-community/Llama-3.2-1B-Instruct',
-    needsAuth: true,
-    preferredBackend: PreferredBackend.cpu,
-    modelType: ModelType.llama,
-    temperature: 0.6,
-    topK: 40,
-    topP: 0.9,
-    maxTokens: 1024,
+    topP: 0.95,
+    maxTokens: 2048,
+    supportImage: true,
+    maxNumImages: 1,
     supportsFunctionCalls: false,
-    fileType: ModelFileType.binary,
   ),
 
   // Phi-4 Mini Instruct
@@ -234,6 +319,8 @@ enum Model implements InferenceModelInterface {
     baseUrl:
         'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task',
     webUrl:
+        'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
+    desktopUrl:
         'https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     filename: 'Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task',
     displayName: 'Phi-4 Mini Instruct',
@@ -255,6 +342,8 @@ enum Model implements InferenceModelInterface {
   functionGemma_270M(
     baseUrl:
         'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.task',
+    desktopUrl:
+        'https://huggingface.co/sasha-denisov/function-gemma-270M-it/resolve/main/functiongemma-270M-it.litertlm',
     filename: 'functiongemma-270M-it.task',
     displayName: 'FunctionGemma 270M IT',
     size: '284MB',
@@ -271,8 +360,8 @@ enum Model implements InferenceModelInterface {
 
   // FunctionGemma 270M IT (Local asset)
   functionGemma_270M_local(
-    baseUrl: 'assets/models/functiongemma-flutter-1.litertlm',
-    filename: 'functiongemma-flutter-1.litertlm',
+    baseUrl: 'assets/models/functiongemma-270M-it.litertlm',
+    filename: 'functiongemma-270M-it.litertlm',
     displayName: 'FunctionGemma 270M IT (Local)',
     size: '284MB',
     licenseUrl: '',
@@ -308,6 +397,7 @@ enum Model implements InferenceModelInterface {
   // Define fields for the enum
   final String baseUrl;
   final String? webUrl;
+  final String? desktopUrl;
 
   @override
   final String filename;
@@ -342,19 +432,30 @@ enum Model implements InferenceModelInterface {
   final bool isThinking;
   final ModelFileType fileType;
 
-  // Getter for url - returns webUrl on web platform if available, otherwise baseUrl
+  // Getter for url - returns platform-specific URL
   @override
   String get url {
+    // Desktop platforms require .litertlm format
+    if (_isDesktop && desktopUrl != null && desktopUrl!.isNotEmpty) {
+      return desktopUrl!;
+    }
+    // Web platform may have different URL
     if (kIsWeb && webUrl != null && webUrl!.isNotEmpty) {
       return webUrl!;
     }
     return baseUrl;
   }
 
+  // Check if model supports desktop (has .litertlm URL)
+  bool get supportsDesktop =>
+      (desktopUrl != null && desktopUrl!.isNotEmpty) ||
+      baseUrl.endsWith('.litertlm');
+
   // Constructor for the enum
   const Model({
     required this.baseUrl,
     this.webUrl,
+    this.desktopUrl,
     required this.filename,
     required this.displayName,
     required this.size,

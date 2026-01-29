@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import 'package:background_downloader/background_downloader.dart';
 
 import '../flutter_gemma.dart';
@@ -324,6 +325,10 @@ class FlutterGemmaMobile extends FlutterGemmaPlugin {
       completer.complete(model);
       return model;
     } catch (e, st) {
+      // FIX #170: Reset state to allow retry with different model
+      _initCompleter = null;
+      _initializedModel = null;
+      _lastActiveInferenceSpec = null;
       completer.completeError(e, st);
       Error.throwWithStackTrace(e, st);
     }
@@ -435,6 +440,10 @@ class FlutterGemmaMobile extends FlutterGemmaPlugin {
       completer.complete(model);
       return model;
     } catch (e, st) {
+      // FIX #170: Reset state to allow retry with different model
+      _initEmbeddingCompleter = null;
+      _initializedEmbeddingModel = null;
+      _lastActiveEmbeddingSpec = null;
       completer.completeError(e, st);
       Error.throwWithStackTrace(e, st);
     }

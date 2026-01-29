@@ -15,6 +15,8 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import kotlinx.coroutines.*
 
+import dev.flutterberlin.flutter_gemma.engines.*
+
 /** FlutterGemmaPlugin */
 class FlutterGemmaPlugin: FlutterPlugin, ActivityAware, 
     PluginRegistry.RequestPermissionsResultListener,
@@ -32,9 +34,10 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware,
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     context = flutterPluginBinding.applicationContext
     service = PlatformServiceImpl(context)
+    service = PlatformServiceImpl(context)
     eventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "flutter_gemma_stream")
-    eventChannel.setStreamHandler(service)
-    PlatformService.setUp(flutterPluginBinding.binaryMessenger, service)
+    eventChannel.setStreamHandler(service!!)
+    PlatformService.setUp(flutterPluginBinding.binaryMessenger, service!!)
 
     // Setup bundled assets channel
     bundledChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_gemma_bundled")
@@ -71,6 +74,7 @@ class FlutterGemmaPlugin: FlutterPlugin, ActivityAware,
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     eventChannel.setStreamHandler(null)
     bundledChannel.setMethodCallHandler(null)
+    service?.cleanup()
     service = null
   }
 
@@ -118,15 +122,35 @@ private class PlatformServiceImpl(
   val context: Context
 ) : PlatformService, EventChannel.StreamHandler {
   private val TAG = "PlatformServiceImpl"
-  private val scope = CoroutineScope(Dispatchers.IO)
+  private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
   private var eventSink: EventChannel.EventSink? = null
-  private var inferenceModel: InferenceModel? = null
-  private var session: InferenceModelSession? = null
+  private var streamJob: kotlinx.coroutines.Job? = null  // Track stream collection job
+  private val engineLock = Any()  // Lock for thread-safe engine access
+
+  // NEW: Use InferenceEngine abstraction instead of InferenceModel
+  private var engine: InferenceEngine? = null
+  private var session: InferenceSession? = null
   private var activity: Activity? = null
-  
+
   // RAG components
   private var embeddingModel: EmbeddingModel? = null
   private var vectorStore: VectorStore? = null
+
+  fun cleanup() {
+    scope.cancel()
+    streamJob?.cancel()
+    streamJob = null
+    synchronized(engineLock) {
+      session?.close()
+      session = null
+      engine?.close()
+      engine = null
+    }
+    embeddingModel?.close()
+    embeddingModel = null
+    vectorStore?.close()
+    vectorStore = null
+  }
 
   // GraphRAG components
   private var graphStore: GraphStore? = null
@@ -269,20 +293,28 @@ private class PlatformServiceImpl(
   ) {
     scope.launch {
       try {
-        val backendEnum = preferredBackend?.let {
-          PreferredBackendEnum.values()[it.ordinal]
-        }
-        val config = InferenceModelConfig(
-          modelPath,
-          maxTokens.toInt(),
-          loraRanks?.map { it.toInt() },
-          backendEnum,
-          maxNumImages?.toInt()
+        // Build configuration first (before touching state)
+        val config = EngineConfig(
+          modelPath = modelPath,
+          maxTokens = maxTokens.toInt(),
+          supportedLoraRanks = loraRanks?.map { it.toInt() },
+          preferredBackend = preferredBackend,
+          maxNumImages = maxNumImages?.toInt()
         )
-        if (config != inferenceModel?.config) {
-          inferenceModel?.close()
-          inferenceModel = InferenceModel(context, config)
+
+        // Create and initialize new engine BEFORE clearing old state
+        // This ensures we don't leave state inconsistent on failure
+        val newEngine = EngineFactory.createFromModelPath(modelPath, context)
+        newEngine.initialize(config)
+
+        // Only now clear old state and swap in new engine (thread-safe)
+        synchronized(engineLock) {
+          session?.close()
+          session = null
+          engine?.close()
+          engine = newEngine
         }
+
         callback(Result.success(Unit))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -291,12 +323,16 @@ private class PlatformServiceImpl(
   }
 
   override fun closeModel(callback: (Result<Unit>) -> Unit) {
-    try {
-      inferenceModel?.close()
-      inferenceModel = null
-      callback(Result.success(Unit))
-    } catch (e: Exception) {
-      callback(Result.failure(e))
+    synchronized(engineLock) {
+      try {
+        session?.close()
+        session = null
+        engine?.close()
+        engine = null
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
     }
   }
 
@@ -311,17 +347,22 @@ private class PlatformServiceImpl(
   ) {
     scope.launch {
       try {
-        val model = inferenceModel ?: throw IllegalStateException("Inference model is not created")
-        val config = InferenceSessionConfig(
-          temperature.toFloat(),
-          randomSeed.toInt(),
-          topK.toInt(),
-          topP?.toFloat(),
-          loraPath,
-          enableVisionModality
-        )
-        session?.close()
-        session = model.createSession(config)
+        synchronized(engineLock) {
+          val currentEngine = engine
+            ?: throw IllegalStateException("Inference model is not created")
+
+          val config = SessionConfig(
+            temperature = temperature.toFloat(),
+            randomSeed = randomSeed.toInt(),
+            topK = topK.toInt(),
+            topP = topP?.toFloat(),
+            loraPath = loraPath,
+            enableVisionModality = enableVisionModality
+          )
+
+          session?.close()
+          session = currentEngine.createSession(config)
+        }
         callback(Result.success(Unit))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -330,19 +371,23 @@ private class PlatformServiceImpl(
   }
 
   override fun closeSession(callback: (Result<Unit>) -> Unit) {
-    try {
-      session?.close()
-      session = null
-      callback(Result.success(Unit))
-    } catch (e: Exception) {
-      callback(Result.failure(e))
+    synchronized(engineLock) {
+      try {
+        session?.close()
+        session = null
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
     }
   }
 
   override fun sizeInTokens(prompt: String, callback: (Result<Long>) -> Unit) {
     scope.launch {
       try {
-        val size = session?.sizeInTokens(prompt) ?: throw IllegalStateException("Session not created")
+        val currentSession = session
+          ?: throw IllegalStateException("Session not created")
+        val size = currentSession.sizeInTokens(prompt)
         callback(Result.success(size.toLong()))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -353,7 +398,9 @@ private class PlatformServiceImpl(
   override fun addQueryChunk(prompt: String, callback: (Result<Unit>) -> Unit) {
     scope.launch {
       try {
-        session?.addQueryChunk(prompt) ?: throw IllegalStateException("Session not created")
+        val currentSession = session
+          ?: throw IllegalStateException("Session not created")
+        currentSession.addQueryChunk(prompt)
         callback(Result.success(Unit))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -364,7 +411,9 @@ private class PlatformServiceImpl(
   override fun addImage(imageBytes: ByteArray, callback: (Result<Unit>) -> Unit) {
     scope.launch {
       try {
-        session?.addImage(imageBytes) ?: throw IllegalStateException("Session not created")
+        val currentSession = session
+          ?: throw IllegalStateException("Session not created")
+        currentSession.addImage(imageBytes)
         callback(Result.success(Unit))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -375,7 +424,9 @@ private class PlatformServiceImpl(
   override fun generateResponse(callback: (Result<String>) -> Unit) {
     scope.launch {
       try {
-        val result = session?.generateResponse() ?: throw IllegalStateException("Session not created")
+        val currentSession = session
+          ?: throw IllegalStateException("Session not created")
+        val result = currentSession.generateResponse()
         callback(Result.success(result))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -386,7 +437,9 @@ private class PlatformServiceImpl(
   override fun generateResponseAsync(callback: (Result<Unit>) -> Unit) {
     scope.launch {
       try {
-        session?.generateResponseAsync() ?: throw IllegalStateException("Session not created")
+        val currentSession = session
+          ?: throw IllegalStateException("Session not created")
+        currentSession.generateResponseAsync()
         callback(Result.success(Unit))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -397,7 +450,9 @@ private class PlatformServiceImpl(
   override fun stopGeneration(callback: (Result<Unit>) -> Unit) {
     scope.launch {
       try {
-        session?.stopGeneration() ?: throw IllegalStateException("Session not created")
+        val currentSession = session
+          ?: throw IllegalStateException("Session not created")
+        currentSession.cancelGeneration()
         callback(Result.success(Unit))
       } catch (e: Exception) {
         callback(Result.failure(e))
@@ -406,26 +461,31 @@ private class PlatformServiceImpl(
   }
 
   override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+    // Cancel previous stream collection to prevent orphaned coroutines
+    streamJob?.cancel()
     eventSink = events
-    val model = inferenceModel ?: return
 
-    scope.launch {
-      launch {
-        model.partialResults.collect { (text, done) ->
-          val payload = mapOf("partialResult" to text, "done" to done)
-          withContext(Dispatchers.Main) {
-            events?.success(payload)
-            if (done) {
-              events?.endOfStream()
+    synchronized(engineLock) {
+      val currentEngine = engine ?: return
+
+      streamJob = scope.launch {
+        launch {
+          currentEngine.partialResults.collect { (text, done) ->
+            val payload = mapOf("partialResult" to text, "done" to done)
+            withContext(Dispatchers.Main) {
+              events?.success(payload)
+              if (done) {
+                events?.endOfStream()
+              }
             }
           }
         }
-      }
 
-      launch {
-        model.errors.collect { error ->
-          withContext(Dispatchers.Main) {
-            events?.error("ERROR", error.message, null)
+        launch {
+          currentEngine.errors.collect { error ->
+            withContext(Dispatchers.Main) {
+              events?.error("ERROR", error.message, null)
+            }
           }
         }
       }
@@ -433,6 +493,8 @@ private class PlatformServiceImpl(
   }
 
   override fun onCancel(arguments: Any?) {
+    streamJob?.cancel()
+    streamJob = null
     eventSink = null
   }
 
@@ -449,11 +511,8 @@ private class PlatformServiceImpl(
         embeddingModel?.close()
 
         // Convert PreferredBackend to useGPU boolean
-        val useGPU = when (preferredBackend) {
-          PreferredBackend.GPU, PreferredBackend.GPU_FLOAT16,
-          PreferredBackend.GPU_MIXED, PreferredBackend.GPU_FULL -> true
-          else -> false
-        }
+        // Note: NPU not supported for embeddings, fallback to CPU
+        val useGPU = preferredBackend == PreferredBackend.GPU
 
         embeddingModel = EmbeddingModel(context, modelPath, tokenizerPath, useGPU)
         embeddingModel!!.initialize()
