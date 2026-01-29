@@ -1216,8 +1216,9 @@ class EmbeddingSimilarityLinkPredictor {
     
     for (final candidate in sameTypeCandidates) {
       if (candidate.entityA.type == 'PERSON' && candidate.entityB.type == 'PERSON') {
-        // Only validate PERSON-PERSON with very high similarity (>= 0.80)
-        if (candidate.similarity >= 0.80) {
+        // Validate PERSON-PERSON with good similarity (>= 0.70)
+        // Lowered from 0.80 to catch family relationships like Dad-Mom, Brother-Dad etc.
+        if (candidate.similarity >= 0.70) {
           personPersonCandidates.add(candidate);
         }
         // Skip lower similarity PERSON-PERSON pairs entirely (prefer fewer, correct relationships)
@@ -1568,6 +1569,54 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
     }
   }
 
+  /// Parse Python variable assignment style responses from LLM
+  /// 
+  /// Handles output like:
+  /// ```
+  /// relationship_type = "FAMILY_MEMBER"
+  /// is_valid = True
+  /// confidence = 0.95
+  /// validate_relationship(relationship_type, is_valid, confidence, explanation)
+  /// ```
+  Map<String, dynamic>? _parsePythonVariableAssignments(String content) {
+    final result = <String, dynamic>{};
+    
+    // Match: varname = "string" or varname = 'string' or varname = True/False/None/number
+    final varAssignRegex = RegExp(
+      r'''^(\w+)\s*=\s*("[^"]*"|'[^']*'|True|False|None|[\d.]+)\s*$''',
+      multiLine: true,
+    );
+    
+    for (final match in varAssignRegex.allMatches(content)) {
+      final varName = match.group(1)!;
+      var value = match.group(2)!;
+      
+      // Parse the value
+      dynamic parsedValue;
+      if (value == 'True') {
+        parsedValue = true;
+      } else if (value == 'False') {
+        parsedValue = false;
+      } else if (value == 'None') {
+        parsedValue = null;
+      } else if (value.startsWith('"') || value.startsWith("'")) {
+        parsedValue = value.substring(1, value.length - 1);
+      } else {
+        parsedValue = double.tryParse(value) ?? value;
+      }
+      
+      result[varName] = parsedValue;
+    }
+    
+    // Only return if we found expected validation keys
+    if (result.containsKey('is_valid') || result.containsKey('relationship_type')) {
+      print('[Structured Validation] Parsed Python variables: $result');
+      return result;
+    }
+    
+    return null;
+  }
+
   /// Run structured validation using function calling tools
   /// 
   /// This replaces the 3-step LLM chain with a single structured call
@@ -1621,6 +1670,35 @@ Call the function now.''';
         final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
         
         print('[Structured Validation] Parsed: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
+        
+        if (relationshipType == 'NONE' || !isValid) {
+          return LinkValidationResult(
+            isValid: false,
+            relationshipType: relationshipType,
+            confidence: adjustedConfidence,
+            explanation: explanation ?? 'No relationship identified',
+          );
+        }
+        
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: relationshipType,
+          confidence: adjustedConfidence.clamp(0.0, 1.0),
+          explanation: explanation,
+        );
+      }
+      
+      // If standard parsing failed, try Python variable assignment style
+      final pythonVars = _parsePythonVariableAssignments(response);
+      if (pythonVars != null) {
+        final relationshipType = pythonVars['relationship_type'] as String?;
+        final isValid = pythonVars['is_valid'] as bool? ?? false;
+        final confidence = (pythonVars['confidence'] as num?)?.toDouble() ?? 0.0;
+        final explanation = pythonVars['explanation'] as String?;
+        
+        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+        
+        print('[Structured Validation] From Python vars: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
         
         if (relationshipType == 'NONE' || !isValid) {
           return LinkValidationResult(
@@ -1732,6 +1810,33 @@ Call the function now.''';
         final explanation = args['explanation'] as String?;
         
         final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+        
+        if (relationshipType == 'NONE' || !isValid) {
+          return LinkValidationResult(
+            isValid: false,
+            explanation: explanation ?? 'No clear relationship identified',
+          );
+        }
+        
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: relationshipType,
+          confidence: adjustedConfidence.clamp(0.0, 1.0),
+          explanation: explanation,
+        );
+      }
+      
+      // If standard parsing failed, try Python variable assignment style
+      final pythonVars = _parsePythonVariableAssignments(response);
+      if (pythonVars != null) {
+        final relationshipType = pythonVars['relationship_type'] as String?;
+        final isValid = pythonVars['is_valid'] as bool? ?? false;
+        final confidence = (pythonVars['confidence'] as num?)?.toDouble() ?? 0.0;
+        final explanation = pythonVars['explanation'] as String?;
+        
+        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+        
+        print('[Structured PERSON] From Python vars: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
         
         if (relationshipType == 'NONE' || !isValid) {
           return LinkValidationResult(
