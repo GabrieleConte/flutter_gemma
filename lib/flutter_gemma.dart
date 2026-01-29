@@ -59,6 +59,7 @@ export 'rag/embedding_models.dart' hide EmbeddingModel;
 
 // Export GraphRAG components
 export 'rag/graph_rag.dart';
+export 'rag/graph_rag_config.dart';
 export 'rag/graph/graph_repository.dart';
 export 'rag/connectors/data_connector.dart';
 export 'rag/connectors/google_suite_connector.dart';
@@ -67,4 +68,5 @@ export 'rag/graph/community_detection.dart';
 export 'rag/graph/cypher_parser.dart';
 export 'rag/graph/hybrid_query_engine.dart';
 export 'rag/graph/background_indexing.dart';
+export 'rag/graph/native_function_extractor.dart';
 

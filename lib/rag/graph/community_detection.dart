@@ -797,14 +797,31 @@ class CommunitySummarizer {
       relationshipStrings,
     );
     
-    final summary = await llmCallback(prompt);
+    String summary;
+    List<double> embedding;
     
-    // Truncate summary for embedding if too long
-    // EmbeddingGemma 256 has max ~256 tokens, roughly 4 chars per token = ~1024 chars
-    final summaryForEmbedding = summary.length > 800 
-        ? summary.substring(0, 800).trim() 
-        : summary;
-    final embedding = await embeddingCallback(summaryForEmbedding);
+    try {
+      summary = await llmCallback(prompt);
+      
+      // Truncate summary for embedding if too long
+      // EmbeddingGemma 256 has max ~256 tokens, roughly 4 chars per token = ~1024 chars
+      final summaryForEmbedding = summary.length > 800 
+          ? summary.substring(0, 800).trim() 
+          : summary;
+      embedding = await embeddingCallback(summaryForEmbedding);
+    } catch (e) {
+      // If LLM is closed (memory pressure from multiple models), generate fallback summary
+      print('[CommunitySummarizer] LLM error: $e, using fallback summary');
+      summary = 'Community of ${communityEntities.length} entities: ${entityNames.take(5).join(", ")}${entityNames.length > 5 ? "..." : ""}.';
+      
+      // Try to get embedding, fallback to zeros if that also fails
+      try {
+        embedding = await embeddingCallback(summary);
+      } catch (_) {
+        print('[CommunitySummarizer] Embedding error, using zero vector');
+        embedding = List.filled(768, 0.0);
+      }
+    }
     
     return CommunitySummary(
       communityId: community.id,
@@ -840,13 +857,28 @@ class CommunitySummarizer {
       community.level,
     );
     
-    final summary = await llmCallback(prompt);
+    String summary;
+    List<double> embedding;
     
-    // Truncate summary for embedding if too long
-    final summaryForEmbedding = summary.length > 800 
-        ? summary.substring(0, 800).trim() 
-        : summary;
-    final embedding = await embeddingCallback(summaryForEmbedding);
+    try {
+      summary = await llmCallback(prompt);
+      
+      // Truncate summary for embedding if too long
+      final summaryForEmbedding = summary.length > 800 
+          ? summary.substring(0, 800).trim() 
+          : summary;
+      embedding = await embeddingCallback(summaryForEmbedding);
+    } catch (e) {
+      // If LLM is closed (memory pressure), generate fallback summary
+      print('[CommunitySummarizer] Hierarchical LLM error: $e, using fallback');
+      summary = 'Higher-level community combining ${childSummaries.length} sub-communities.';
+      
+      try {
+        embedding = await embeddingCallback(summary);
+      } catch (_) {
+        embedding = List.filled(768, 0.0);
+      }
+    }
     
     // Count entities and relationships from children
     final totalEntities = childSummaries.fold(0, (sum, s) => sum + s.entityCount);

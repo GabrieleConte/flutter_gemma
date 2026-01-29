@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../../pigeon.g.dart';
+import '../../core/tool.dart';
 import '../connectors/data_connector.dart';
 import 'graph_repository.dart';
 import 'entity_extractor.dart';
@@ -140,6 +141,12 @@ class BackgroundIndexingService {
   final ConnectorManager connectorManager;
   final IndexingConfig config;
   
+  /// Callback to notify when extraction phase is complete (can deallocate extraction model)
+  final Future<void> Function()? onExtractionPhaseComplete;
+  
+  /// Callback to prepare main LLM before summarization (can reallocate if needed)
+  final Future<void> Function()? onBeforeSummarization;
+  
   late final LeidenCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
   late final LinkPredictor? _linkPredictor;
@@ -179,6 +186,11 @@ class BackgroundIndexingService {
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
     Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
+    /// Optional structured LLM callback that supports function calling tools
+    /// Used for link validation to get structured relationship types
+    Future<String> Function(String prompt, {List<Tool>? tools})? structuredLlmCallback,
+    this.onExtractionPhaseComplete,
+    this.onBeforeSummarization,
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
     _embeddingCallback = embeddingCallback;
@@ -213,6 +225,7 @@ class BackgroundIndexingService {
         _embeddingSimilarityPredictor = EmbeddingSimilarityLinkPredictor(
           repository: repository,
           llmCallback: llmCallback,
+          structuredLlmCallback: structuredLlmCallback,
           config: linkConfig,
         );
       }
@@ -296,6 +309,12 @@ class BackgroundIndexingService {
         await _embeddingSimilarityPhase();
         if (_cancelRequested) return;
       }
+      
+      // Notify that extraction phase is complete (extraction model can be deallocated)
+      if (onExtractionPhaseComplete != null) {
+        print('[BackgroundIndexing] Extraction phases complete, notifying for model cleanup');
+        await onExtractionPhaseComplete!();
+      }
 
       // Phase 2: Detect communities
       if (config.detectCommunities) {
@@ -305,6 +324,11 @@ class BackgroundIndexingService {
 
       // Phase 3: Generate community summaries
       if (config.generateSummaries && _summarizer != null) {
+        // Notify before summarization (main LLM may need reallocation)
+        if (onBeforeSummarization != null) {
+          print('[BackgroundIndexing] Preparing for summarization, notifying for model readiness');
+          await onBeforeSummarization!();
+        }
         await _generateSummariesPhase();
       }
 

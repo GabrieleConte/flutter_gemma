@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart' as global;
+import 'package:flutter_gemma/rag/graph/link_prediction.dart' show LinkValidationTools;
 import 'package:flutter_gemma_example/services/graph_rag_service.dart';
 import 'package:flutter_gemma_example/services/auth_token_service.dart';
 import 'package:flutter_gemma_example/models/model.dart';
@@ -74,10 +75,10 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
     });
     
     try {
-      // Step 1: Initialize inference model
+      // Step 1: Initialize inference model (Gemma 3 Nano 2B - supports function calls)
       _showSnackBar('Installing inference model...');
       
-      const inferenceModel = Model.gemma3_1B;
+      const inferenceModel = Model.gemma3n_2B_litertlm;
       final installer = FlutterGemma.installModel(
         modelType: inferenceModel.modelType,
         fileType: inferenceModel.fileType,
@@ -93,17 +94,37 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
         await installer.fromNetwork(inferenceModel.url, token: token).install();
       }
       
-      // Use CPU backend for emulator compatibility (GPU not supported on most emulators)
+      // Use GPU backend for better performance with larger model
       final model = await FlutterGemma.getActiveModel(
         maxTokens: inferenceModel.maxTokens,
-        preferredBackend: PreferredBackend.cpu,
+        preferredBackend: inferenceModel.preferredBackend,
       );
       
       final chat = await model.createChat(
+        temperature: 0.7,
+        randomSeed: 1,
+        topK: inferenceModel.topK,
+        modelType: inferenceModel.modelType,
+      );
+      
+      // Create extraction chat from same model with tool support
+      _showSnackBar('Creating extraction chat with tools...');
+      
+      debugPrint('[GraphRAGScreen] Creating extraction chat with tools from same model');
+      final extractionTools = <Tool>[
+        ExtractionTools.extractAll,
+        ...LinkValidationTools.all,
+      ];
+      final extractionChat = await model.createChat(
         temperature: 0.0,
         randomSeed: 1,
         topK: inferenceModel.topK,
+        supportsFunctionCalls: true,
+        tools: extractionTools,
+        modelType: inferenceModel.modelType,
       );
+      debugPrint('[GraphRAGScreen] Extraction chat created with ${extractionTools.length} tools');
+      _showSnackBar('Extraction chat ready ✅');
       
       _showSnackBar('Inference model ready ✅');
       
@@ -133,6 +154,8 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
+        extractionChat: extractionChat,
+        // No separate extraction model - same model instance
       );
       
       // Subscribe to indexing progress

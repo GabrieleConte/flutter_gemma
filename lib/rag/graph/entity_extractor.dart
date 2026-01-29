@@ -2,6 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+// Re-export native function extractor types for convenience
+export 'native_function_extractor.dart'
+    show
+        NativeFunctionExtractor,
+        AdaptiveEntityExtractor,
+        ToolDefinition,
+        ExtractionTools;
+
 /// Extraction result containing entities and relationships
 class ExtractionResult {
   final List<ExtractedEntity> entities;

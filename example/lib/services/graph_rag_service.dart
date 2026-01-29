@@ -1,7 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
-import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel;
+import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel, InferenceModel;
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -18,8 +19,15 @@ class GraphRAGService {
   
   // LLM and embedding callbacks
   InferenceChat? _chat;
+  InferenceChat? _extractionChat;
   InferenceChat? _visionChat;
   EmbeddingModel? _embeddingModel;
+  
+  // Model instances for lifecycle management
+  InferenceModel? _extractionModel;
+  
+  // Recreate callback for main chat (used to reload after extraction model is closed)
+  Future<InferenceChat> Function()? _recreateMainChat;
   
   /// Whether the service is initialized
   bool get isInitialized => _isInitialized;
@@ -46,14 +54,22 @@ class GraphRAGService {
   /// 
   /// [chat] - The main chat model for text generation
   /// [embeddingModel] - The embedding model for semantic search
+  /// [extractionChat] - Optional chat model for entity extraction with tool support
+  ///                    If provided and supportsFunctionCalls is true, enables
+  ///                    structured function calling for entity extraction
+  /// [extractionModel] - Optional model instance for extraction (for lifecycle management)
   /// [visionChat] - Optional vision-capable chat model for image captioning
   ///                If provided and enableImageCaptioning is true in config,
   ///                photos will be analyzed using vision LLM
+  /// [recreateMainChat] - Callback to recreate main chat if needed (after memory cleanup)
   Future<void> initialize({
     required InferenceChat chat,
     required EmbeddingModel embeddingModel,
+    InferenceChat? extractionChat,
+    InferenceModel? extractionModel,
     InferenceChat? visionChat,
     bool enableImageCaptioning = false,
+    Future<InferenceChat> Function()? recreateMainChat,
   }) async {
     if (_isInitialized) {
       debugPrint('[GraphRAGService] Already initialized');
@@ -63,8 +79,11 @@ class GraphRAGService {
     try {
       debugPrint('[GraphRAGService] Initializing...');
       _chat = chat;
+      _extractionChat = extractionChat;
+      _extractionModel = extractionModel;
       _visionChat = visionChat;
       _embeddingModel = embeddingModel;
+      _recreateMainChat = recreateMainChat;
       
       // Get database path
       final directory = await getApplicationDocumentsDirectory();
@@ -78,22 +97,41 @@ class GraphRAGService {
         debugPrint('[GraphRAGService] Vision LLM enabled for image captioning');
       }
       
-      // Create GraphRAG config with image captioning setting
+      // Determine extraction callback for structured function calling
+      Future<String> Function(String, {List<Tool>? tools})? extractionCallback;
+      if (extractionChat != null && extractionChat.supportsFunctionCalls) {
+        extractionCallback = _generateExtractionResponse;
+        debugPrint('[GraphRAGService] Extraction LLM enabled with function calling support');
+      } else if (chat.supportsFunctionCalls) {
+        // Use main chat for extraction if it supports function calls
+        _extractionChat = chat;
+        extractionCallback = _generateExtractionResponse;
+        debugPrint('[GraphRAGService] Using main chat for extraction (supports function calls)');
+      }
+      
+      // Create GraphRAG config with image captioning setting and function calling
       final config = GraphRAGConfig(
         databasePath: dbPath,
         indexingConfig: IndexingConfig(
           enableImageCaptioning: enableImageCaptioning && visionChat != null,
         ),
+        extendedConfig: GraphRAGExtendedConfig(
+          enableFunctionCalling: extractionCallback != null,
+          enablePerformanceLogging: true,
+        ),
         autoIndex: false,
       );
       
-      // Create GraphRAG instance
+      // Create GraphRAG instance with lifecycle callbacks
       _graphRag = GraphRAGFactory.createWithConfig(
         config: config,
         platform: PlatformService(),
         llmCallback: _generateLLMResponse,
         embeddingCallback: _generateEmbedding,
         visionLlmCallback: visionCallback,
+        extractionLlmCallback: extractionCallback,
+        onExtractionPhaseComplete: _handleExtractionPhaseComplete,
+        onBeforeSummarization: _handleBeforeSummarization,
       );
       
       await _graphRag!.initialize();
@@ -107,6 +145,42 @@ class GraphRAGService {
       debugPrint('[GraphRAGService] Initialization failed: $e');
       debugPrint('[GraphRAGService] Stack: $stack');
       rethrow;
+    }
+  }
+  
+  /// Called when extraction phase is complete - deallocate extraction model to free memory
+  Future<void> _handleExtractionPhaseComplete() async {
+    debugPrint('[GraphRAGService] Extraction phase complete, deallocating extraction model...');
+    
+    if (_extractionModel != null) {
+      try {
+        await _extractionModel!.close();
+        _extractionModel = null;
+        _extractionChat = null;
+        debugPrint('[GraphRAGService] Extraction model deallocated ✅');
+        
+        // Give the system time to reclaim memory
+        await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        debugPrint('[GraphRAGService] Error closing extraction model: $e');
+      }
+    }
+  }
+  
+  /// Called before summarization - ensure main LLM is ready
+  Future<void> _handleBeforeSummarization() async {
+    debugPrint('[GraphRAGService] Preparing for summarization...');
+    
+    // Check if main chat is still working
+    if (_chat == null && _recreateMainChat != null) {
+      debugPrint('[GraphRAGService] Main chat not available, recreating...');
+      try {
+        _chat = await _recreateMainChat!();
+        debugPrint('[GraphRAGService] Main chat recreated ✅');
+      } catch (e) {
+        debugPrint('[GraphRAGService] Error recreating main chat: $e');
+        rethrow;
+      }
     }
   }
   
@@ -136,6 +210,37 @@ class GraphRAGService {
     }
     
     debugPrint('[GraphRAGService] Vision response: ${responseText.substring(0, responseText.length.clamp(0, 100))}...');
+    return responseText;
+  }
+  
+  /// Generate extraction LLM response with tool support for structured entity extraction
+  /// This method enables native function calling for better extraction accuracy
+  Future<String> _generateExtractionResponse(String prompt, {List<Tool>? tools}) async {
+    if (_extractionChat == null) {
+      throw StateError('Extraction chat model not initialized');
+    }
+    
+    debugPrint('[GraphRAGService] Generating extraction response with tools: ${tools?.map((t) => t.name).join(", ") ?? "none"}');
+    
+    // Clear history before each extraction to avoid context window overflow
+    await _extractionChat!.clearHistory();
+    
+    // Add prompt and generate response
+    // The tools are already configured on the InferenceChat instance
+    await _extractionChat!.addQuery(Message(text: prompt));
+    final response = await _extractionChat!.generateChatResponse();
+    
+    // Extract text from ModelResponse
+    String responseText = '';
+    if (response is TextResponse) {
+      responseText = response.token;
+    } else if (response is FunctionCallResponse) {
+      // If we get a function call response, convert it to JSON string for parsing
+      responseText = '{"name": "${response.name}", "parameters": ${jsonEncode(response.args)}}';
+      debugPrint('[GraphRAGService] Got function call: ${response.name}');
+    }
+    
+    debugPrint('[GraphRAGService] Extraction response: ${responseText.substring(0, responseText.length.clamp(0, 150))}...');
     return responseText;
   }
   

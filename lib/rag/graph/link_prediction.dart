@@ -1,8 +1,60 @@
 import 'dart:async';
+import 'dart:convert';
 
+import '../../core/tool.dart';
+import '../../core/function_call_parser.dart';
 import 'graph_repository.dart';
 import 'entity_extractor.dart';
 import '../utils/math_utils.dart';
+
+/// Structured tools for link prediction validation
+class LinkValidationTools {
+  /// Tool for validating and categorizing a relationship between two entities
+  static const validateRelationship = Tool(
+    name: 'validate_relationship',
+    description: 'Validate whether two entities have a relationship and categorize it. '
+        'Call this with the relationship type, validity, and confidence score.',
+    parameters: {
+      'type': 'object',
+      'properties': {
+        'relationship_type': {
+          'type': 'string',
+          'description': 'The type of relationship between the entities',
+          'enum': [
+            'FAMILY_MEMBER',
+            'COLLEAGUE',
+            'FRIEND',
+            'WORKS_AT',
+            'KNOWS',
+            'RELATED_TO',
+            'ASSOCIATED_WITH',
+            'SIMILAR_TO',
+            'LOCATED_IN',
+            'PART_OF',
+            'MENTIONED_WITH',
+            'NONE'
+          ]
+        },
+        'is_valid': {
+          'type': 'boolean',
+          'description': 'Whether a meaningful relationship exists between the entities'
+        },
+        'confidence': {
+          'type': 'number',
+          'description': 'Confidence score from 0.0 to 1.0'
+        },
+        'explanation': {
+          'type': 'string',
+          'description': 'Brief explanation of the relationship'
+        }
+      },
+      'required': ['relationship_type', 'is_valid', 'confidence']
+    },
+  );
+
+  /// All link validation tools
+  static List<Tool> get all => [validateRelationship];
+}
 
 /// Data source types for the personal knowledge graph
 class DataSourceTypes {
@@ -1026,11 +1078,14 @@ class LinkValidationResult {
 class EmbeddingSimilarityLinkPredictor {
   final GraphRepository repository;
   final Future<String> Function(String prompt) llmCallback;
+  /// Optional structured LLM callback that supports function calling tools
+  final Future<String> Function(String prompt, {List<Tool>? tools})? structuredLlmCallback;
   final LinkPredictionConfig config;
 
   EmbeddingSimilarityLinkPredictor({
     required this.repository,
     required this.llmCallback,
+    this.structuredLlmCallback,
     LinkPredictionConfig? config,
   }) : config = config ?? LinkPredictionConfig();
 
@@ -1222,8 +1277,10 @@ class EmbeddingSimilarityLinkPredictor {
           continue;
         }
         
-        // Run specialized PERSON-PERSON validation
-        final result = await _runPersonPersonValidation(candidate);
+        // Run specialized PERSON-PERSON validation (structured if available)
+        final result = structuredLlmCallback != null 
+            ? await _runStructuredPersonValidation(candidate)
+            : await _runPersonPersonValidation(candidate);
         
         if (result.isValid && result.relationshipType != null) {
           print('[EmbeddingSimilarityLinkPredictor] ✓ Valid PERSON: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
@@ -1272,8 +1329,10 @@ class EmbeddingSimilarityLinkPredictor {
           continue;
         }
         
-        // Run 3-step LLM validation chain
-        final result = await _runValidationChain(candidate);
+        // Run validation chain (structured if available, otherwise 3-step chain)
+        final result = structuredLlmCallback != null
+            ? await _runStructuredValidation(candidate)
+            : await _runValidationChain(candidate);
         
         if (result.isValid && result.relationshipType != null) {
           print('[EmbeddingSimilarityLinkPredictor] ✓ Valid: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
@@ -1505,6 +1564,229 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
       return LinkValidationResult(
         isValid: false,
         explanation: 'Validation error: $e',
+      );
+    }
+  }
+
+  /// Run structured validation using function calling tools
+  /// 
+  /// This replaces the 3-step LLM chain with a single structured call
+  Future<LinkValidationResult> _runStructuredValidation(EmbeddingCandidate candidate) async {
+    if (structuredLlmCallback == null) {
+      // Fallback to 3-step chain if no structured callback
+      return _runValidationChain(candidate);
+    }
+    
+    final entityA = candidate.entityA;
+    final entityB = candidate.entityB;
+    
+    print('[Structured Validation] Validating ${entityA.name} <-> ${entityB.name}');
+    
+    final prompt = '''Analyze these two entities and call the validate_relationship function with your assessment.
+
+Entity A: ${entityA.name} (${entityA.type})
+${entityA.description != null ? 'Description: ${entityA.description}' : ''}
+
+Entity B: ${entityB.name} (${entityB.type})
+${entityB.description != null ? 'Description: ${entityB.description}' : ''}
+
+Semantic similarity: ${(candidate.similarity * 100).toStringAsFixed(0)}%
+
+You MUST call validate_relationship with:
+- relationship_type: Choose from FAMILY_MEMBER, COLLEAGUE, FRIEND, WORKS_AT, KNOWS, RELATED_TO, ASSOCIATED_WITH, SIMILAR_TO, LOCATED_IN, PART_OF, MENTIONED_WITH, or NONE
+- is_valid: true if there's a meaningful relationship, false otherwise  
+- confidence: A number between 0.0 and 1.0
+- explanation: Brief reason for your assessment
+
+Call the function now.''';
+
+    try {
+      final response = await structuredLlmCallback!(
+        prompt,
+        tools: LinkValidationTools.all,
+      );
+      
+      print('[Structured Validation] Response: $response');
+      
+      // Parse the function call response
+      final parsed = FunctionCallParser.parse(response);
+      if (parsed != null && parsed.name == 'validate_relationship') {
+        final args = parsed.args;
+        final relationshipType = args['relationship_type'] as String?;
+        final isValid = args['is_valid'] as bool? ?? false;
+        final confidence = (args['confidence'] as num?)?.toDouble() ?? 0.0;
+        final explanation = args['explanation'] as String?;
+        
+        // Adjust confidence based on embedding similarity
+        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+        
+        print('[Structured Validation] Parsed: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
+        
+        if (relationshipType == 'NONE' || !isValid) {
+          return LinkValidationResult(
+            isValid: false,
+            relationshipType: relationshipType,
+            confidence: adjustedConfidence,
+            explanation: explanation ?? 'No relationship identified',
+          );
+        }
+        
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: relationshipType,
+          confidence: adjustedConfidence.clamp(0.0, 1.0),
+          explanation: explanation,
+        );
+      }
+      
+      // If parsing failed, try to extract from JSON directly
+      try {
+        final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(response);
+        if (jsonMatch != null) {
+          final jsonData = json.decode(jsonMatch.group(0)!) as Map<String, dynamic>;
+          final relationshipType = jsonData['relationship_type'] as String?;
+          final isValid = jsonData['is_valid'] as bool? ?? false;
+          final confidence = (jsonData['confidence'] as num?)?.toDouble() ?? 0.0;
+          final explanation = jsonData['explanation'] as String?;
+          
+          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+          
+          if (relationshipType == 'NONE' || !isValid) {
+            return LinkValidationResult(
+              isValid: false,
+              relationshipType: relationshipType,
+              confidence: adjustedConfidence,
+              explanation: explanation ?? 'No relationship identified',
+            );
+          }
+          
+          return LinkValidationResult(
+            isValid: true,
+            relationshipType: relationshipType,
+            confidence: adjustedConfidence.clamp(0.0, 1.0),
+            explanation: explanation,
+          );
+        }
+      } catch (_) {
+        // JSON parsing failed, fall through to graceful failure
+      }
+      
+      // Structured parsing failed - return invalid result instead of falling back to main LLM
+      // (main LLM may be closed due to memory pressure from multiple models)
+      print('[Structured Validation] Failed to parse structured response, skipping link');
+      return LinkValidationResult(
+        isValid: false,
+        explanation: 'Structured validation could not parse response',
+      );
+    } catch (e) {
+      print('[Structured Validation] Error: $e, skipping link');
+      return LinkValidationResult(
+        isValid: false,
+        explanation: 'Structured validation error: $e',
+      );
+    }
+  }
+
+  /// Run structured validation for PERSON-PERSON pairs
+  Future<LinkValidationResult> _runStructuredPersonValidation(EmbeddingCandidate candidate) async {
+    if (structuredLlmCallback == null) {
+      return _runPersonPersonValidation(candidate);
+    }
+    
+    final entityA = candidate.entityA;
+    final entityB = candidate.entityB;
+    
+    print('[Structured PERSON] Validating ${entityA.name} <-> ${entityB.name}');
+    
+    final prompt = '''Analyze these two people and call validate_relationship with your assessment.
+
+Person A: ${entityA.name}
+${entityA.description != null ? 'Description: ${entityA.description}' : ''}
+
+Person B: ${entityB.name}
+${entityB.description != null ? 'Description: ${entityB.description}' : ''}
+
+Semantic similarity: ${(candidate.similarity * 100).toStringAsFixed(0)}%
+
+You MUST call validate_relationship with:
+- relationship_type: FAMILY_MEMBER, COLLEAGUE, FRIEND, KNOWS, or NONE
+- is_valid: true or false
+- confidence: 0.0 to 1.0
+
+Call the function now.''';
+
+    try {
+      final response = await structuredLlmCallback!(
+        prompt,
+        tools: LinkValidationTools.all,
+      );
+      
+      print('[Structured PERSON] Response: $response');
+      
+      final parsed = FunctionCallParser.parse(response);
+      if (parsed != null && parsed.name == 'validate_relationship') {
+        final args = parsed.args;
+        final relationshipType = args['relationship_type'] as String?;
+        final isValid = args['is_valid'] as bool? ?? false;
+        final confidence = (args['confidence'] as num?)?.toDouble() ?? 0.0;
+        final explanation = args['explanation'] as String?;
+        
+        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+        
+        if (relationshipType == 'NONE' || !isValid) {
+          return LinkValidationResult(
+            isValid: false,
+            explanation: explanation ?? 'No clear relationship identified',
+          );
+        }
+        
+        return LinkValidationResult(
+          isValid: true,
+          relationshipType: relationshipType,
+          confidence: adjustedConfidence.clamp(0.0, 1.0),
+          explanation: explanation,
+        );
+      }
+      
+      // Try JSON extraction
+      try {
+        final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(response);
+        if (jsonMatch != null) {
+          final jsonData = json.decode(jsonMatch.group(0)!) as Map<String, dynamic>;
+          final relationshipType = jsonData['relationship_type'] as String?;
+          final isValid = jsonData['is_valid'] as bool? ?? false;
+          final confidence = (jsonData['confidence'] as num?)?.toDouble() ?? 0.0;
+          final explanation = jsonData['explanation'] as String?;
+          
+          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+          
+          if (relationshipType == 'NONE' || !isValid) {
+            return LinkValidationResult(
+              isValid: false,
+              explanation: explanation ?? 'No clear relationship identified',
+            );
+          }
+          
+          return LinkValidationResult(
+            isValid: true,
+            relationshipType: relationshipType,
+            confidence: adjustedConfidence.clamp(0.0, 1.0),
+            explanation: explanation,
+          );
+        }
+      } catch (_) {}
+      
+      // Structured parsing failed - return invalid result instead of falling back to main LLM
+      print('[Structured PERSON] Failed to parse, skipping link');
+      return LinkValidationResult(
+        isValid: false,
+        explanation: 'Structured PERSON validation could not parse response',
+      );
+    } catch (e) {
+      print('[Structured PERSON] Error: $e, skipping link');
+      return LinkValidationResult(
+        isValid: false,
+        explanation: 'Structured PERSON validation error: $e',
       );
     }
   }

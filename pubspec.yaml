@@ -27,6 +27,8 @@ dependencies:
   plugin_platform_interface: ^2.0.2
   shared_preferences: ^2.5.2
   background_downloader: ^9.2.3
+  # Device info for NPU capability detection
+  device_info_plus: ^10.1.0
   # Desktop gRPC support
   grpc: ^5.0.0
   protobuf: ^6.0.0

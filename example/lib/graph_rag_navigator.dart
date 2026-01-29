@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
+import 'package:flutter_gemma/rag/graph/link_prediction.dart' show LinkValidationTools;
 import 'package:flutter_gemma_example/services/graph_rag_service.dart';
 import 'package:flutter_gemma_example/services/auth_token_service.dart';
 import 'package:flutter_gemma_example/models/model.dart';
@@ -31,8 +32,8 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   String? _initError;
   String _statusMessage = 'Checking models...';
 
-  // Model definitions
-  static const _inferenceModel = Model.gemma3_1B;
+  // Model definitions - using gemma3n_2B for both main LLM and extraction (supports function calls)
+  static const _inferenceModel = Model.gemma3n_2B_litertlm;
   static const _embeddingModel = app_models.EmbeddingModel.embeddingGemma512;
 
   @override
@@ -65,7 +66,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         return;
       }
 
-      // Check if inference model is installed
+      // Check if inference model is installed (used for both main LLM and extraction)
       final inferenceInstalled = await FlutterGemma.isModelInstalled(
         _inferenceModel.filename,
       );
@@ -81,7 +82,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         _checkingModels = false;
       });
 
-      // If both models are ready, auto-initialize
+      // If all models are ready, auto-initialize
       if (inferenceInstalled && embeddingInstalled) {
         await _initializeWithExistingModels();
       }
@@ -99,7 +100,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
     setState(() {
       _isInitializing = true;
       _initError = null;
-      _statusMessage = 'Loading inference model...';
+      _statusMessage = 'Loading inference model (Gemma 3 Nano 2B)...';
     });
 
     try {
@@ -120,17 +121,37 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         await installer.fromNetwork(_inferenceModel.url, token: token).install();
       }
 
-      // Now get the active model
+      // Now get the active model - used for both main chat and extraction
       final model = await FlutterGemma.getActiveModel(
         maxTokens: _inferenceModel.maxTokens,
-        preferredBackend: PreferredBackend.cpu,
+        preferredBackend: _inferenceModel.preferredBackend,
       );
 
+      // Create main chat for text generation
       final chat = await model.createChat(
+        temperature: 0.7,
+        randomSeed: 1,
+        topK: _inferenceModel.topK,
+        modelType: _inferenceModel.modelType,
+      );
+      
+      // Create extraction chat from same model with tool support
+      setState(() => _statusMessage = 'Creating extraction chat with tools...');
+      
+      debugPrint('[GraphRAGNavigator] Creating extraction chat with tools from same model');
+      final extractionTools = <Tool>[
+        ExtractionTools.extractAll,
+        ...LinkValidationTools.all,
+      ];
+      final extractionChat = await model.createChat(
         temperature: 0.0,
         randomSeed: 1,
         topK: _inferenceModel.topK,
+        supportsFunctionCalls: true,
+        tools: extractionTools,
+        modelType: _inferenceModel.modelType,
       );
+      debugPrint('[GraphRAGNavigator] Extraction chat created with ${extractionTools.length} tools');
 
       setState(() => _statusMessage = 'Loading embedding model...');
 
@@ -153,10 +174,12 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
 
       setState(() => _statusMessage = 'Initializing GraphRAG...');
 
-      // Initialize service
+      // Initialize service - both chats use the same model, no need for lifecycle management
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
+        extractionChat: extractionChat,
+        // No separate extraction model - same model instance
       );
 
       setState(() {

@@ -1,6 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
+import '../core/tool.dart';
 import '../pigeon.g.dart';
 import 'connectors/data_connector.dart';
 import 'connectors/google_suite_connector.dart';
@@ -12,6 +14,8 @@ import 'graph/hybrid_query_engine.dart';
 import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
 import 'graph/link_prediction.dart';
+import 'graph/cache_manager.dart';
+import 'graph_rag_config.dart';
 
 /// Configuration for GraphRAG
 class GraphRAGConfig {
@@ -30,6 +34,9 @@ class GraphRAGConfig {
   /// Configuration for background indexing
   final IndexingConfig indexingConfig;
   
+  /// Extended configuration for LiteRT-LM integration
+  final GraphRAGExtendedConfig extendedConfig;
+  
   /// Whether to auto-start indexing on initialization
   final bool autoIndex;
 
@@ -39,11 +46,13 @@ class GraphRAGConfig {
     EntityExtractionConfig? extractionConfig,
     CommunityDetectionConfig? communityConfig,
     IndexingConfig? indexingConfig,
+    GraphRAGExtendedConfig? extendedConfig,
     this.autoIndex = false,
   })  : queryConfig = queryConfig ?? HybridQueryConfig(),
         extractionConfig = extractionConfig ?? EntityExtractionConfig(),
         communityConfig = communityConfig ?? CommunityDetectionConfig(),
-        indexingConfig = indexingConfig ?? IndexingConfig();
+        indexingConfig = indexingConfig ?? IndexingConfig(),
+        extendedConfig = extendedConfig ?? const GraphRAGExtendedConfig();
 }
 
 /// Main facade for GraphRAG functionality
@@ -53,6 +62,7 @@ class GraphRAGConfig {
 /// - Building and querying the knowledge graph
 /// - Running background indexing
 /// - Executing hybrid queries (Cypher + semantic)
+/// - Automatic backend selection (NPU/GPU/CPU) with fallback
 class GraphRAG {
   final GraphRAGConfig _config;
   final PlatformService _platform;
@@ -60,11 +70,33 @@ class GraphRAG {
   final Future<List<double>> Function(String text) _embeddingCallback;
   final Future<String> Function(String prompt, Uint8List imageBytes)? _visionLlmCallback;
   
+  /// Optional callback for entity extraction with tool support
+  /// If provided, enables structured function calling for extraction
+  final Future<String> Function(String prompt, {List<Tool>? tools})? _extractionLlmCallback;
+  
+  /// Callback to notify when extraction phase is complete (can deallocate extraction model)
+  final Future<void> Function()? _onExtractionPhaseComplete;
+  
+  /// Callback to prepare main LLM before summarization (can reallocate if needed)
+  final Future<void> Function()? _onBeforeSummarization;
+  
   late final NativeGraphRepository _repository;
   late final ConnectorManager _connectorManager;
-  late final LLMEntityExtractor _extractor;
+  late final EntityExtractor _extractor;
   late final HybridQueryEngine _queryEngine;
   late final BackgroundIndexingService _indexingService;
+  
+  /// Cache manager for model caching (5-10x faster reloads)
+  late final ModelCacheManager _cacheManager;
+  
+  /// Device capability detector for backend selection
+  late final DeviceCapabilityDetector _deviceDetector;
+  
+  /// Backend fallback manager
+  late final BackendFallbackManager _fallbackManager;
+  
+  /// Currently active backend
+  PreferredBackend? _activeBackend;
   
   bool _initialized = false;
 
@@ -74,14 +106,49 @@ class GraphRAG {
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
     Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})? extractionLlmCallback,
+    Future<void> Function()? onExtractionPhaseComplete,
+    Future<void> Function()? onBeforeSummarization,
+    DeviceCapabilityDetector? deviceDetector,
+    ModelCacheManager? cacheManager,
   })  : _config = config,
         _platform = platform,
         _llmCallback = llmCallback,
         _embeddingCallback = embeddingCallback,
-        _visionLlmCallback = visionLlmCallback;
+        _visionLlmCallback = visionLlmCallback,
+        _extractionLlmCallback = extractionLlmCallback,
+        _onExtractionPhaseComplete = onExtractionPhaseComplete,
+        _onBeforeSummarization = onBeforeSummarization {
+    // Initialize capability detector (can be mocked for testing)
+    _deviceDetector = deviceDetector ?? DeviceCapabilityDetector();
+    
+    // Initialize cache manager
+    _cacheManager = cacheManager ?? 
+        (config.extendedConfig.enableCacheDir 
+            ? LiteRTModelCacheManager(
+                customCacheDirectory: config.extendedConfig.cacheDirectoryPath,
+                enableLogging: config.extendedConfig.enablePerformanceLogging,
+              )
+            : MockModelCacheManager());
+    
+    // Initialize fallback manager
+    _fallbackManager = BackendFallbackManager(
+      detector: _deviceDetector,
+      enablePerformanceLogging: config.extendedConfig.enablePerformanceLogging,
+    );
+  }
 
   /// Whether GraphRAG is initialized
   bool get isInitialized => _initialized;
+  
+  /// Currently active backend after initialization
+  PreferredBackend? get activeBackend => _activeBackend;
+  
+  /// Cache manager for model caching
+  ModelCacheManager get cacheManager => _cacheManager;
+  
+  /// Device capability detector
+  DeviceCapabilityDetector get deviceDetector => _deviceDetector;
 
   /// Access to the graph repository
   GraphRepository get repository {
@@ -145,12 +212,47 @@ class GraphRAG {
       DocumentsConnector(_platform),
     );
 
-    // Setup entity extractor
-    _extractor = LLMEntityExtractor(
-      llmCallback: _llmCallback,
-      embeddingCallback: _embeddingCallback,
-      config: _config.extractionConfig,
-    );
+    // Setup entity extractor with optional native function calling
+    final extendedConfig = _config.extendedConfig;
+    final extractionCallback = _extractionLlmCallback;
+    if (extendedConfig.enableFunctionCalling && extractionCallback != null) {
+      // Use adaptive extractor with proper tool support
+      _extractor = AdaptiveEntityExtractor(
+        llmCallback: (prompt, {tools}) => extractionCallback(
+          prompt,
+          tools: tools?.cast<Tool>(),
+        ),
+        embeddingCallback: _embeddingCallback,
+        enableFunctionCalling: true,
+        config: _config.extractionConfig,
+        enableLogging: extendedConfig.enablePerformanceLogging,
+      );
+      if (extendedConfig.enablePerformanceLogging) {
+        debugPrint('[GraphRAG] Using AdaptiveEntityExtractor with tool support');
+      }
+    } else if (extendedConfig.enableFunctionCalling) {
+      // Function calling enabled but no extraction callback - use LLM with fallback
+      _extractor = AdaptiveEntityExtractor(
+        llmCallback: (prompt, {tools}) => _llmCallback(prompt),
+        embeddingCallback: _embeddingCallback,
+        enableFunctionCalling: false, // Disable native, use JSON extraction
+        config: _config.extractionConfig,
+        enableLogging: extendedConfig.enablePerformanceLogging,
+      );
+      if (extendedConfig.enablePerformanceLogging) {
+        debugPrint('[GraphRAG] Using AdaptiveEntityExtractor without tool support (no extractionLlmCallback)');
+      }
+    } else {
+      // Use standard LLM extractor
+      _extractor = LLMEntityExtractor(
+        llmCallback: _llmCallback,
+        embeddingCallback: _embeddingCallback,
+        config: _config.extractionConfig,
+      );
+      if (extendedConfig.enablePerformanceLogging) {
+        debugPrint('[GraphRAG] Using LLMEntityExtractor');
+      }
+    }
 
     // Setup query engine with LLM for local answer generation
     _queryEngine = HybridQueryEngine(
@@ -168,6 +270,9 @@ class GraphRAG {
       llmCallback: _llmCallback,
       embeddingCallback: _embeddingCallback,
       visionLlmCallback: _visionLlmCallback,
+      structuredLlmCallback: _extractionLlmCallback,
+      onExtractionPhaseComplete: _onExtractionPhaseComplete,
+      onBeforeSummarization: _onBeforeSummarization,
       config: _config.indexingConfig,
     );
 
@@ -177,6 +282,65 @@ class GraphRAG {
     if (_config.autoIndex) {
       await startIndexing();
     }
+  }
+  
+  /// Initialize with backend selection and fallback
+  /// 
+  /// This method attempts to initialize with the preferred backend,
+  /// falling back to less capable backends on error.
+  /// 
+  /// Returns the [BackendInitResult] with the successfully initialized
+  /// backend and any fallback attempts.
+  Future<BackendInitResult> initializeWithBackendFallback({
+    Future<bool> Function(PreferredBackend backend)? backendInitCallback,
+  }) async {
+    // First do standard initialization
+    await initialize();
+    
+    // If no backend callback provided, just detect optimal backend
+    if (backendInitCallback == null) {
+      final optimal = await _deviceDetector.detectOptimalBackend(
+        enableNPU: _config.extendedConfig.enableNPUDetection,
+      );
+      _activeBackend = toPreferredBackend(optimal);
+      return BackendInitResult(
+        backend: _activeBackend!,
+        success: true,
+        attemptedBackends: [_activeBackend!],
+      );
+    }
+    
+    // Use fallback manager for backend initialization
+    final result = await _fallbackManager.initializeWithFallback(
+      preferredBackend: _config.extendedConfig.preferredBackend,
+      initCallback: backendInitCallback,
+      enableNPU: _config.extendedConfig.enableNPUDetection,
+    );
+    
+    if (result.success) {
+      _activeBackend = result.backend;
+    }
+    
+    return result;
+  }
+  
+  /// Get optimal context size for current backend
+  int getOptimalContextSize({String? modelId}) {
+    final backend = _activeBackend ?? PreferredBackend.gpu;
+    return ContextWindowManager.getOptimalContextSize(
+      backend: backend,
+      modelId: modelId,
+      requestedSize: _config.extendedConfig.maxContextTokens,
+    );
+  }
+  
+  /// Check if the current backend supports global queries
+  /// 
+  /// Global queries require more context for map-reduce operations.
+  /// NPU backend has reduced context and may not support complex global queries.
+  bool supportsGlobalQueries() {
+    final contextSize = getOptimalContextSize();
+    return ContextWindowManager.isSufficientForGlobalQuery(contextSize);
   }
 
   /// Close GraphRAG and release resources
@@ -766,6 +930,9 @@ class GraphRAGFactory {
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
     Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})? extractionLlmCallback,
+    Future<void> Function()? onExtractionPhaseComplete,
+    Future<void> Function()? onBeforeSummarization,
     bool autoIndex = false,
   }) {
     return GraphRAG(
@@ -777,6 +944,9 @@ class GraphRAGFactory {
       llmCallback: llmCallback,
       embeddingCallback: embeddingCallback,
       visionLlmCallback: visionLlmCallback,
+      extractionLlmCallback: extractionLlmCallback,
+      onExtractionPhaseComplete: onExtractionPhaseComplete,
+      onBeforeSummarization: onBeforeSummarization,
     );
   }
 
@@ -787,6 +957,9 @@ class GraphRAGFactory {
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
     Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})? extractionLlmCallback,
+    Future<void> Function()? onExtractionPhaseComplete,
+    Future<void> Function()? onBeforeSummarization,
   }) {
     return GraphRAG(
       config: config,
@@ -794,6 +967,9 @@ class GraphRAGFactory {
       llmCallback: llmCallback,
       embeddingCallback: embeddingCallback,
       visionLlmCallback: visionLlmCallback,
+      extractionLlmCallback: extractionLlmCallback,
+      onExtractionPhaseComplete: onExtractionPhaseComplete,
+      onBeforeSummarization: onBeforeSummarization,
     );
   }
 }
