@@ -376,8 +376,7 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
       entities: _entities,
       relationships: _relationships,
       onEntityTap: _showEntityDetails,
-      enableClustering: true,
-      clusterThreshold: 20,
+      hubThreshold: 5,
     );
   }
 

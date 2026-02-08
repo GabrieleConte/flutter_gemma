@@ -11,32 +11,24 @@ class GraphNode {
   Offset velocity;
   bool isDragging;
 
-  /// For cluster nodes: the entity IDs contained in this cluster
-  final List<String>? clusterEntityIds;
-
-  /// Whether this node can be clicked to expand (for collapsed clusters)
-  final bool isCluster;
+  /// Number of child entities (only meaningful for HUB nodes)
+  final int childCount;
 
   GraphNode({
     required this.id,
     required this.name,
     required this.type,
     required this.position,
-    this.clusterEntityIds,
-    bool? isCluster,
-  })  : isCluster = isCluster ??
-            (clusterEntityIds != null && clusterEntityIds.isNotEmpty),
-        velocity = Offset.zero,
+    this.childCount = 0,
+  })  : velocity = Offset.zero,
         isDragging = false;
 
   Color get color {
-    if (isCluster) return Colors.blueGrey;
-
     switch (type.toUpperCase()) {
       case 'SELF':
-        return Colors.amber; // "You" central node - golden
+        return Colors.amber;
       case 'HUB':
-        return Colors.indigo.shade300; // Hub nodes - indigo
+        return Colors.indigo.shade300;
       case 'PERSON':
         return Colors.blue;
       case 'ORGANIZATION':
@@ -53,6 +45,8 @@ class GraphNode {
         return Colors.deepOrange;
       case 'NOTE':
         return Colors.cyan;
+      case 'NOTE_CHUNK':
+        return Colors.cyan.shade700;
       case 'PROJECT':
         return Colors.deepPurple;
       case 'TOPIC':
@@ -69,13 +63,11 @@ class GraphNode {
   }
 
   IconData get icon {
-    if (isCluster) return Icons.workspaces;
-
     switch (type.toUpperCase()) {
       case 'SELF':
-        return Icons.account_circle; // "You" central node
+        return Icons.account_circle;
       case 'HUB':
-        return Icons.hub; // Hub node
+        return Icons.hub;
       case 'PERSON':
         return Icons.person;
       case 'ORGANIZATION':
@@ -91,6 +83,8 @@ class GraphNode {
       case 'DOCUMENT':
         return Icons.description;
       case 'NOTE':
+        return Icons.note;
+      case 'NOTE_CHUNK':
         return Icons.note;
       case 'PROJECT':
         return Icons.folder;
@@ -115,52 +109,49 @@ class GraphEdge {
   final String type;
   final double weight;
 
+  /// Role determines rest-length and rendering style
+  final EdgeRole role;
+
   GraphEdge({
     required this.sourceId,
     required this.targetId,
     required this.type,
     this.weight = 1.0,
+    this.role = EdgeRole.entityToEntity,
   });
 }
 
-/// A cluster of related entities
-class GraphCluster {
-  final String id;
-  final String name;
-  final List<GraphEntity> entities;
-  final String dominantType;
-  bool isExpanded;
+/// Semantic role of an edge — controls spring rest-length and visual style
+enum EdgeRole {
+  /// Hub -> You (thick, medium length)
+  hubToYou,
 
-  GraphCluster({
-    required this.id,
-    required this.name,
-    required this.entities,
-    required this.dominantType,
-    this.isExpanded = false,
-  });
+  /// Entity -> Hub (thin, short)
+  entityToHub,
 
-  int get size => entities.length;
+  /// Entity -> You direct (medium, no hub)
+  entityToYou,
+
+  /// Entity <-> Entity relationship (thin, subtle)
+  entityToEntity,
 }
 
-/// Interactive graph visualizer with force-directed layout and clustering
+/// Interactive graph visualizer with force-directed layout and hub routing
 class GraphVisualizer extends StatefulWidget {
   final List<GraphEntity> entities;
   final List<GraphRelationship> relationships;
   final void Function(GraphEntity entity)? onEntityTap;
 
-  /// Threshold for clustering - types with more than this many nodes will be clustered
-  final int clusterThreshold;
-
-  /// Whether to enable clustering mode
-  final bool enableClustering;
+  /// Entity types with MORE than this many entities will route through a HUB
+  /// node instead of connecting directly to "You". Set to 0 to always use hubs.
+  final int hubThreshold;
 
   const GraphVisualizer({
     super.key,
     required this.entities,
     required this.relationships,
     this.onEntityTap,
-    this.clusterThreshold = 10,
-    this.enableClustering = true,
+    this.hubThreshold = 5,
   });
 
   @override
@@ -173,15 +164,8 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   late List<GraphEdge> _edges;
   late AnimationController _simulationController;
 
-  // Clustering state
-  Map<String, GraphCluster> _clusters = {};
-  final Set<String> _expandedClusters = {};
-
-  // Track which entities came from which cluster (for cloud grouping)
-  final Map<String, String> _entitySourceCluster = {};
-
-  // Track cluster center positions when expanded
-  final Map<String, Offset> _expandedClusterCenters = {};
+  /// Which node-pair keys are connected via an edge (for reducing repulsion)
+  final Set<String> _connectedPairs = {};
 
   // Transformation state
   Offset _offset = Offset.zero;
@@ -192,54 +176,54 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   String? _selectedNodeId;
   GraphNode? _draggedNode;
 
-  // Force simulation parameters
-  static const double _repulsionStrength = 5000.0;
-  static const double _attractionStrength = 0.01;
-  static const double _centeringStrength = 0.01;
-  static const double _damping = 0.9;
-  static const double _minDistance = 50.0;
-
-  // Virtual canvas size - much larger than screen for panning
+  // Virtual canvas size
   double _virtualCanvasSize = 2000.0;
 
-  // Dynamic node sizing based on total entities
+  // --- Force simulation constants ---
+  static const double _repulsionStrength = 8000.0;
+  static const double _minDistance = 60.0;
+  static const double _springStrength = 0.03;
+  static const double _damping = 0.85;
+  static const double _velocityThreshold = 0.2;
+  static const double _centerGravity = 0.005;
+  static const double _youCenterGravity = 0.02;
+
+  /// Rest-lengths per edge role
+  static double _restLength(EdgeRole role) {
+    switch (role) {
+      case EdgeRole.hubToYou:
+        return 200.0;
+      case EdgeRole.entityToHub:
+        return 130.0;
+      case EdgeRole.entityToYou:
+        return 160.0;
+      case EdgeRole.entityToEntity:
+        return 110.0;
+    }
+  }
+
+  // --- Node sizing ---
   double _getNodeRadius(GraphNode node, {bool isSelected = false}) {
     final totalNodes = _nodes.length;
+    final scaleFactor = (40.0 / totalNodes).clamp(0.6, 1.0);
 
-    // Base size reduction when many nodes visible
-    double scaleFactor = 1.0;
-    if (totalNodes > 30) {
-      scaleFactor = 30 / totalNodes; // Scale down proportionally
-      scaleFactor = scaleFactor.clamp(0.5, 1.0); // Min 50% of original size
-    }
-
-    // Type-based sizing
     double baseRadius;
-    switch (node.type) {
+    switch (node.type.toUpperCase()) {
       case 'SELF':
-        baseRadius = 28.0; // "You" is largest
+        baseRadius = 30.0;
         break;
       case 'HUB':
-        baseRadius = 22.0; // Hubs are medium-large
+        baseRadius = 20.0 + min(node.childCount * 0.5, 8.0);
         break;
       case 'PERSON':
-        baseRadius = 16.0;
-        break;
-      case 'EVENT':
-      case 'ORGANIZATION':
         baseRadius = 14.0;
         break;
       default:
-        baseRadius = 12.0; // Other types are smaller
+        baseRadius = 11.0;
     }
 
-    // Is this a cluster node?
-    if (node.clusterEntityIds != null && node.clusterEntityIds!.isNotEmpty) {
-      baseRadius = 24.0; // Cluster nodes are large
-    }
-
-    final scaledRadius = baseRadius * scaleFactor;
-    return isSelected ? scaledRadius * 1.2 : scaledRadius;
+    final r = baseRadius * scaleFactor;
+    return isSelected ? r * 1.2 : r;
   }
 
   @override
@@ -268,546 +252,335 @@ class _GraphVisualizerState extends State<GraphVisualizer>
     super.dispose();
   }
 
+  // =====================================================================
+  //  GRAPH INITIALIZATION — hub routing + radial initial placement
+  // =====================================================================
+
   void _initializeGraph() {
     final random = Random(42);
-    // Use virtual canvas center for positioning
-    final centerX = _virtualCanvasSize / 2;
-    final centerY = _virtualCanvasSize / 2;
-
-    if (widget.enableClustering) {
-      _initializeWithClustering(random, centerX, centerY);
-    } else {
-      _initializeWithoutClustering(random, centerX, centerY);
-    }
-
-    // Set initial offset to center the virtual canvas in the view
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        final size = context.size ?? const Size(400, 400);
-        setState(() {
-          // Center the virtual canvas center in the screen
-          _offset = Offset(
-            size.width / 2 - (_virtualCanvasSize / 2) * _scale,
-            size.height / 2 - (_virtualCanvasSize / 2) * _scale,
-          );
-        });
-      }
-    });
-  }
-
-  void _initializeWithClustering(
-      Random random, double centerX, double centerY) {
-    // Dynamically size virtual canvas based on entity count
     final totalEntities = widget.entities.length;
     _virtualCanvasSize = (1500.0 + totalEntities * 30).clamp(1500.0, 5000.0);
+    final cx = _virtualCanvasSize / 2;
+    final cy = _virtualCanvasSize / 2;
 
-    // Group entities by type
-    final entitiesByType = <String, List<GraphEntity>>{};
-    for (final entity in widget.entities) {
-      entitiesByType.putIfAbsent(entity.type, () => []);
-      entitiesByType[entity.type]!.add(entity);
+    // ---- 1. Build entity lookup ----
+    final entityById = <String, GraphEntity>{};
+    for (final e in widget.entities) {
+      entityById[e.id] = e;
     }
 
-    // Create clusters for types that exceed threshold
-    _clusters = {};
-    final clusteredEntityIds = <String>{};
-    final unclustered = <GraphEntity>[];
-    // Track which entities come from expanded clusters
-    final expandedClusterEntities = <String, List<GraphEntity>>{};
-
-    for (final entry in entitiesByType.entries) {
-      final type = entry.key;
-      final entities = entry.value;
-
-      // Always show "You" node and don't cluster types with few entities
-      if (type == 'SELF' || entities.length <= widget.clusterThreshold) {
-        unclustered.addAll(entities);
-      } else {
-        // Check if this cluster is expanded
-        final clusterId = 'cluster_$type';
-        if (_expandedClusters.contains(clusterId)) {
-          // Track these entities as coming from this expanded cluster
-          expandedClusterEntities[clusterId] = entities;
-          for (final e in entities) {
-            _entitySourceCluster[e.id] = clusterId;
-          }
-          // Keep cluster as a hub node even when expanded
-          _clusters[clusterId] = GraphCluster(
-            id: clusterId,
-            name: type, // Just type name, not count
-            entities: entities,
-            dominantType: type,
-            isExpanded: true,
-          );
-        } else {
-          // Create cluster node (collapsed)
-          _clusters[clusterId] = GraphCluster(
-            id: clusterId,
-            name: '$type (${entities.length})',
-            entities: entities,
-            dominantType: type,
-            isExpanded: false,
-          );
-          clusteredEntityIds.addAll(entities.map((e) => e.id));
-        }
-      }
+    // ---- 2. Find hub entities and "You" entity ----
+    final hubEntities = <String, GraphEntity>{};
+    for (final e in widget.entities) {
+      if (e.type == 'HUB') hubEntities[e.id] = e;
     }
 
-    // Create nodes for unclustered entities (not from expanded clusters)
-    final visibleEntityIds = <String>{};
-    _nodes = [];
-
-    for (final entity in unclustered) {
-      visibleEntityIds.add(entity.id);
-      _nodes.add(GraphNode(
-        id: entity.id,
-        name: entity.name,
-        type: entity.type,
-        position: Offset(
-          centerX + (random.nextDouble() - 0.5) * 300,
-          centerY + (random.nextDouble() - 0.5) * 300,
-        ),
-      ));
-    }
-
-    // Create nodes for expanded cluster entities - position in a cloud around saved center
-    for (final entry in expandedClusterEntities.entries) {
-      final clusterId = entry.key;
-      final entities = entry.value;
-      final clusterCenter =
-          _expandedClusterCenters[clusterId] ?? Offset(centerX, centerY);
-
-      // Position entities in a circular cloud around the cluster center
-      // Scale very aggressively for large clusters - hub will be at center
-      final count = entities.length;
-      // Much larger base radius to leave room for hub at center
-      final baseRadius = 150.0 + (count * 25).clamp(0, 1500).toDouble();
-      // Fewer entities per ring with larger spacing
-      final entitiesPerRing = count > 40 ? 12 : (count > 20 ? 10 : 8);
-      final ringSpacing =
-          80.0 + (count > 40 ? 60.0 : (count > 20 ? 40.0 : 20.0));
-
-      for (var i = 0; i < entities.length; i++) {
-        final entity = entities[i];
-        visibleEntityIds.add(entity.id);
-
-        // Use golden angle for even distribution around circle
-        final angle = i * 2.39996; // Golden angle in radians (~137.5 degrees)
-        final ringIndex = i ~/ entitiesPerRing;
-        final radius = baseRadius + (ringIndex * ringSpacing);
-        final jitter = (random.nextDouble() - 0.5) * 30;
-
-        _nodes.add(GraphNode(
-          id: entity.id,
-          name: entity.name,
-          type: entity.type,
-          position: Offset(
-            clusterCenter.dx + cos(angle) * radius + jitter,
-            clusterCenter.dy + sin(angle) * radius + jitter,
-          ),
-        ));
-      }
-    }
-
-    // Add cluster nodes (both collapsed and expanded as hubs)
-    for (final cluster in _clusters.values) {
-      // For expanded clusters, position at saved center
-      final position =
-          cluster.isExpanded && _expandedClusterCenters.containsKey(cluster.id)
-              ? _expandedClusterCenters[cluster.id]!
-              : Offset(
-                  centerX + (random.nextDouble() - 0.5) * 300,
-                  centerY + (random.nextDouble() - 0.5) * 300,
-                );
-
-      _nodes.add(GraphNode(
-        id: cluster.id,
-        name: cluster.name,
-        type: cluster.isExpanded
-            ? 'HUB'
-            : cluster.dominantType, // Mark expanded as HUB
-        position: position,
-        clusterEntityIds: cluster.isExpanded
-            ? null
-            : cluster.entities.map((e) => e.id).toList(),
-        isCluster: !cluster.isExpanded, // Only clickable to expand if collapsed
-      ));
-    }
-
-    // Create edges - connect to cluster if entity is clustered
-    _edges = [];
-    for (final rel in widget.relationships) {
-      String sourceId = rel.sourceId;
-      String targetId = rel.targetId;
-
-      // Redirect edges to cluster nodes if source/target is clustered
-      if (clusteredEntityIds.contains(sourceId)) {
-        final cluster = _clusters.values.firstWhere(
-          (c) => c.entities.any((e) => e.id == sourceId),
-          orElse: () => _clusters.values.first,
-        );
-        sourceId = cluster.id;
-      }
-      if (clusteredEntityIds.contains(targetId)) {
-        final cluster = _clusters.values.firstWhere(
-          (c) => c.entities.any((e) => e.id == targetId),
-          orElse: () => _clusters.values.first,
-        );
-        targetId = cluster.id;
-      }
-
-      // Only add edge if both endpoints are visible
-      final sourceVisible = visibleEntityIds.contains(sourceId) ||
-          _clusters.containsKey(sourceId);
-      final targetVisible = visibleEntityIds.contains(targetId) ||
-          _clusters.containsKey(targetId);
-
-      if (sourceVisible && targetVisible && sourceId != targetId) {
-        // Avoid duplicate edges
-        final edgeExists = _edges.any(
-          (e) =>
-              (e.sourceId == sourceId && e.targetId == targetId) ||
-              (e.sourceId == targetId && e.targetId == sourceId),
-        );
-        if (!edgeExists) {
-          _edges.add(GraphEdge(
-            sourceId: sourceId,
-            targetId: targetId,
-            type: rel.type,
-            weight: rel.weight,
-          ));
-        }
-      }
-    }
-
-    // Ensure clusters and expanded cluster entities connect to "You" via hub representation
-    // Find the "You" node
-    final youNode = _nodes.firstWhere(
-      (n) => n.type == 'SELF',
-      orElse: () => _nodes.first,
+    final youEntity = widget.entities.firstWhere(
+      (e) => e.type == 'SELF',
+      orElse: () => widget.entities.first,
     );
 
-    // Connect UNCLUSTERED entities directly to "You"
-    // These are entities that didn't get grouped into a cluster
-    for (final entity in unclustered) {
-      // Skip "You" itself
-      if (entity.type == 'SELF') continue;
-      
-      // Check if this entity already has an edge to "You" from relationships
-      final alreadyConnected = _edges.any(
-        (e) =>
-            (e.sourceId == entity.id && e.targetId == youNode.id) ||
-            (e.sourceId == youNode.id && e.targetId == entity.id),
-      );
-      
-      if (!alreadyConnected) {
-        _edges.add(GraphEdge(
-          sourceId: youNode.id,
-          targetId: entity.id,
-          type: 'RELATED_TO',
-          weight: 0.4,
-        ));
+    // ---- 3. Determine hub children from ACTUAL relationships ----
+    // Instead of guessing from type names, use the relationship data
+    // to find which entities are connected to each hub.
+    final hubChildren = <String, Set<String>>{}; // hubId -> set of child entity IDs
+    for (final hubId in hubEntities.keys) {
+      hubChildren[hubId] = <String>{};
+    }
+    for (final rel in widget.relationships) {
+      final src = rel.sourceId;
+      final tgt = rel.targetId;
+      // If one side is a hub and the other is a normal entity, record it
+      if (_isHub(src) && !_isHub(tgt) && !_isSelf(tgt) && hubChildren.containsKey(src)) {
+        hubChildren[src]!.add(tgt);
+      }
+      if (_isHub(tgt) && !_isHub(src) && !_isSelf(src) && hubChildren.containsKey(tgt)) {
+        hubChildren[tgt]!.add(src);
       }
     }
 
-    // For collapsed clusters, create edge from cluster to "You"
-    for (final cluster in _clusters.values) {
-      final edgeExists = _edges.any(
-        (e) =>
-            (e.sourceId == cluster.id && e.targetId == youNode.id) ||
-            (e.sourceId == youNode.id && e.targetId == cluster.id),
-      );
-      if (!edgeExists) {
-        _edges.add(GraphEdge(
-          sourceId: youNode.id,
-          targetId: cluster.id,
-          type: 'CONTAINS',
-          weight: 0.5,
-        ));
+    // ---- 4. Decide which hubs are visible (children >= threshold) ----
+    final visibleHubIds = <String>{};
+    for (final entry in hubChildren.entries) {
+      if (entry.value.length >= widget.hubThreshold) {
+        visibleHubIds.add(entry.key);
       }
     }
 
-    // For expanded clusters: connect cluster hub to "You" (no edges to individual entities)
-    for (final clusterId in _expandedClusters) {
-      // Connect cluster hub to "You"
-      final hubEdgeExists = _edges.any(
-        (e) =>
-            (e.sourceId == clusterId && e.targetId == youNode.id) ||
-            (e.sourceId == youNode.id && e.targetId == clusterId),
-      );
-      if (!hubEdgeExists) {
-        _edges.add(GraphEdge(
-          sourceId: youNode.id,
-          targetId: clusterId,
-          type: 'CONTAINS',
-          weight: 0.7,
-        ));
-      }
-      // Entities in the cloud are NOT connected to hub - they just orbit around it
+    // Track which entities are routed through a visible hub
+    final hubRoutedEntityIds = <String>{};
+    for (final hubId in visibleHubIds) {
+      hubRoutedEntityIds.addAll(hubChildren[hubId]!);
     }
-  }
 
-  void _initializeWithoutClustering(
-      Random random, double centerX, double centerY) {
-    // Dynamically size virtual canvas based on entity count
-    final totalEntities = widget.entities.length;
-    _virtualCanvasSize = (1500.0 + totalEntities * 30).clamp(1500.0, 5000.0);
-
-    final entityIds = widget.entities.map((e) => e.id).toSet();
-
-    _nodes = widget.entities.map((entity) {
-      return GraphNode(
-        id: entity.id,
-        name: entity.name,
-        type: entity.type,
-        position: Offset(
-          centerX + (random.nextDouble() - 0.5) * 300,
-          centerY + (random.nextDouble() - 0.5) * 300,
-        ),
-      );
+    // ---- 5. Build visible entity set ----
+    final visibleEntities = widget.entities.where((e) {
+      if (e.type == 'HUB') return visibleHubIds.contains(e.id);
+      return true;
     }).toList();
 
-    // Only include edges where both nodes exist
-    _edges = widget.relationships
-        .where((r) =>
-            entityIds.contains(r.sourceId) && entityIds.contains(r.targetId))
-        .map((rel) => GraphEdge(
-              sourceId: rel.sourceId,
-              targetId: rel.targetId,
-              type: rel.type,
-              weight: rel.weight,
-            ))
-        .toList();
+    // ---- 6. Radial initial placement ----
+    final nodeMap = <String, GraphNode>{};
+    final entityIdSet = visibleEntities.map((e) => e.id).toSet();
 
-    // Connect all entities to "You" if not already connected
-    final youNode = _nodes.firstWhere(
-      (n) => n.type == 'SELF',
-      orElse: () => _nodes.first,
+    // Place "You" at center
+    nodeMap[youEntity.id] = GraphNode(
+      id: youEntity.id,
+      name: youEntity.name,
+      type: youEntity.type,
+      position: Offset(cx, cy),
     );
 
-    for (final entity in widget.entities) {
-      // Skip "You" itself
-      if (entity.type == 'SELF') continue;
-
-      // Check if this entity already has an edge to "You"
-      final alreadyConnected = _edges.any(
-        (e) =>
-            (e.sourceId == entity.id && e.targetId == youNode.id) ||
-            (e.sourceId == youNode.id && e.targetId == entity.id),
+    // Place hub nodes in an inner ring around "You"
+    final hubList = visibleHubIds.toList();
+    const hubRingRadius = 250.0;
+    for (var i = 0; i < hubList.length; i++) {
+      final hubId = hubList[i];
+      final hubEntity = hubEntities[hubId]!;
+      final childCount = hubChildren[hubId]?.length ?? 0;
+      final angle = (2 * pi * i) / hubList.length - pi / 2;
+      nodeMap[hubId] = GraphNode(
+        id: hubId,
+        name: hubEntity.name,
+        type: hubEntity.type,
+        position: Offset(
+          cx + cos(angle) * hubRingRadius,
+          cy + sin(angle) * hubRingRadius,
+        ),
+        childCount: childCount,
       );
+    }
 
-      if (!alreadyConnected) {
-        _edges.add(GraphEdge(
-          sourceId: youNode.id,
-          targetId: entity.id,
-          type: 'RELATED_TO',
-          weight: 0.4,
-        ));
+    // Place hub-routed entities around their hub
+    for (final hubId in hubList) {
+      final children = hubChildren[hubId]!
+          .where((id) => entityById.containsKey(id))
+          .map((id) => entityById[id]!)
+          .toList();
+      final hubPos = nodeMap[hubId]!.position;
+      final childRadius = 120.0 + min(children.length * 12.0, 400.0);
+      for (var ci = 0; ci < children.length; ci++) {
+        final child = children[ci];
+        if (nodeMap.containsKey(child.id)) continue;
+        final angle = ci * 2.39996; // golden angle
+        final ringIndex = ci ~/ 10;
+        final r = childRadius + ringIndex * 60.0;
+        final jitter = (random.nextDouble() - 0.5) * 20;
+        nodeMap[child.id] = GraphNode(
+          id: child.id,
+          name: child.name,
+          type: child.type,
+          position: Offset(
+            hubPos.dx + cos(angle) * r + jitter,
+            hubPos.dy + sin(angle) * r + jitter,
+          ),
+        );
       }
     }
-  }
 
-  void _toggleCluster(String clusterId) {
-    setState(() {
-      if (_expandedClusters.contains(clusterId)) {
-        // Collapsing: remove center position tracking
-        _expandedClusters.remove(clusterId);
-        _expandedClusterCenters.remove(clusterId);
-        // Clear entity source cluster mapping for this cluster
-        _entitySourceCluster.removeWhere((_, v) => v == clusterId);
-      } else {
-        // Expanding: save current cluster node position as center
-        final clusterNode = _nodes.firstWhere(
-          (n) => n.id == clusterId,
-          orElse: () => _nodes.first,
-        );
-        _expandedClusterCenters[clusterId] = clusterNode.position;
-        _expandedClusters.add(clusterId);
+    // Place non-hub entities in a ring around "You"
+    final nonHubEntities = visibleEntities
+        .where(
+            (e) => !nodeMap.containsKey(e.id) && e.type != 'SELF' && e.type != 'HUB')
+        .toList();
+    final directRingRadius = 180.0 + min(nonHubEntities.length * 15.0, 300.0);
+    for (var i = 0; i < nonHubEntities.length; i++) {
+      final e = nonHubEntities[i];
+      final angle = i * 2.39996;
+      final ringIndex = i ~/ 8;
+      final r = directRingRadius + ringIndex * 50.0;
+      final jitter = (random.nextDouble() - 0.5) * 20;
+      nodeMap[e.id] = GraphNode(
+        id: e.id,
+        name: e.name,
+        type: e.type,
+        position: Offset(
+          cx + cos(angle) * r + jitter,
+          cy + sin(angle) * r + jitter,
+        ),
+      );
+    }
+
+    _nodes = nodeMap.values.toList();
+
+    // ---- 7. Build edges ----
+    _edges = [];
+    _connectedPairs.clear();
+    final addedEdges = <String>{};
+
+    void addEdge(
+        String src, String tgt, String type, double weight, EdgeRole role) {
+      if (src == tgt) return;
+      if (!entityIdSet.contains(src) || !entityIdSet.contains(tgt)) return;
+      final key = src.compareTo(tgt) < 0 ? '$src|$tgt' : '$tgt|$src';
+      if (addedEdges.contains(key)) return;
+      addedEdges.add(key);
+      _edges.add(GraphEdge(
+        sourceId: src,
+        targetId: tgt,
+        type: type,
+        weight: weight,
+        role: role,
+      ));
+      _connectedPairs.add(key);
+    }
+
+    // 7a. Data-layer relationships (skip edges involving hidden hubs)
+    for (final rel in widget.relationships) {
+      if (!entityIdSet.contains(rel.sourceId) ||
+          !entityIdSet.contains(rel.targetId)) {
+        continue;
       }
-      _initializeGraph();
 
-      // Auto-fit view after cluster expansion/collapse with a slight delay
-      Future.delayed(const Duration(milliseconds: 100), () {
-        if (mounted) _fitAllNodes();
-      });
+      EdgeRole role;
+      if ((_isHub(rel.sourceId) && _isSelf(rel.targetId)) ||
+          (_isSelf(rel.sourceId) && _isHub(rel.targetId))) {
+        role = EdgeRole.hubToYou;
+      } else if (_isHub(rel.sourceId) || _isHub(rel.targetId)) {
+        role = EdgeRole.entityToHub;
+      } else if (_isSelf(rel.sourceId) || _isSelf(rel.targetId)) {
+        role = EdgeRole.entityToYou;
+      } else {
+        role = EdgeRole.entityToEntity;
+      }
+
+      addEdge(rel.sourceId, rel.targetId, rel.type, rel.weight, role);
+    }
+
+    // 7b. Ensure every visible hub is connected to "You"
+    for (final hubId in visibleHubIds) {
+      addEdge(youEntity.id, hubId, 'HAS_DATA', 1.0, EdgeRole.hubToYou);
+    }
+
+    // 7c. Ensure hub-routed entities have edges to their hub
+    for (final hubId in visibleHubIds) {
+      for (final childId in hubChildren[hubId]!) {
+        if (childId == youEntity.id) continue;
+        if (!entityIdSet.contains(childId)) continue;
+        addEdge(hubId, childId, 'CONTAINS', 0.6, EdgeRole.entityToHub);
+      }
+    }
+
+    // 7d. Non-hub entities connect directly to "You"
+    for (final e in nonHubEntities) {
+      addEdge(youEntity.id, e.id, 'RELATED_TO', 0.4, EdgeRole.entityToYou);
+    }
+
+    // ---- 8. Initial view offset ----
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fitAllNodes();
     });
   }
+
+  bool _isHub(String id) => id.startsWith('hub_');
+  bool _isSelf(String id) => id == 'you_central_node';
+
+  // =====================================================================
+  //  FORCE-DIRECTED PHYSICS — Coulomb + Hooke + centering gravity
+  // =====================================================================
 
   void _simulateStep() {
     if (_nodes.isEmpty) return;
 
-    final size = context.size ?? const Size(400, 400);
-    final center = Offset(size.width / 2, size.height / 2);
+    final virtualCenter =
+        Offset(_virtualCanvasSize / 2, _virtualCanvasSize / 2);
 
-    // Adaptive parameters based on node count - more nodes = faster settling
-    final nodeCount = _nodes.length;
-    final adaptiveDamping =
-        nodeCount > 30 ? 0.8 : (nodeCount > 15 ? 0.85 : _damping);
-    final velocityThreshold =
-        nodeCount > 30 ? 0.5 : (nodeCount > 15 ? 0.3 : 0.1);
-    final forceScale = nodeCount > 30 ? 0.5 : (nodeCount > 15 ? 0.7 : 1.0);
-
-    // Calculate forces for each node
     for (final node in _nodes) {
       if (node.isDragging) continue;
 
       var force = Offset.zero;
 
-      // Repulsion from other nodes
+      // --- Coulomb repulsion from every other node ---
       for (final other in _nodes) {
         if (other.id == node.id) continue;
 
         final delta = node.position - other.position;
-        final distance = max(delta.distance, 1.0); // Avoid division by zero
+        final dist = max(delta.distance, 1.0);
+        final effectiveDist = max(dist, _minDistance);
 
-        // Check if same cluster
-        final nodeCluster = _entitySourceCluster[node.id];
-        final otherCluster = _entitySourceCluster[other.id];
-        final sameCluster = nodeCluster != null && nodeCluster == otherCluster;
+        // Reduce repulsion between connected nodes so edges can stay shorter
+        final pairKey = node.id.compareTo(other.id) < 0
+            ? '${node.id}|${other.id}'
+            : '${other.id}|${node.id}';
+        final connected = _connectedPairs.contains(pairKey);
+        final repulsionScale = connected ? 0.3 : 1.0;
 
-        // Check if other node is the hub of this node's cluster
-        final otherIsMyHub = nodeCluster != null && other.id == nodeCluster;
-        // Check if this node is an entity and other is its cluster hub
-        final iAmEntityOtherIsHub = otherIsMyHub;
-
-        if (iAmEntityOtherIsHub) {
-          // Entity must stay away from its hub - strong repulsion at close range
-          const hubMinDistance = 80.0;
-          if (distance < hubMinDistance) {
-            final overlap = hubMinDistance - distance;
-            final pushStrength = overlap * 0.15; // Strong push away from hub
-            final pushDir =
-                delta.distance > 0.1 ? delta / distance : const Offset(1, 0);
-            force += pushDir * pushStrength;
-          }
-        } else if (sameCluster) {
-          // Cloud behavior: push when overlapping - larger minimum distance
-          const cloudMinDistance = 70.0;
-          if (distance < cloudMinDistance) {
-            final overlap = cloudMinDistance - distance;
-            // Stronger push to keep entities apart
-            final pushStrength = overlap * 0.12 * forceScale;
-            final pushDir =
-                delta.distance > 0.1 ? delta / distance : const Offset(1, 0);
-            force += pushDir * pushStrength;
-          }
-        } else {
-          // Normal repulsion for different clusters
-          final effectiveDistance = max(distance, _minDistance);
-          final repulsion = delta /
-              effectiveDistance *
-              (_repulsionStrength / (effectiveDistance * effectiveDistance));
-          force += repulsion * forceScale;
-        }
+        final repulsion = (delta / effectiveDist) *
+            (_repulsionStrength *
+                repulsionScale /
+                (effectiveDist * effectiveDist));
+        force += repulsion;
       }
 
-      // Extra attraction to cluster center for entities from expanded clusters
-      final sourceCluster = _entitySourceCluster[node.id];
-      if (sourceCluster != null &&
-          _expandedClusterCenters.containsKey(sourceCluster)) {
-        final clusterCenter = _expandedClusterCenters[sourceCluster]!;
-        final toClusterCenter = clusterCenter - node.position;
-        final distToCenter = toClusterCenter.distance;
-        // Weaker center pull with many nodes - just enough to keep cloud coherent
-        final attractionStrength =
-            (0.015 + (distToCenter > 100 ? 0.02 : 0)) * forceScale;
-        force += toClusterCenter * attractionStrength;
-      }
-
-      // Cluster hub nodes should stay at the dynamic center of their cloud
-      // This is the PRIMARY force for expanded cluster hubs
-      if (node.id.startsWith('cluster_') &&
-          _expandedClusters.contains(node.id)) {
-        // Calculate dynamic center of all entities in this cluster
-        final clusterEntityNodes = _nodes
-            .where(
-              (n) => _entitySourceCluster[n.id] == node.id,
-            )
-            .toList();
-
-        if (clusterEntityNodes.isNotEmpty) {
-          // Calculate centroid of all cluster entities
-          double sumX = 0, sumY = 0;
-          for (final entityNode in clusterEntityNodes) {
-            sumX += entityNode.position.dx;
-            sumY += entityNode.position.dy;
-          }
-          final centroid = Offset(
-            sumX / clusterEntityNodes.length,
-            sumY / clusterEntityNodes.length,
-          );
-
-          // Strong but smooth attraction to centroid (allows dragging)
-          final toCentroid = centroid - node.position;
-          force += toCentroid * 0.5; // Very strong pull toward center
-
-          // Update saved center
-          _expandedClusterCenters[node.id] = centroid;
-        }
-      }
-
-      // Hub nodes should stay closer to center (where "You" is)
-      // But NOT expanded cluster hubs - they follow their cloud
-      if (node.type == 'HUB' && !_expandedClusters.contains(node.id)) {
-        final toCenter = center - node.position;
-        force += toCenter * 0.02 * forceScale;
-      }
-
-      // Attraction along edges
+      // --- Hooke spring attraction along edges ---
       for (final edge in _edges) {
         GraphNode? other;
         if (edge.sourceId == node.id) {
-          other = _nodes.where((n) => n.id == edge.targetId).firstOrNull;
+          other = _nodeById(edge.targetId);
         } else if (edge.targetId == node.id) {
-          other = _nodes.where((n) => n.id == edge.sourceId).firstOrNull;
+          other = _nodeById(edge.sourceId);
         }
+        if (other == null) continue;
 
-        if (other != null) {
-          final delta = other.position - node.position;
-          final attraction =
-              delta * _attractionStrength * edge.weight * forceScale;
-          force += attraction;
-        }
+        final delta = other.position - node.position;
+        final dist = delta.distance;
+        if (dist < 0.1) continue;
+        final rest = _restLength(edge.role);
+        final displacement = dist - rest;
+        final springForce =
+            (delta / dist) * (_springStrength * displacement * edge.weight);
+        force += springForce;
       }
 
-      // Centering force - pull towards virtual center, not screen center
-      // This keeps the graph coherent in virtual space
-      final virtualCenter =
-          Offset(_virtualCanvasSize / 2, _virtualCanvasSize / 2);
-      final toVirtualCenter = virtualCenter - node.position;
-      force += toVirtualCenter * _centeringStrength * forceScale * 0.5;
+      // --- Centering gravity ---
+      final toCenter = virtualCenter - node.position;
+      final gravity =
+          node.type == 'SELF' ? _youCenterGravity : _centerGravity;
+      force += toCenter * gravity;
 
-      // Update velocity and position with adaptive damping
-      node.velocity = (node.velocity + force) * adaptiveDamping;
-
-      // Adaptive velocity threshold - higher with more nodes
-      if (node.velocity.distance < velocityThreshold) {
+      // --- Integrate velocity ---
+      node.velocity = (node.velocity + force) * _damping;
+      if (node.velocity.distance < _velocityThreshold) {
         node.velocity = Offset.zero;
       } else {
         node.position += node.velocity;
       }
 
-      // Keep within virtual canvas bounds (much larger than screen)
+      // Clamp to virtual canvas
       node.position = Offset(
-        node.position.dx.clamp(50, _virtualCanvasSize - 50),
-        node.position.dy.clamp(50, _virtualCanvasSize - 50),
+        node.position.dx.clamp(50.0, _virtualCanvasSize - 50.0),
+        node.position.dy.clamp(50.0, _virtualCanvasSize - 50.0),
       );
     }
 
     setState(() {});
   }
 
-  GraphNode? _findNodeAt(Offset position) {
-    final transformedPosition = (position - _offset) / _scale;
+  GraphNode? _nodeById(String id) {
+    for (final n in _nodes) {
+      if (n.id == id) return n;
+    }
+    return null;
+  }
 
+  // =====================================================================
+  //  HIT TESTING
+  // =====================================================================
+
+  GraphNode? _findNodeAt(Offset position) {
+    final transformed = (position - _offset) / _scale;
     for (final node in _nodes.reversed) {
-      final distance = (node.position - transformedPosition).distance;
-      if (distance < 25) {
+      final r = _getNodeRadius(node);
+      if ((node.position - transformed).distance < r + 8) {
         return node;
       }
     }
     return null;
   }
+
+  // =====================================================================
+  //  BUILD
+  // =====================================================================
 
   @override
   Widget build(BuildContext context) {
@@ -818,14 +591,10 @@ class _GraphVisualizerState extends State<GraphVisualizer>
           children: [
             Icon(Icons.account_tree, size: 64, color: Colors.white24),
             SizedBox(height: 16),
-            Text(
-              'No entities to visualize',
-              style: TextStyle(color: Colors.white54),
-            ),
-            Text(
-              'Index some data first',
-              style: TextStyle(color: Colors.white38, fontSize: 12),
-            ),
+            Text('No entities to visualize',
+                style: TextStyle(color: Colors.white54)),
+            Text('Index some data first',
+                style: TextStyle(color: Colors.white38, fontSize: 12)),
           ],
         ),
       );
@@ -843,16 +612,13 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       onScaleUpdate: (details) {
         setState(() {
           if (_draggedNode != null) {
-            // Drag node
             final delta =
                 details.focalPoint - (_lastFocalPoint ?? details.focalPoint);
             _draggedNode!.position += delta / _scale;
             _draggedNode!.velocity = Offset.zero;
           } else if (details.scale != 1.0) {
-            // Zoom
             _scale = (_scale * details.scale).clamp(0.3, 3.0);
           } else {
-            // Pan
             final delta =
                 details.focalPoint - (_lastFocalPoint ?? details.focalPoint);
             _offset += delta;
@@ -870,12 +636,6 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       onTapUp: (details) {
         final node = _findNodeAt(details.localPosition);
         if (node != null) {
-          // Check if this is a cluster node
-          if (node.isCluster) {
-            _toggleCluster(node.id);
-            return;
-          }
-
           setState(() => _selectedNodeId = node.id);
           final entity = widget.entities.firstWhere(
             (e) => e.id == node.id,
@@ -890,7 +650,6 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         color: const Color(0xFF0a1929),
         child: Stack(
           children: [
-            // Graph canvas
             CustomPaint(
               painter: _GraphPainter(
                 nodes: _nodes,
@@ -902,59 +661,10 @@ class _GraphVisualizerState extends State<GraphVisualizer>
               ),
               size: Size.infinite,
             ),
-
-            // Legend
-            Positioned(
-              top: 8,
-              left: 8,
-              child: _buildLegend(),
-            ),
-
-            // Controls
-            Positioned(
-              bottom: 8,
-              right: 8,
-              child: _buildControls(),
-            ),
-
-            // Node count indicator
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '${widget.entities.length} entities total',
-                      style:
-                          const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                    Text(
-                      '${_nodes.length} nodes, ${_edges.length} edges shown',
-                      style:
-                          const TextStyle(color: Colors.white54, fontSize: 11),
-                    ),
-                    if (_clusters.isNotEmpty)
-                      Text(
-                        '${_clusters.length} clusters (tap to expand)',
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 10),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Selected node info
-            if (_selectedNodeId != null &&
-                !_selectedNodeId!.startsWith('cluster_'))
+            Positioned(top: 8, left: 8, child: _buildLegend()),
+            Positioned(bottom: 8, right: 8, child: _buildControls()),
+            Positioned(top: 8, right: 8, child: _buildNodeCount()),
+            if (_selectedNodeId != null)
               Positioned(
                 bottom: 8,
                 left: 8,
@@ -967,9 +677,12 @@ class _GraphVisualizerState extends State<GraphVisualizer>
     );
   }
 
-  Widget _buildLegend() {
-    final types = _nodes.map((n) => n.type).toSet().toList();
+  // =====================================================================
+  //  UI HELPERS
+  // =====================================================================
 
+  Widget _buildLegend() {
+    final types = _nodes.map((n) => n.type).toSet().toList()..sort();
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -980,14 +693,11 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Entity Types',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          const Text('Entity Types',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           ...types.map((type) {
             final node = _nodes.firstWhere((n) => n.type == type);
@@ -1005,14 +715,33 @@ class _GraphVisualizerState extends State<GraphVisualizer>
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    type,
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
-                  ),
+                  Text(type,
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 11)),
                 ],
               ),
             );
           }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNodeCount() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('${widget.entities.length} entities total',
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text('${_nodes.length} nodes, ${_edges.length} edges',
+              style: const TextStyle(color: Colors.white54, fontSize: 11)),
         ],
       ),
     );
@@ -1055,88 +784,15 @@ class _GraphVisualizerState extends State<GraphVisualizer>
     );
   }
 
-  void _centerOnGraph() {
-    if (_nodes.isEmpty) return;
-
-    final size = context.size ?? const Size(400, 400);
-
-    // Find center of all nodes
-    double sumX = 0, sumY = 0;
-    for (final node in _nodes) {
-      sumX += node.position.dx;
-      sumY += node.position.dy;
-    }
-    final graphCenterX = sumX / _nodes.length;
-    final graphCenterY = sumY / _nodes.length;
-
-    setState(() {
-      _scale = 1.0;
-      _offset = Offset(
-        size.width / 2 - graphCenterX * _scale,
-        size.height / 2 - graphCenterY * _scale,
-      );
-    });
-  }
-
-  void _fitAllNodes() {
-    if (_nodes.isEmpty) return;
-
-    final size = context.size ?? const Size(400, 400);
-
-    // Find bounding box of all nodes
-    double minX = double.infinity, maxX = double.negativeInfinity;
-    double minY = double.infinity, maxY = double.negativeInfinity;
-
-    for (final node in _nodes) {
-      minX = min(minX, node.position.dx);
-      maxX = max(maxX, node.position.dx);
-      minY = min(minY, node.position.dy);
-      maxY = max(maxY, node.position.dy);
-    }
-
-    final graphWidth = maxX - minX + 100; // Add padding
-    final graphHeight = maxY - minY + 100;
-    final graphCenterX = (minX + maxX) / 2;
-    final graphCenterY = (minY + maxY) / 2;
-
-    // Calculate scale to fit all nodes with some padding
-    final scaleX = (size.width - 100) / graphWidth;
-    final scaleY = (size.height - 150) / graphHeight;
-    final newScale = min(scaleX, scaleY).clamp(0.3, 2.0);
-
-    setState(() {
-      _scale = newScale;
-      _offset = Offset(
-        size.width / 2 - graphCenterX * _scale,
-        size.height / 2 - graphCenterY * _scale,
-      );
-    });
-  }
-
-  void _zoomAroundCenter(double factor) {
-    final size = context.size ?? const Size(400, 400);
-    final screenCenter = Offset(size.width / 2, size.height / 2);
-
-    // Find the world point at screen center before zoom
-    final worldPointAtCenter = (screenCenter - _offset) / _scale;
-
-    // Apply zoom
-    final newScale = (_scale * factor).clamp(0.3, 3.0);
-
-    // Adjust offset so the same world point stays at screen center
-    final newOffset = screenCenter - worldPointAtCenter * newScale;
-
-    setState(() {
-      _scale = newScale;
-      _offset = newOffset;
-    });
-  }
-
   Widget _buildSelectedNodeInfo() {
-    final node = _nodes.firstWhere((n) => n.id == _selectedNodeId);
-    final entity = widget.entities.firstWhere((e) => e.id == _selectedNodeId);
-
-    // Count connections
+    final node = _nodes.firstWhere(
+      (n) => n.id == _selectedNodeId,
+      orElse: () => _nodes.first,
+    );
+    final entity = widget.entities.firstWhere(
+      (e) => e.id == _selectedNodeId,
+      orElse: () => widget.entities.first,
+    );
     final connections = _edges
         .where((e) =>
             e.sourceId == _selectedNodeId || e.targetId == _selectedNodeId)
@@ -1158,14 +814,10 @@ class _GraphVisualizerState extends State<GraphVisualizer>
               Icon(node.icon, color: node.color, size: 20),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  node.name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(node.name,
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis),
               ),
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white54, size: 18),
@@ -1176,15 +828,12 @@ class _GraphVisualizerState extends State<GraphVisualizer>
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            'Type: ${node.type}',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-          Text(
-            'Connections: $connections',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-          if (entity.description != null && entity.description!.isNotEmpty) ...[
+          Text('Type: ${node.type}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text('Connections: $connections',
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          if (entity.description != null &&
+              entity.description!.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
               entity.description!.length > 100
@@ -1197,7 +846,68 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       ),
     );
   }
+
+  // =====================================================================
+  //  VIEW TRANSFORMS
+  // =====================================================================
+
+  void _centerOnGraph() {
+    if (_nodes.isEmpty) return;
+    final size = context.size ?? const Size(400, 400);
+    double sumX = 0, sumY = 0;
+    for (final node in _nodes) {
+      sumX += node.position.dx;
+      sumY += node.position.dy;
+    }
+    final gcx = sumX / _nodes.length;
+    final gcy = sumY / _nodes.length;
+    setState(() {
+      _scale = 1.0;
+      _offset = Offset(
+          size.width / 2 - gcx * _scale, size.height / 2 - gcy * _scale);
+    });
+  }
+
+  void _fitAllNodes() {
+    if (_nodes.isEmpty) return;
+    final size = context.size ?? const Size(400, 400);
+    double minX = double.infinity, maxX = double.negativeInfinity;
+    double minY = double.infinity, maxY = double.negativeInfinity;
+    for (final node in _nodes) {
+      minX = min(minX, node.position.dx);
+      maxX = max(maxX, node.position.dx);
+      minY = min(minY, node.position.dy);
+      maxY = max(maxY, node.position.dy);
+    }
+    final gw = maxX - minX + 100;
+    final gh = maxY - minY + 100;
+    final gcx = (minX + maxX) / 2;
+    final gcy = (minY + maxY) / 2;
+    final sx = (size.width - 80) / gw;
+    final sy = (size.height - 120) / gh;
+    final ns = min(sx, sy).clamp(0.3, 2.0);
+    setState(() {
+      _scale = ns;
+      _offset = Offset(
+          size.width / 2 - gcx * _scale, size.height / 2 - gcy * _scale);
+    });
+  }
+
+  void _zoomAroundCenter(double factor) {
+    final size = context.size ?? const Size(400, 400);
+    final sc = Offset(size.width / 2, size.height / 2);
+    final wp = (sc - _offset) / _scale;
+    final ns = (_scale * factor).clamp(0.3, 3.0);
+    setState(() {
+      _scale = ns;
+      _offset = sc - wp * ns;
+    });
+  }
 }
+
+// =======================================================================
+//  CUSTOM PAINTER
+// =======================================================================
 
 class _GraphPainter extends CustomPainter {
   final List<GraphNode> nodes;
@@ -1223,53 +933,95 @@ class _GraphPainter extends CustomPainter {
     canvas.scale(scale);
 
     final nodeMap = {for (var n in nodes) n.id: n};
+    final edgePaint = Paint()..style = PaintingStyle.stroke;
 
-    // Draw edges
-    final edgePaint = Paint()
-      ..color = Colors.white24
-      ..strokeWidth = 1.0
-      ..style = PaintingStyle.stroke;
-
+    // ---- Draw edges ----
     for (final edge in edges) {
       final source = nodeMap[edge.sourceId];
       final target = nodeMap[edge.targetId];
+      if (source == null || target == null) continue;
 
-      if (source != null && target != null) {
-        // Highlight edges connected to selected node
-        if (selectedNodeId != null &&
-            (edge.sourceId == selectedNodeId ||
-                edge.targetId == selectedNodeId)) {
-          edgePaint.color = Colors.white60;
-          edgePaint.strokeWidth = 2.0;
-        } else {
-          edgePaint.color = Colors.white24;
-          edgePaint.strokeWidth = 1.0;
+      final isSelected = selectedNodeId != null &&
+          (edge.sourceId == selectedNodeId || edge.targetId == selectedNodeId);
+
+      if (isSelected) {
+        edgePaint
+          ..color = Colors.white60
+          ..strokeWidth = 2.5;
+      } else {
+        switch (edge.role) {
+          case EdgeRole.hubToYou:
+            edgePaint
+              ..color = Colors.white38
+              ..strokeWidth = 2.0;
+            break;
+          case EdgeRole.entityToHub:
+            edgePaint
+              ..color = const Color(0x29FFFFFF)
+              ..strokeWidth = 1.0;
+            break;
+          case EdgeRole.entityToYou:
+            edgePaint
+              ..color = Colors.white24
+              ..strokeWidth = 1.2;
+            break;
+          case EdgeRole.entityToEntity:
+            edgePaint
+              ..color = Colors.white12
+              ..strokeWidth = 0.8;
+            break;
         }
-
-        canvas.drawLine(source.position, target.position, edgePaint);
       }
+
+      canvas.drawLine(source.position, target.position, edgePaint);
     }
 
-    // Draw nodes
+    // ---- Draw nodes ----
     for (final node in nodes) {
       final isSelected = node.id == selectedNodeId;
       final radius = getNodeRadius(node, isSelected: isSelected);
 
-      // Node shadow
+      // Glow for "You" node
+      if (node.type == 'SELF') {
+        canvas.drawCircle(
+          node.position,
+          radius + 8,
+          Paint()..color = Colors.amber.withValues(alpha: 0.15),
+        );
+        canvas.drawCircle(
+          node.position,
+          radius + 4,
+          Paint()..color = Colors.amber.withValues(alpha: 0.25),
+        );
+      }
+
+      // Hub ring outline
+      if (node.type == 'HUB') {
+        canvas.drawCircle(
+          node.position,
+          radius + 3,
+          Paint()
+            ..color = node.color.withValues(alpha: 0.3)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.5,
+        );
+      }
+
+      // Shadow
       canvas.drawCircle(
-        node.position + const Offset(2, 2),
+        node.position + const Offset(1.5, 1.5),
         radius,
-        Paint()..color = Colors.black38,
+        Paint()..color = Colors.black26,
       );
 
-      // Node fill
+      // Fill
       canvas.drawCircle(
         node.position,
         radius,
         Paint()..color = node.color,
       );
 
-      // Node border (if selected)
+      // Selection border
       if (isSelected) {
         canvas.drawCircle(
           node.position,
@@ -1281,13 +1033,14 @@ class _GraphPainter extends CustomPainter {
         );
       }
 
-      // Node label - adjust font size based on node size
-      final fontSize = (radius * 0.5).clamp(8.0, 12.0);
-      final textPainter = TextPainter(
+      // Label
+      final fontSize = (radius * 0.55).clamp(8.0, 13.0);
+      final label = node.name.length > 14
+          ? '${node.name.substring(0, 14)}...'
+          : node.name;
+      final tp = TextPainter(
         text: TextSpan(
-          text: node.name.length > 10
-              ? '${node.name.substring(0, 10)}...'
-              : node.name,
+          text: label,
           style: TextStyle(
             color: Colors.white,
             fontSize: isSelected ? fontSize + 1 : fontSize,
@@ -1296,11 +1049,7 @@ class _GraphPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-
-      textPainter.paint(
-        canvas,
-        node.position + Offset(-textPainter.width / 2, radius + 4),
-      );
+      tp.paint(canvas, node.position + Offset(-tp.width / 2, radius + 4));
     }
 
     canvas.restore();
