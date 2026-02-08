@@ -426,6 +426,20 @@ Call extract_entities_and_relationships with the entities and relationships you 
       case 'calendar':
       case 'calendar_event':
         return _eventToText(data);
+      case 'phone_call':
+      case 'phone_calls':
+      case 'call':
+      case 'calls':
+        return _phoneCallToText(data);
+      case 'photo':
+      case 'photos':
+        return _photoToText(data);
+      case 'note':
+      case 'notes':
+        return _noteToText(data);
+      case 'alarm':
+      case 'alarms':
+        return _alarmToText(data);
       default:
         return _genericToText(data);
     }
@@ -468,13 +482,113 @@ Call extract_entities_and_relationships with the entities and relationships you 
     final start = event['start'] ?? event['startDate'];
     if (start != null) parts.add('Start: $start');
 
+    final end = event['end'] ?? event['endDate'];
+    if (end != null) parts.add('End: $end');
+
     final attendees = event['attendees'];
     if (attendees is List && attendees.isNotEmpty) {
       parts.add('Attendees: ${attendees.join(", ")}');
     }
 
-    final description = event['description'];
+    final description = event['description'] ?? event['notes'];
     if (description != null) parts.add('Description: $description');
+
+    // Recurrence info
+    final recurrenceInfo = event['recurrenceInfo'];
+    if (recurrenceInfo != null) parts.add('Recurrence: $recurrenceInfo');
+    final repeatFrequency = event['repeatFrequency'];
+    if (repeatFrequency != null) parts.add('Repeat: $repeatFrequency');
+    final onValue = event['on'];
+    if (onValue != null) parts.add('On: $onValue');
+
+    return parts.join('\n');
+  }
+
+  String _phoneCallToText(Map<String, dynamic> call) {
+    final parts = <String>[];
+
+    final contact = call['contactName'] ?? call['name'];
+    if (contact != null) parts.add('Contact: $contact');
+
+    final phone = call['phoneNumber'];
+    if (phone != null) parts.add('Phone: $phone');
+
+    final direction = call['callDirection'] ?? call['callType'];
+    if (direction != null) parts.add('Direction: $direction');
+
+    final date = call['date'];
+    if (date != null) parts.add('Date: $date');
+
+    final startTime = call['startTime'];
+    if (startTime != null) parts.add('Start time: $startTime');
+
+    final endTime = call['endTime'];
+    if (endTime != null) parts.add('End time: $endTime');
+
+    final duration = call['duration'];
+    if (duration != null) parts.add('Duration: $duration');
+
+    return parts.join('\n');
+  }
+
+  String _photoToText(Map<String, dynamic> photo) {
+    final parts = <String>[];
+
+    final filename = photo['filename'] ?? photo['name'];
+    if (filename != null) parts.add('Photo: $filename');
+
+    final location = photo['locationName'] ?? photo['location'];
+    if (location != null) parts.add('Location: $location');
+
+    final date = photo['creationDate'] ?? photo['dateTaken'];
+    if (date != null) parts.add('Date: $date');
+
+    return parts.join('\n');
+  }
+
+  String _noteToText(Map<String, dynamic> note) {
+    final parts = <String>[];
+
+    final title = note['title'];
+    if (title != null) parts.add('Note: $title');
+
+    final text = note['text'] ?? note['content'];
+    if (text != null) {
+      final preview = text.toString().length > 500
+          ? '${text.toString().substring(0, 500)}...'
+          : text.toString();
+      parts.add('Content: $preview');
+    }
+
+    final dateCreated = note['dateCreated'];
+    if (dateCreated != null) parts.add('Created: $dateCreated');
+
+    final dateModified = note['dateModified'];
+    if (dateModified != null) parts.add('Modified: $dateModified');
+
+    return parts.join('\n');
+  }
+
+  String _alarmToText(Map<String, dynamic> alarm) {
+    final parts = <String>[];
+
+    final label = alarm['label'];
+    if (label != null) parts.add('Alarm: $label');
+
+    final time = alarm['time'];
+    if (time != null) parts.add('Time: $time');
+
+    final recurrenceType = alarm['recurrenceType'];
+    if (recurrenceType != null) parts.add('Type: $recurrenceType');
+
+    final date = alarm['date'];
+    if (date != null) parts.add('Date: $date');
+
+    final repeatFrequency = alarm['repeatFrequency'];
+    if (repeatFrequency != null) parts.add('Repeat: $repeatFrequency');
+
+    final onValue = alarm['on'];
+    if (onValue != null) parts.add('On: $onValue');
 
     return parts.join('\n');
   }

@@ -157,6 +157,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
 
   bool _isIndexingNote = false;
 
+  bool _isIndexingAlarm = false;
+
   Future<void> _addNote() async {
     final result = await showDialog<Map<String, String>>(
       context: context,
@@ -187,6 +189,42 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
       _showSnackBar('Error indexing note: $e', isError: true);
     } finally {
       setState(() => _isIndexingNote = false);
+    }
+  }
+
+  Future<void> _addAlarm() async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => const _AddAlarmDialog(),
+    );
+
+    if (result == null || result['label']?.toString().isEmpty == true) {
+      return;
+    }
+
+    setState(() => _isIndexingAlarm = true);
+
+    try {
+      final label = result['label'] as String;
+      final dateTime = result['dateTime'] as DateTime;
+      final recurrence = result['recurrence'] as String?;
+
+      _showSnackBar('Indexing alarm "$label"...');
+
+      await _service.indexAlarm(
+        label: label,
+        dateTime: dateTime,
+        recurrence: recurrence,
+      );
+
+      await _loadStats();
+      await _loadGraphData();
+
+      _showSnackBar('Alarm indexed successfully!');
+    } catch (e) {
+      _showSnackBar('Error indexing alarm: $e', isError: true);
+    } finally {
+      setState(() => _isIndexingAlarm = false);
     }
   }
 
@@ -592,6 +630,21 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                   style: TextButton.styleFrom(foregroundColor: Colors.cyan),
                 ),
                 TextButton.icon(
+                  onPressed: _isIndexingAlarm ? null : _addAlarm,
+                  icon: _isIndexingAlarm
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white70,
+                        ),
+                      )
+                    : const Icon(Icons.alarm_add, size: 18),
+                  label: Text(_isIndexingAlarm ? 'Indexing...' : 'Create Alarm'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.amber),
+                ),
+                TextButton.icon(
                   onPressed: _clearGraph,
                   icon: const Icon(Icons.delete_outline, size: 18),
                   label: const Text('Clear Graph'),
@@ -935,6 +988,205 @@ class _AddNoteDialogState extends State<_AddNoteDialog> {
           },
           style: TextButton.styleFrom(foregroundColor: Colors.cyan),
           child: const Text('Index'),
+        ),
+      ],
+    );
+  }
+}
+
+class _AddAlarmDialog extends StatefulWidget {
+  const _AddAlarmDialog();
+
+  @override
+  State<_AddAlarmDialog> createState() => _AddAlarmDialogState();
+}
+
+class _AddAlarmDialogState extends State<_AddAlarmDialog> {
+  final _labelController = TextEditingController();
+  DateTime _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
+  String? _selectedRecurrence;
+
+  static const _recurrenceOptions = [
+    null, // None
+    'daily',
+    'weekdays',
+    'weekends',
+    'weekly',
+    'monthly',
+  ];
+
+  static const _recurrenceLabels = {
+    null: 'None',
+    'daily': 'Daily',
+    'weekdays': 'Weekdays (Mon-Fri)',
+    'weekends': 'Weekends (Sat-Sun)',
+    'weekly': 'Weekly',
+    'monthly': 'Monthly',
+  };
+
+  @override
+  void dispose() {
+    _labelController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+    );
+    if (date != null) {
+      setState(() => _selectedDate = date);
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final time = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (time != null) {
+      setState(() => _selectedTime = time);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateStr =
+        '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}';
+
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1a3a5c),
+      title: const Text(
+        'Create Alarm',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _labelController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Alarm label',
+                labelStyle: TextStyle(color: Colors.white54),
+                hintText: 'e.g. Wake up, Take medicine...',
+                hintStyle: TextStyle(color: Colors.white24),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.amber),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: _pickDate,
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Date',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white24),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today,
+                              color: Colors.white70, size: 16),
+                          const SizedBox(width: 8),
+                          Text(dateStr,
+                              style: const TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: InkWell(
+                    onTap: _pickTime,
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Time',
+                        labelStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white24),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.access_time,
+                              color: Colors.white70, size: 16),
+                          const SizedBox(width: 8),
+                          Text(timeStr,
+                              style: const TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String?>(
+              value: _selectedRecurrence,
+              dropdownColor: const Color(0xFF1a3a5c),
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Repeat',
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+              ),
+              items: _recurrenceOptions.map((option) {
+                return DropdownMenuItem<String?>(
+                  value: option,
+                  child: Text(_recurrenceLabels[option] ?? 'None'),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() => _selectedRecurrence = value);
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () {
+            if (_labelController.text.trim().isEmpty) return;
+            final alarmDateTime = DateTime(
+              _selectedDate.year,
+              _selectedDate.month,
+              _selectedDate.day,
+              _selectedTime.hour,
+              _selectedTime.minute,
+            );
+            Navigator.pop(context, {
+              'label': _labelController.text.trim(),
+              'dateTime': alarmDateTime,
+              'recurrence': _selectedRecurrence,
+            });
+          },
+          style: TextButton.styleFrom(foregroundColor: Colors.amber),
+          child: const Text('Create'),
         ),
       ],
     );

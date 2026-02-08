@@ -82,6 +82,8 @@ class CalendarEvent {
   final DateTime endDate;
   final List<String> attendees;
   final DateTime lastModified;
+  final String? recurrenceRule;
+  final bool isRecurring;
 
   CalendarEvent({
     required this.id,
@@ -92,6 +94,8 @@ class CalendarEvent {
     required this.endDate,
     this.attendees = const [],
     required this.lastModified,
+    this.recurrenceRule,
+    this.isRecurring = false,
   });
 
   Duration get duration => endDate.difference(startDate);
@@ -107,6 +111,9 @@ class CalendarEvent {
       // Filter out nulls from nullable list
       attendees: result.attendees.whereType<String>().toList(),
       lastModified: DateTime.fromMillisecondsSinceEpoch(result.lastModified),
+      // Recurrence fields will be populated once Pigeon interface is extended
+      recurrenceRule: null,
+      isRecurring: false,
     );
   }
 

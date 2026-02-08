@@ -142,11 +142,14 @@ class EntityTypes {
   static const String topic = 'TOPIC';
   static const String note = 'NOTE';
   static const String noteChunk = 'NOTE_CHUNK';
+  static const String phoneCall = 'PHONE_CALL';
+  static const String alarm = 'ALARM';
+  static const String photo = 'PHOTO';
 
   static const List<String> all = [
     person, organization, location, event, date,
     project, document, email, phone, skill, topic,
-    note, noteChunk,
+    note, noteChunk, phoneCall, alarm, photo,
   ];
 }
 
@@ -167,6 +170,15 @@ class RelationshipTypes {
   static const String interestedIn = 'INTERESTED_IN';
   static const String contactOf = 'CONTACT_OF';
   static const String scheduledFor = 'SCHEDULED_FOR';
+  static const String calledContact = 'CALLED';
+  static const String receivedCallFrom = 'RECEIVED_CALL_FROM';
+  static const String takenAt = 'TAKEN_AT';
+  static const String takenOn = 'TAKEN_ON';
+  static const String picturedIn = 'PICTURED_IN';
+  static const String createdOn = 'CREATED_ON';
+  static const String modifiedOn = 'MODIFIED_ON';
+  static const String setFor = 'SET_FOR';
+  static const String recurringOn = 'RECURRING_ON';
 }
 
 /// Configuration for entity extraction
@@ -916,6 +928,12 @@ class DirectEntityExtractor implements EntityExtractor {
       case 'document':
       case 'documents':
         return _extractFromDocument(data, sourceId, sourceType);
+      case 'alarm':
+      case 'alarms':
+        return _extractFromAlarm(data, sourceId, sourceType);
+      case 'note':
+      case 'notes':
+        return _extractFromNote(data, sourceId, sourceType);
       default:
         // For unknown types, return empty - use LLM extractor instead
         return ExtractionResult(
@@ -940,6 +958,7 @@ class DirectEntityExtractor implements EntityExtractor {
   ) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
+    final sourceApp = contact['sourceApp']?.toString();
 
     // Extract person entity
     final fullName = contact['fullName'] ?? contact['name'];
@@ -956,6 +975,9 @@ class DirectEntityExtractor implements EntityExtractor {
     if (personName.isNotEmpty) {
       final jobTitle = contact['jobTitle']?.toString();
       final note = contact['note']?.toString();
+      // Support both phoneNumbers list and single telephoneNumber
+      final phones = contact['phoneNumbers'] ?? 
+          (contact['telephoneNumber'] != null ? [contact['telephoneNumber']] : null);
       
       entities.add(ExtractedEntity(
         name: personName,
@@ -964,9 +986,10 @@ class DirectEntityExtractor implements EntityExtractor {
         attributes: {
           if (contact['emailAddresses'] != null) 
             'emails': contact['emailAddresses'],
-          if (contact['phoneNumbers'] != null) 
-            'phones': contact['phoneNumbers'],
+          if (phones != null) 
+            'phones': phones,
           if (jobTitle != null) 'jobTitle': jobTitle,
+          if (sourceApp != null) 'source_app': sourceApp,
         },
         confidence: 1.0, // Deterministic extraction
       ));
@@ -1008,6 +1031,7 @@ class DirectEntityExtractor implements EntityExtractor {
   ) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
+    final sourceApp = event['sourceApp']?.toString();
 
     // Extract event entity
     final title = event['title'] ?? event['summary'];
@@ -1017,6 +1041,14 @@ class DirectEntityExtractor implements EntityExtractor {
       final startDate = event['startDate'] ?? event['start'];
       final endDate = event['endDate'] ?? event['end'];
       
+      // Recurrence info
+      final isRecurring = event['isRecurring'] == true ||
+          event['recurrenceInfo'] == 'recurrent' ||
+          (event['recurrenceRule'] != null && event['recurrenceRule'].toString().isNotEmpty);
+      final recurrenceInfo = isRecurring ? 'recurrent' : 'single-occurrence';
+      final repeatFrequency = event['repeatFrequency']?.toString();
+      final onValue = event['on']?.toString();
+      
       entities.add(ExtractedEntity(
         name: eventName,
         type: EntityTypes.event,
@@ -1024,6 +1056,10 @@ class DirectEntityExtractor implements EntityExtractor {
         attributes: {
           if (startDate != null) 'startDate': startDate.toString(),
           if (endDate != null) 'endDate': endDate.toString(),
+          'recurrenceInfo': recurrenceInfo,
+          if (repeatFrequency != null) 'repeatFrequency': repeatFrequency,
+          if (onValue != null) 'on': onValue,
+          if (sourceApp != null) 'source_app': sourceApp,
         },
         confidence: 1.0,
       ));
@@ -1084,6 +1120,7 @@ class DirectEntityExtractor implements EntityExtractor {
   ) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
+    final sourceApp = photo['sourceApp']?.toString();
 
     // Extract photo entity
     final photoId = photo['id'] ?? photo['name'] ?? photo['filename'];
@@ -1097,12 +1134,14 @@ class DirectEntityExtractor implements EntityExtractor {
       
       entities.add(ExtractedEntity(
         name: photoName,
-        type: 'PHOTO',
+        type: EntityTypes.photo,
         attributes: {
           if (creationDate != null) 'creationDate': creationDate.toString(),
           if (width != null) 'width': width,
           if (height != null) 'height': height,
           if (photo['mediaType'] != null) 'mediaType': photo['mediaType'],
+          if (photo['filePath'] != null) 'path': photo['filePath'],
+          if (sourceApp != null) 'source_app': sourceApp,
         },
         confidence: 1.0,
       ));
@@ -1208,14 +1247,43 @@ class DirectEntityExtractor implements EntityExtractor {
   ) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
+    final sourceApp = call['sourceApp']?.toString();
 
-    // Extract person entity from contact name
+    // Extract contact/phone entities
     final contactName = call['contactName'] ?? call['name'];
     final phoneNumber = call['phoneNumber'] ?? call['number'];
-    final callType = call['callType'] ?? call['type'];
+    final callType = call['callType'] ?? call['callDirection'] ?? call['type'];
     final timestamp = call['timestamp'] ?? call['date'];
     final duration = call['duration'];
+    final startTime = call['startTime'];
+    final endTime = call['endTime'];
 
+    // Determine call direction string
+    final callDirection = callType?.toString().toLowerCase() ?? 'unknown';
+
+    // Always create a PHONE_CALL entity for the call itself
+    final callId = call['id']?.toString() ?? sourceId;
+    final callLabel = contactName != null 
+        ? 'Call with ${contactName}'
+        : 'Call ${phoneNumber ?? callId}';
+    
+    entities.add(ExtractedEntity(
+      name: callLabel,
+      type: EntityTypes.phoneCall,
+      attributes: {
+        'callId': callId,
+        'callDirection': callDirection,
+        if (timestamp != null) 'timestamp': timestamp.toString(),
+        if (startTime != null) 'startTime': startTime.toString(),
+        if (endTime != null) 'endTime': endTime.toString(),
+        if (duration != null) 'duration': duration.toString(),
+        if (phoneNumber != null) 'phoneNumber': phoneNumber.toString(),
+        if (sourceApp != null) 'source_app': sourceApp,
+      },
+      confidence: 1.0,
+    ));
+
+    // Create person entity from contact name
     if (contactName != null && contactName.toString().isNotEmpty) {
       entities.add(ExtractedEntity(
         name: contactName.toString(),
@@ -1226,18 +1294,31 @@ class DirectEntityExtractor implements EntityExtractor {
         confidence: 1.0,
       ));
 
-      // Create call relationship from "You" perspective
-      // The actual "You" link will be created by LinkPredictor
+      // Link call to person
+      final relType = callDirection.contains('incoming')
+          ? RelationshipTypes.receivedCallFrom
+          : RelationshipTypes.calledContact;
+      relationships.add(ExtractedRelationship(
+        sourceEntity: callLabel,
+        targetEntity: contactName.toString(),
+        type: relType,
+        confidence: 1.0,
+      ));
     } else if (phoneNumber != null && phoneNumber.toString().isNotEmpty) {
-      // If no contact name, create a phone number entity
+      // Create phone number entity if no contact name
       entities.add(ExtractedEntity(
         name: phoneNumber.toString(),
         type: EntityTypes.phone,
-        attributes: {
-          if (callType != null) 'lastCallType': callType.toString(),
-          if (timestamp != null) 'lastCallTime': timestamp.toString(),
-          if (duration != null) 'lastCallDuration': duration,
-        },
+        confidence: 0.9,
+      ));
+
+      final relType = callDirection.contains('incoming')
+          ? RelationshipTypes.receivedCallFrom
+          : RelationshipTypes.calledContact;
+      relationships.add(ExtractedRelationship(
+        sourceEntity: callLabel,
+        targetEntity: phoneNumber.toString(),
+        type: relType,
         confidence: 0.9,
       ));
     }
@@ -1354,6 +1435,139 @@ class DirectEntityExtractor implements EntityExtractor {
         type: 'ABOUT',
         confidence: 0.7,
       ));
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Extract entities from an alarm
+  ExtractionResult _extractFromAlarm(
+    Map<String, dynamic> alarm,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+    final sourceApp = alarm['sourceApp']?.toString();
+
+    final alarmId = alarm['alarm'] ?? alarm['id'] ?? sourceId;
+    final label = alarm['label']?.toString() ?? 'Alarm';
+    final time = alarm['time']?.toString() ?? '';
+    final recurrenceType = alarm['recurrenceType']?.toString() ?? 'single-occurrence';
+    final isRecurrent = recurrenceType == 'recurrent';
+    final date = alarm['date']?.toString();
+    final repeatFrequency = alarm['repeatFrequency']?.toString();
+    final onValue = alarm['on']?.toString();
+
+    // Create ALARM entity
+    final alarmName = isRecurrent
+        ? 'Recurring alarm: $label'
+        : 'Alarm: $label';
+
+    entities.add(ExtractedEntity(
+      name: alarmName,
+      type: EntityTypes.alarm,
+      description: isRecurrent
+          ? '$label at $time, $repeatFrequency${onValue != null ? ' on $onValue' : ''}'
+          : '$label on ${date ?? "unknown"} at $time',
+      attributes: {
+        'alarmId': alarmId.toString(),
+        'label': label,
+        'time': time,
+        'recurrenceType': recurrenceType,
+        if (date != null) 'date': date,
+        if (repeatFrequency != null) 'repeatFrequency': repeatFrequency,
+        if (onValue != null) 'on': onValue,
+        if (sourceApp != null) 'source_app': sourceApp,
+      },
+      confidence: 1.0,
+    ));
+
+    // Create DATE entity for single-occurrence alarms
+    if (!isRecurrent && date != null && date.isNotEmpty) {
+      final dateStr = _formatDateForEntity(date);
+      if (dateStr.isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: dateStr,
+          type: EntityTypes.date,
+          confidence: 1.0,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: alarmName,
+          targetEntity: dateStr,
+          type: RelationshipTypes.setFor,
+          confidence: 1.0,
+        ));
+      }
+    }
+
+    return ExtractionResult(
+      entities: entities,
+      relationships: relationships,
+      sourceId: sourceId,
+      sourceType: sourceType,
+    );
+  }
+
+  /// Extract entities from a structured note (metadata-only, no LLM)
+  ExtractionResult _extractFromNote(
+    Map<String, dynamic> note,
+    String sourceId,
+    String sourceType,
+  ) {
+    final entities = <ExtractedEntity>[];
+    final relationships = <ExtractedRelationship>[];
+    final sourceApp = note['sourceApp']?.toString();
+
+    final noteId = note['note'] ?? note['id'] ?? sourceId;
+    final title = note['title']?.toString() ?? 'Untitled Note';
+    final text = note['text'] ?? note['content'] ?? '';
+    final dateCreated = note['dateCreated']?.toString();
+    final dateModified = note['dateModified']?.toString();
+
+    // Create NOTE entity
+    final description = text.toString().length > 500
+        ? '${text.toString().substring(0, 500)}...'
+        : text.toString();
+
+    entities.add(ExtractedEntity(
+      name: title,
+      type: EntityTypes.note,
+      description: description.isNotEmpty ? description : null,
+      attributes: {
+        'noteId': noteId.toString(),
+        if (dateCreated != null) 'dateCreated': dateCreated,
+        if (dateModified != null) 'dateModified': dateModified,
+        if (sourceApp != null) 'source_app': sourceApp,
+      },
+      confidence: 1.0,
+    ));
+
+    // Create DATE entity for creation date
+    if (dateCreated != null && dateCreated.isNotEmpty) {
+      final dateStr = dateCreated.contains('T')
+          ? dateCreated.split('T')[0]
+          : dateCreated;
+      if (dateStr.isNotEmpty) {
+        entities.add(ExtractedEntity(
+          name: dateStr,
+          type: EntityTypes.date,
+          confidence: 1.0,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: title,
+          targetEntity: dateStr,
+          type: RelationshipTypes.createdOn,
+          confidence: 1.0,
+        ));
+      }
     }
 
     return ExtractionResult(

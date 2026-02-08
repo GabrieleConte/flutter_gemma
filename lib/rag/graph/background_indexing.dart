@@ -163,6 +163,8 @@ class BackgroundIndexingService {
     'PHOTO', 'PHOTOS',
     'PHONE_CALL', 'PHONE_CALLS', 'CALL', 'CALLS',
     'DOCUMENT', 'DOCUMENTS',
+    'ALARM', 'ALARMS',
+    'NOTE', 'NOTES',
   };
   
   IndexingProgress _progress = IndexingProgress(
@@ -1221,6 +1223,7 @@ class BackgroundIndexingService {
         'jobTitle': item.jobTitle,
         'emailAddresses': item.emailAddresses,
         'phoneNumbers': item.phoneNumbers,
+        'sourceApp': 'system_contacts',
       };
     }
     
@@ -1233,6 +1236,9 @@ class BackgroundIndexingService {
         'startDate': item.startDate.toIso8601String(),
         'endDate': item.endDate.toIso8601String(),
         'attendees': item.attendees,
+        'recurrenceRule': item.recurrenceRule,
+        'isRecurring': item.isRecurring,
+        'sourceApp': 'system_calendar',
       };
     }
     
@@ -1248,17 +1254,30 @@ class BackgroundIndexingService {
         'longitude': item.longitude,
         'locationName': item.locationName,
         'mediaType': item.mediaType,
+        'sourceApp': 'system_photos',
       };
     }
     
     if (item is PhoneCall) {
+      // Compute start/end times from timestamp + duration
+      final startDt = item.timestamp;
+      final endDt = startDt.add(item.duration);
+      final date = '${startDt.year}-${startDt.month.toString().padLeft(2, '0')}-${startDt.day.toString().padLeft(2, '0')}';
+      final startTime = '${startDt.hour.toString().padLeft(2, '0')}:${startDt.minute.toString().padLeft(2, '0')}';
+      final endTime = '${endDt.hour.toString().padLeft(2, '0')}:${endDt.minute.toString().padLeft(2, '0')}';
+
       return {
         'id': item.id,
         'contactName': item.contactName,
         'phoneNumber': item.phoneNumber,
-        'callType': item.callType.toString(),
+        'callType': item.callType.toString().split('.').last,
+        'callDirection': item.callType.toString().split('.').last,
         'timestamp': item.timestamp.millisecondsSinceEpoch,
         'duration': item.duration.inSeconds,
+        'date': date,
+        'startTime': startTime,
+        'endTime': endTime,
+        'sourceApp': 'system_calls',
       };
     }
     
@@ -1273,6 +1292,7 @@ class BackgroundIndexingService {
         'createdDate': item.createdDate.millisecondsSinceEpoch,
         'modifiedDate': item.modifiedDate.millisecondsSinceEpoch,
         'textPreview': item.textPreview,
+        'sourceApp': 'system_documents',
       };
     }
     
@@ -1343,6 +1363,13 @@ class BackgroundIndexingService {
         final name = itemMap['name'] ?? itemMap['title'];
         if (name != null && name.toString().isNotEmpty) {
           return _generateEntityId(name.toString(), 'DOCUMENT');
+        }
+        break;
+      case 'ALARM':
+      case 'ALARMS':
+        final label = itemMap['label'] ?? itemMap['title'];
+        if (label != null && label.toString().isNotEmpty) {
+          return _generateEntityId(label.toString(), 'ALARM');
         }
         break;
     }

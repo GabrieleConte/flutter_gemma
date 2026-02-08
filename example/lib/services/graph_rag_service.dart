@@ -690,6 +690,9 @@ class GraphRAGService {
   Future<void> indexNote({
     required String title,
     required String content,
+    DateTime? dateCreated,
+    DateTime? dateModified,
+    String? sourceApp,
   }) async {
     _checkInitialized();
 
@@ -708,9 +711,36 @@ class GraphRAGService {
       noteId: noteId,
       title: title,
       content: content,
+      dateCreated: dateCreated,
+      dateModified: dateModified,
+      sourceApp: sourceApp,
     );
 
     debugPrint('[GraphRAGService] Note "$title" indexed successfully');
+  }
+
+  /// Index a user-created alarm into the knowledge graph.
+  Future<void> indexAlarm({
+    required String label,
+    required DateTime dateTime,
+    String? recurrence,
+  }) async {
+    _checkInitialized();
+
+    debugPrint('[GraphRAGService] Indexing alarm: "$label"');
+
+    final alarmId =
+        '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
+
+    await _graphRag!.indexAlarmContent(
+      alarmId: alarmId,
+      label: label,
+      dateTime: dateTime,
+      recurrence: recurrence,
+      sourceApp: 'user_input',
+    );
+
+    debugPrint('[GraphRAGService] Alarm "$label" indexed successfully');
   }
   
   /// Dispose resources

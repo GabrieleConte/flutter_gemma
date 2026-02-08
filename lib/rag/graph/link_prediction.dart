@@ -65,9 +65,10 @@ class DataSourceTypes {
   static const String photo = 'PHOTO';
   static const String phoneCall = 'PHONE_CALL';
   static const String note = 'NOTE';
+  static const String alarm = 'ALARM';
   
   static const List<String> all = [
-    contact, calendar, document, photo, phoneCall, note,
+    contact, calendar, document, photo, phoneCall, note, alarm,
   ];
 }
 
@@ -103,6 +104,9 @@ class DataHubEntity {
       case 'NOTE':
       case 'NOTES':
         return 'My Notes';
+      case 'ALARM':
+      case 'ALARMS':
+        return 'My Alarms';
       default:
         return 'My Data';
     }
@@ -181,6 +185,9 @@ class YouRelationshipTypes {
   /// You -> Note: You wrote this note
   static const String wroteNote = 'WROTE_NOTE';
   
+  /// You -> Alarm: You set this alarm
+  static const String setAlarm = 'SET_ALARM';
+  
   /// Generic relationship for data ownership
   static const String owns = 'OWNS';
   
@@ -209,6 +216,9 @@ class YouRelationshipTypes {
       case 'NOTE':
       case 'NOTES':
         return wroteNote;
+      case 'ALARM':
+      case 'ALARMS':
+        return setAlarm;
       default:
         return owns;
     }
@@ -506,14 +516,23 @@ class LinkPredictor {
     final callId = call['id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
     final contactName = call['contactName'] ?? call['name'];
     final phoneNumber = call['phoneNumber'] ?? call['number'];
-    final callType = call['callType'] ?? call['type']; // incoming, outgoing, missed
+    final callType = call['callType'] ?? call['callDirection'] ?? call['type'];
+    final callDirection = callType?.toString().toLowerCase() ?? 'unknown';
+
+    // Build call entity name matching DirectEntityExtractor convention
+    final callLabel = contactName != null 
+        ? 'Call with $contactName'
+        : 'Call ${phoneNumber ?? callId}';
+    final callEntityId = _generateEntityId(callLabel, 'PHONE_CALL');
     
     // Link call to contact/person
     if (contactName != null && contactName.toString().isNotEmpty) {
       final personId = _generateEntityId(contactName.toString(), 'PERSON');
-      final relType = callType == 'incoming' ? 'RECEIVED_CALL_FROM' : 'CALLED';
+      final relType = callDirection.contains('incoming')
+          ? RelationshipTypes.receivedCallFrom
+          : RelationshipTypes.calledContact;
       links.add(PredictedLink(
-        sourceEntityId: YouEntity.id,
+        sourceEntityId: callEntityId,
         targetEntityId: personId,
         relationshipType: relType,
         confidence: config.templateWeight,
@@ -660,6 +679,7 @@ class LinkPredictor {
     );
     final folder = note['folder'] ?? note['notebook'];
     final tags = note['tags'] as List<dynamic>?;
+    final dateCreated = note['dateCreated'];
     
     // Note in folder/notebook
     if (folder != null && folder.toString().isNotEmpty) {
@@ -691,7 +711,55 @@ class LinkPredictor {
         }
       }
     }
+
+    // Note created on date
+    if (dateCreated != null) {
+      final dateStr = _formatDateForEntity(dateCreated);
+      if (dateStr.isNotEmpty) {
+        final dateId = _generateEntityId(dateStr, 'DATE');
+        links.add(PredictedLink(
+          sourceEntityId: noteId,
+          targetEntityId: dateId,
+          relationshipType: RelationshipTypes.createdOn,
+          confidence: config.templateWeight,
+          predictionMethod: 'template_note_date',
+          evidence: {'dateCreated': dateStr},
+        ));
+      }
+    }
     
+    return links;
+  }
+
+  /// Run template-based inference for an alarm
+  List<PredictedLink> inferFromAlarm(Map<String, dynamic> alarm) {
+    final links = <PredictedLink>[];
+
+    final label = alarm['label'] ?? '';
+    final recurrenceType = alarm['recurrenceType'] ?? 'single-occurrence';
+    final isRecurrent = recurrenceType == 'recurrent';
+    final alarmName = isRecurrent
+        ? 'Recurring alarm: $label'
+        : 'Alarm: $label';
+    final alarmId = _generateEntityId(alarmName, 'ALARM');
+    final date = alarm['date'];
+
+    // Single-occurrence alarm → link to date
+    if (!isRecurrent && date != null) {
+      final dateStr = _formatDateForEntity(date);
+      if (dateStr.isNotEmpty) {
+        final dateId = _generateEntityId(dateStr, 'DATE');
+        links.add(PredictedLink(
+          sourceEntityId: alarmId,
+          targetEntityId: dateId,
+          relationshipType: RelationshipTypes.setFor,
+          confidence: config.templateWeight,
+          predictionMethod: 'template_alarm_date',
+          evidence: {'date': dateStr},
+        ));
+      }
+    }
+
     return links;
   }
 
@@ -725,6 +793,9 @@ class LinkPredictor {
       case 'NOTE':
       case 'NOTES':
         return inferFromNote(data);
+      case 'ALARM':
+      case 'ALARMS':
+        return inferFromAlarm(data);
       default:
         return [];
     }

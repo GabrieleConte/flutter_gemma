@@ -997,6 +997,9 @@ class GraphRAG {
     required String noteId,
     required String title,
     required String content,
+    DateTime? dateCreated,
+    DateTime? dateModified,
+    String? sourceApp,
   }) async {
     _checkInitialized();
 
@@ -1130,6 +1133,9 @@ class GraphRAG {
         'noteId': noteId,
         'chunkCount': chunks.length,
         'totalLength': content.length,
+        if (dateCreated != null) 'dateCreated': dateCreated.toIso8601String(),
+        if (dateModified != null) 'dateModified': dateModified.toIso8601String(),
+        if (sourceApp != null) 'sourceApp': sourceApp,
       },
       lastModified: now,
     );
@@ -1290,6 +1296,150 @@ class GraphRAG {
 
     debugPrint('[GraphRAG] Indexed note "$title": ${chunks.length} chunk(s), '
         '${uniqueEntityIds.length} extracted entities');
+  }
+
+  /// Index an alarm created by the user into the knowledge graph.
+  ///
+  /// Creates an ALARM entity and links it to a DATE entity and
+  /// the You hub via the standard hub pattern.
+  Future<void> indexAlarmContent({
+    required String alarmId,
+    required String label,
+    required DateTime dateTime,
+    String? recurrence,
+    String? sourceApp,
+  }) async {
+    _checkInitialized();
+
+    String normalizeId(String name, String type) {
+      final normalized =
+          name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+      final typePrefix = type.isNotEmpty ? '${type.toLowerCase()}_' : '';
+      return '$typePrefix$normalized';
+    }
+
+    final now = DateTime.now();
+
+    // Create ALARM entity
+    final alarmEntityId = normalizeId(label, 'ALARM');
+    final dateStr =
+        '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+
+    final alarmEmbedding = await _embeddingCallback(
+      'Alarm: $label at $timeStr on $dateStr${recurrence != null ? ' recurring $recurrence' : ''}',
+    );
+
+    final alarmEntity = GraphEntity(
+      id: alarmEntityId,
+      name: label,
+      type: 'ALARM',
+      description: 'Alarm set for $timeStr on $dateStr',
+      embedding: alarmEmbedding,
+      metadata: {
+        'alarmId': alarmId,
+        'date': dateStr,
+        'time': timeStr,
+        'timestamp': dateTime.toIso8601String(),
+        if (recurrence != null) 'recurrence': recurrence,
+        if (sourceApp != null) 'sourceApp': sourceApp,
+      },
+      lastModified: now,
+    );
+
+    try {
+      await _repository.addEntity(alarmEntity);
+    } catch (_) {
+      await _repository.updateEntity(
+        alarmEntity.id,
+        name: alarmEntity.name,
+        type: alarmEntity.type,
+        embedding: alarmEmbedding,
+        description: alarmEntity.description,
+        metadata: alarmEntity.metadata,
+        lastModified: now,
+      );
+    }
+
+    // Create DATE entity and SET_FOR relationship
+    final dateEntityId = normalizeId(dateStr, 'DATE');
+    final dateEmbedding = await _embeddingCallback(dateStr);
+
+    final dateEntity = GraphEntity(
+      id: dateEntityId,
+      name: dateStr,
+      type: 'DATE',
+      description: dateStr,
+      embedding: dateEmbedding,
+      metadata: {},
+      lastModified: now,
+    );
+
+    try {
+      await _repository.addEntity(dateEntity);
+    } catch (_) {}
+
+    final setForRel = GraphRelationship(
+      id: '${alarmEntityId}_set_for_$dateEntityId',
+      sourceId: alarmEntityId,
+      targetId: dateEntityId,
+      type: 'SET_FOR',
+      weight: 1.0,
+      metadata: {'time': timeStr},
+    );
+    try {
+      await _repository.addRelationship(setForRel);
+    } catch (_) {}
+
+    // --- Link to You node via hub pattern ---
+    const youId = YouEntity.id;
+    final youEntity = await _repository.getEntity(youId);
+    if (youEntity == null) {
+      final youEmbedding =
+          await _embeddingCallback('You - personal user self');
+      final you = YouEntity.create(embedding: youEmbedding);
+      await _repository.addEntity(you);
+    }
+
+    // Ensure hub entity exists: You -> HAS_DATA -> My Alarms
+    final hubId = DataHubEntity.idFor(DataSourceTypes.alarm);
+    final existingHub = await _repository.getEntity(hubId);
+    if (existingHub == null) {
+      final hubEmbedding = await _embeddingCallback(
+        DataHubEntity.nameFor(DataSourceTypes.alarm),
+      );
+      await _repository.addEntity(
+        DataHubEntity.create(DataSourceTypes.alarm, embedding: hubEmbedding),
+      );
+
+      final hubRel = GraphRelationship(
+        id: '${youId}_${YouRelationshipTypes.hasData}_$hubId',
+        sourceId: youId,
+        targetId: hubId,
+        type: YouRelationshipTypes.hasData,
+        weight: 1.0,
+        metadata: {},
+      );
+      try {
+        await _repository.addRelationship(hubRel);
+      } catch (_) {}
+    }
+
+    // Link alarm to hub: My Alarms Hub -> SET_ALARM -> Alarm
+    final alarmHubRel = GraphRelationship(
+      id: '${hubId}_${YouRelationshipTypes.setAlarm}_$alarmEntityId',
+      sourceId: hubId,
+      targetId: alarmEntityId,
+      type: YouRelationshipTypes.setAlarm,
+      weight: 1.0,
+      metadata: {},
+    );
+    try {
+      await _repository.addRelationship(alarmHubRel);
+    } catch (_) {}
+
+    debugPrint('[GraphRAG] Indexed alarm "$label" for $timeStr on $dateStr');
   }
 
   // === Community Detection ===
