@@ -21,6 +21,10 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
   bool _isQuerying = false;
   bool _useGlobalQuery = false;
 
+  // Retrieval parameters
+  int _topK = 4;
+  int _maxHops = 1;
+
   // Streaming global query state
   String? _streamingProgress;
   String _streamingAnswer = '';
@@ -103,7 +107,7 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
         });
       } else {
         // Local query with answer generation
-        final result = await _service.queryWithAnswer(query);
+        final result = await _service.queryWithAnswer(query, topK: _topK, maxHops: _maxHops);
 
         setState(() {
           _queryHistory.insert(
@@ -115,6 +119,7 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
                 contextString: result.contextString,
                 timestamp: DateTime.now(),
                 generatedAnswer: result.generatedAnswer,
+                queryMetadata: result.metadata,
               ));
           _isQuerying = false;
         });
@@ -181,6 +186,58 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          // Retrieval controls (only for local queries)
+          if (!_useGlobalQuery)
+            Row(
+              children: [
+                // TopK control
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Text('Top-K:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 100,
+                        child: Slider(
+                          value: _topK.toDouble(),
+                          min: 1,
+                          max: 20,
+                          divisions: 19,
+                          label: '$_topK',
+                          activeColor: Colors.blue,
+                          onChanged: (v) => setState(() => _topK = v.round()),
+                        ),
+                      ),
+                      Text('$_topK', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // MaxHops control
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Text('Hops:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 100,
+                        child: Slider(
+                          value: _maxHops.toDouble(),
+                          min: 0,
+                          max: 3,
+                          divisions: 3,
+                          label: '$_maxHops',
+                          activeColor: Colors.blue,
+                          onChanged: (v) => setState(() => _maxHops = v.round()),
+                        ),
+                      ),
+                      Text('$_maxHops', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           const SizedBox(height: 8),
           // Query Input Row
           Row(
@@ -374,8 +431,8 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
 
 class _QueryResult {
   final String query;
-  final List<ScoredQueryEntity> entities;
-  final List<ScoredQueryCommunity> communities;
+  final List<GraphRAGScoredEntity> entities;
+  final List<GraphRAGScoredCommunity> communities;
   final String contextString;
   final DateTime timestamp;
   final bool isGlobalQuery;
@@ -384,6 +441,9 @@ class _QueryResult {
   
   /// Generated answer (for local queries with answer generation)
   final String? generatedAnswer;
+  
+  /// Query metadata (local queries only)
+  final GraphRAGQueryMetadata? queryMetadata;
 
   _QueryResult({
     required this.query,
@@ -395,6 +455,7 @@ class _QueryResult {
     this.globalQueryMetadata,
     this.communityAnswersUsed = 0,
     this.generatedAnswer,
+    this.queryMetadata,
   });
 }
 
@@ -405,6 +466,11 @@ class _QueryResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final seedEntities =
+        result.entities.where((e) => e.source == 'embedding').toList();
+    final hopEntities =
+        result.entities.where((e) => e.source == 'graph_traversal').toList();
+
     return Card(
       color: result.isGlobalQuery
           ? const Color(0xFF2d1a5c)
@@ -428,29 +494,31 @@ class _QueryResultCard extends StatelessWidget {
         subtitle: Text(
           result.isGlobalQuery
               ? 'Global Query (Level ${result.globalQueryMetadata?.communityLevel ?? 0}, ${result.communityAnswersUsed} communities used)'
-              : '${result.entities.length} entities found',
+              : '${seedEntities.length} seed + ${hopEntities.length} hop entities',
           style: const TextStyle(fontSize: 12, color: Colors.white70),
         ),
         initiallyExpanded: true,
         children: [
-          // === ANSWER SECTION (both local and global) ===
+          // === ANSWER SECTION ===
           if (result.isGlobalQuery && result.contextString.isNotEmpty)
             _buildAnswerSection(
               title: 'Global Answer',
               answer: result.contextString,
               color: Colors.purple,
             ),
-          if (!result.isGlobalQuery && result.generatedAnswer != null && result.generatedAnswer!.isNotEmpty)
+          if (!result.isGlobalQuery &&
+              result.generatedAnswer != null &&
+              result.generatedAnswer!.isNotEmpty)
             _buildAnswerSection(
               title: 'Answer',
               answer: result.generatedAnswer!,
               color: Colors.blue,
             ),
-          
-          // === RELEVANT SOURCES SECTION ===
-          if (result.entities.isNotEmpty || result.communities.isNotEmpty)
-            _buildRelevantSourcesSection(),
-          
+
+          // === RETRIEVAL CONTEXT SECTION (local queries only) ===
+          if (!result.isGlobalQuery && result.entities.isNotEmpty)
+            _buildRetrievalContextSection(seedEntities, hopEntities),
+
           // === METADATA SECTION ===
           if (result.isGlobalQuery && result.globalQueryMetadata != null)
             Padding(
@@ -462,11 +530,22 @@ class _QueryResultCard extends StatelessWidget {
                 style: const TextStyle(fontSize: 10, color: Colors.white54),
               ),
             ),
+          if (!result.isGlobalQuery && result.queryMetadata != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Text(
+                '${result.queryMetadata!.seedEntitiesCount} seeds → '
+                '${result.queryMetadata!.hopEntitiesCount} hops | '
+                'Budget: ${result.queryMetadata!.estimatedTokensUsed}/${result.queryMetadata!.tokenBudget} tokens | '
+                '${result.queryMetadata!.executionTime.inMilliseconds}ms',
+                style: const TextStyle(fontSize: 10, color: Colors.white54),
+              ),
+            ),
         ],
       ),
     );
   }
-  
+
   Widget _buildAnswerSection({
     required String title,
     required String answer,
@@ -509,19 +588,23 @@ class _QueryResultCard extends StatelessWidget {
       ),
     );
   }
-  
-  Widget _buildRelevantSourcesSection() {
+
+  Widget _buildRetrievalContextSection(
+    List<GraphRAGScoredEntity> seeds,
+    List<GraphRAGScoredEntity> hops,
+  ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Section header
           const Row(
             children: [
-              Icon(Icons.source, size: 14, color: Colors.white70),
+              Icon(Icons.account_tree, size: 14, color: Colors.white70),
               SizedBox(width: 6),
               Text(
-                'Relevant Sources',
+                'Retrieval Context',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.white70,
@@ -530,50 +613,131 @@ class _QueryResultCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          // Top 3 entities as chips
-          if (result.entities.isNotEmpty)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: result.entities.take(3).map((scored) {
-                return _EntityChip(
-                  entity: scored.entity,
-                  score: scored.score,
-                );
-              }).toList(),
-            ),
-          // Community if available
-          if (result.communities.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.purple.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.purple.withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.group_work, size: 14, color: Colors.purple),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Community L${result.communities.first.community.level}',
-                    style: const TextStyle(
-                      color: Colors.purple,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+          const SizedBox(height: 10),
+
+          // Seed entities (from embedding similarity)
+          if (seeds.isNotEmpty) ...[
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.cyan.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border:
+                        Border.all(color: Colors.cyan.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'SEED',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.cyan,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                  if (result.communities.first.community.summary.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '• ${_truncate(result.communities.first.community.summary, 50)}',
-                        style: const TextStyle(color: Colors.white54, fontSize: 11),
-                        overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Embedding similarity (${seeds.length})',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ...seeds.map((scored) => _EntityRow(scored: scored)),
+          ],
+
+          // Hop entities (from graph traversal)
+          if (hops.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'HOP',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '1-hop graph traversal (${hops.length})',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ...hops.map((scored) => _EntityRow(scored: scored)),
+          ],
+
+          // Community context
+          if (result.communities.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.purple.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border:
+                    Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.group_work,
+                          size: 14, color: Colors.purple),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Community L${result.communities.first.community.level}',
+                        style: const TextStyle(
+                          color: Colors.purple,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
+                      const Spacer(),
+                      Text(
+                        '${(result.communities.first.score * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.purple,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (result
+                      .communities.first.community.summary.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _truncate(
+                          result.communities.first.community.summary, 120),
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11),
                     ),
                   ],
                 ],
@@ -584,43 +748,42 @@ class _QueryResultCard extends StatelessWidget {
       ),
     );
   }
-  
+
   String _truncate(String text, int maxLength) {
     if (text.length <= maxLength) return text;
     return '${text.substring(0, maxLength)}...';
   }
 }
 
-class _EntityChip extends StatelessWidget {
-  final GraphEntity entity;
-  final double score;
+/// A single entity row showing type badge, name, source indicator, and score
+class _EntityRow extends StatelessWidget {
+  final GraphRAGScoredEntity scored;
 
-  const _EntityChip({
-    required this.entity,
-    required this.score,
-  });
+  const _EntityRow({required this.scored});
 
   @override
   Widget build(BuildContext context) {
+    final entity = scored.entity;
     final typeColor = _getTypeColor(entity.type);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: typeColor.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: typeColor.withValues(alpha: 0.4)),
-      ),
+    final pct = (scored.score * 100).toStringAsFixed(0);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
+          // Type badge
           Container(
+            width: 36,
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
             decoration: BoxDecoration(
               color: typeColor,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              entity.type.substring(0, entity.type.length.clamp(0, 3)).toUpperCase(),
+              entity.type
+                  .substring(0, entity.type.length.clamp(0, 3))
+                  .toUpperCase(),
+              textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 8,
                 fontWeight: FontWeight.bold,
@@ -628,52 +791,58 @@ class _EntityChip extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 120),
+          const SizedBox(width: 8),
+          // Entity name
+          Expanded(
             child: Text(
               entity.name,
               style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
+                fontSize: 13,
                 color: Colors.white,
               ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(width: 6),
-          Text(
-            '${(score * 100).toStringAsFixed(0)}%',
-            style: TextStyle(
-              fontSize: 10,
-              color: typeColor,
-              fontWeight: FontWeight.bold,
+          // Score percentage
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: typeColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '$pct%',
+              style: TextStyle(
+                fontSize: 11,
+                color: typeColor,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Color _getTypeColor(String type) {
-    switch (type.toUpperCase()) {
-      case 'PERSON':
-        return Colors.blue;
-      case 'ORGANIZATION':
-        return Colors.green;
-      case 'EVENT':
-        return Colors.orange;
-      case 'LOCATION':
-        return Colors.purple;
-      case 'PHONE':
-        return Colors.teal;
-      case 'EMAIL':
-        return Colors.red;
-      case 'DATE':
-      case 'TIME':
-        return Colors.amber;
-      default:
-        return Colors.blueGrey;
-    }
+Color _getTypeColor(String type) {
+  switch (type.toUpperCase()) {
+    case 'PERSON':
+      return Colors.blue;
+    case 'ORGANIZATION':
+      return Colors.green;
+    case 'EVENT':
+      return Colors.orange;
+    case 'LOCATION':
+      return Colors.purple;
+    case 'PHONE':
+      return Colors.teal;
+    case 'EMAIL':
+      return Colors.red;
+    case 'DATE':
+    case 'TIME':
+      return Colors.amber;
+    default:
+      return Colors.blueGrey;
   }
 }

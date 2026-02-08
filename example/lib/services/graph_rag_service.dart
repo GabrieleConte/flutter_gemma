@@ -404,18 +404,20 @@ class GraphRAGService {
   }
   
   /// Query the knowledge graph
-  Future<HybridQueryResult> query(
+  Future<GraphRAGQueryResult> query(
     String naturalLanguageQuery, {
-    String? cypherQuery,
     List<String>? entityTypes,
+    int? topK,
+    int? maxHops,
   }) async {
     _checkInitialized();
     debugPrint('[GraphRAGService] Query: "$naturalLanguageQuery"');
     
     final result = await _graphRag!.query(
       naturalLanguageQuery,
-      cypherQuery: cypherQuery,
       entityTypes: entityTypes,
+      topK: topK,
+      maxHops: maxHops,
     );
     
     debugPrint('[GraphRAGService] Query returned ${result.entities.length} entities, ${result.communities.length} communities');
@@ -423,18 +425,20 @@ class GraphRAGService {
   }
   
   /// Query the knowledge graph with generated answer
-  Future<HybridQueryResult> queryWithAnswer(
+  Future<GraphRAGQueryResult> queryWithAnswer(
     String naturalLanguageQuery, {
-    String? cypherQuery,
     List<String>? entityTypes,
+    int? topK,
+    int? maxHops,
   }) async {
     _checkInitialized();
     debugPrint('[GraphRAGService] Query with answer: "$naturalLanguageQuery"');
     
     final result = await _graphRag!.queryWithAnswer(
       naturalLanguageQuery,
-      cypherQuery: cypherQuery,
       entityTypes: entityTypes,
+      topK: topK,
+      maxHops: maxHops,
     );
     
     debugPrint('[GraphRAGService] Query returned ${result.entities.length} entities, answer: ${result.generatedAnswer?.substring(0, result.generatedAnswer!.length.clamp(0, 50)) ?? "none"}...');

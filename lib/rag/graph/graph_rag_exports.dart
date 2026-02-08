@@ -108,35 +108,16 @@ export 'community_detection.dart'
         CommunitySummarizer,
         CommunitySummary;
 
-// Cypher parser
-export 'cypher_parser.dart'
+// GraphRAG query engine
+export 'graphrag_query_engine.dart'
     show
-        CypherParser,
-        CypherQueryExecutor,
-        CypherParseException,
-        ParsedCypherQuery,
-        NodePattern,
-        RelationshipPattern,
-        PathPattern,
-        WhereCondition,
-        ComparisonCondition,
-        AndCondition,
-        OrCondition,
-        NotCondition,
-        ReturnItem,
-        OrderByItem;
-
-// Hybrid query engine
-export 'hybrid_query_engine.dart'
-    show
-        HybridQueryConfig,
-        HybridQueryResult,
-        ScoredQueryEntity,
-        ScoredQueryCommunity,
-        QueryMetadata,
-        HybridQueryEngine,
-        HybridQueryBuilder,
-        HybridQueryResultExtension;
+        GraphRAGQueryConfig,
+        GraphRAGQueryResult,
+        GraphRAGScoredEntity,
+        GraphRAGScoredCommunity,
+        GraphRAGQueryMetadata,
+        GraphRAGQueryEngine,
+        GraphRAGQueryResultExtension;
 
 // Global query engine (GraphRAG paper map-reduce approach)
 export 'global_query_engine.dart'

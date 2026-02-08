@@ -3,7 +3,7 @@ import 'package:flutter_gemma/rag/graph/graph_repository.dart';
 import 'package:flutter_gemma/rag/graph/entity_extractor.dart';
 import 'package:flutter_gemma/rag/graph/community_detection.dart';
 import 'package:flutter_gemma/rag/graph/cypher_parser.dart';
-import 'package:flutter_gemma/rag/graph/hybrid_query_engine.dart';
+import 'package:flutter_gemma/rag/graph/graphrag_query_engine.dart';
 import 'package:flutter_gemma/rag/connectors/data_connector.dart';
 import 'package:flutter_gemma/rag/graph/background_indexing.dart';
 
@@ -192,75 +192,6 @@ void main() {
     });
   });
 
-  group('CypherParser', () {
-    late CypherParser parser;
-
-    setUp(() {
-      parser = CypherParser();
-    });
-
-    test('parses simple MATCH clause', () {
-      const query = 'MATCH (n:PERSON) RETURN n';
-      final parsed = parser.parse(query);
-
-      expect(parsed.matchPatterns.length, 1);
-      expect(parsed.matchPatterns.first.nodes.length, 1);
-      expect(parsed.matchPatterns.first.nodes.first.labels, contains('PERSON'));
-    });
-
-    test('parses MATCH with variable', () {
-      const query = 'MATCH (p:PERSON) RETURN p';
-      final parsed = parser.parse(query);
-
-      expect(parsed.matchPatterns.first.nodes.first.variable, 'p');
-    });
-
-    test('parses single node pattern', () {
-      // Note: Simplified Cypher parser handles single node patterns
-      const query = 'MATCH (p:PERSON) RETURN p';
-      final parsed = parser.parse(query);
-
-      expect(parsed.matchPatterns.first.nodes.length, 1);
-      expect(parsed.matchPatterns.first.nodes.first.labels, contains('PERSON'));
-    });
-
-    test('parses WHERE clause', () {
-      const query = 'MATCH (p:PERSON) WHERE p.name = "John" RETURN p';
-      final parsed = parser.parse(query);
-
-      expect(parsed.whereCondition, isNotNull);
-      expect(parsed.whereCondition, isA<ComparisonCondition>());
-    });
-
-    test('parses LIMIT clause', () {
-      const query = 'MATCH (p:PERSON) RETURN p LIMIT 10';
-      final parsed = parser.parse(query);
-
-      expect(parsed.limit, 10);
-    });
-
-    test('parses RETURN *', () {
-      const query = 'MATCH (p:PERSON) RETURN *';
-      final parsed = parser.parse(query);
-
-      expect(parsed.returnAll, isTrue);
-    });
-
-    test('parses compound WHERE with AND', () {
-      const query =
-          'MATCH (p:PERSON) WHERE p.name = "John" AND p.age > 30 RETURN p';
-      final parsed = parser.parse(query);
-
-      expect(parsed.whereCondition, isA<AndCondition>());
-    });
-
-    test('handles empty query gracefully', () {
-      // Empty query returns empty result
-      final parsed = parser.parse('');
-      expect(parsed.matchPatterns, isEmpty);
-    });
-  });
-
   group('WhereCondition evaluation', () {
     test('ComparisonCondition evaluates equality', () {
       final condition = ComparisonCondition(
@@ -314,42 +245,37 @@ void main() {
     });
   });
 
-  group('HybridQueryConfig', () {
+  group('GraphRAGQueryConfig', () {
     test('has default values', () {
-      final config = HybridQueryConfig();
+      final config = GraphRAGQueryConfig();
 
-      expect(config.cypherWeight, 0.4);
-      expect(config.embeddingWeight, 0.4);
-      expect(config.communityWeight, 0.2);
-      expect(config.topK, 10);
+      expect(config.topK, 4);
+      expect(config.maxHops, 1);
+      expect(config.similarityThreshold, 0.5);
+      expect(config.maxContextTokens, 4096);
+      expect(config.contextBudgetRatio, 0.9);
       expect(config.includeCommunityContext, isTrue);
+      expect(config.hubEntityTypes, isNotEmpty);
+      expect(config.hubEntityTypes, GraphRAGQueryConfig.defaultHubEntityTypes);
     });
 
     test('allows customization', () {
-      final config = HybridQueryConfig(
-        cypherWeight: 0.5,
-        embeddingWeight: 0.5,
-        communityWeight: 0.0,
+      final config = GraphRAGQueryConfig(
         topK: 20,
+        maxHops: 3,
+        similarityThreshold: 0.3,
+        maxContextTokens: 2048,
+        contextBudgetRatio: 0.8,
         includeCommunityContext: false,
+        hubEntityTypes: {'DATE'},
       );
 
-      expect(config.cypherWeight, 0.5);
       expect(config.topK, 20);
+      expect(config.maxHops, 3);
+      expect(config.similarityThreshold, 0.3);
+      expect(config.maxContextTokens, 2048);
       expect(config.includeCommunityContext, isFalse);
-    });
-  });
-
-  group('HybridQueryBuilder', () {
-    test('builds query with fluent API', () {
-      final builder = HybridQueryBuilder()
-          .query('Find people at Google')
-          .types(['PERSON'])
-          .limit(5)
-          .withCommunities(false);
-
-      // Builder stores configuration for execution
-      expect(builder, isNotNull);
+      expect(config.hubEntityTypes, {'DATE'});
     });
   });
 
@@ -489,16 +415,20 @@ void main() {
     });
   });
 
-  group('HybridQueryResult Extension', () {
+  group('GraphRAGQueryResult Extension', () {
     test('hasResults returns correct value', () {
-      final emptyResult = HybridQueryResult(
+      final emptyResult = GraphRAGQueryResult(
         entities: [],
         communities: [],
         contextString: '',
-        metadata: QueryMetadata(
+        metadata: GraphRAGQueryMetadata(
           originalQuery: 'test',
-          totalEntitiesSearched: 0,
-          totalCommunitiesSearched: 0,
+          seedEntitiesCount: 0,
+          hopEntitiesCount: 0,
+          totalEntitiesBeforeBudget: 0,
+          totalEntitiesAfterBudget: 0,
+          tokenBudget: 3686,
+          estimatedTokensUsed: 0,
           executionTime: Duration.zero,
         ),
       );
@@ -520,17 +450,21 @@ void main() {
         lastModified: DateTime.now(),
       );
 
-      final result = HybridQueryResult(
+      final result = GraphRAGQueryResult(
         entities: [
-          ScoredQueryEntity(entity: entity1, score: 1.0, source: 'embedding'),
-          ScoredQueryEntity(entity: entity2, score: 0.8, source: 'embedding'),
+          GraphRAGScoredEntity(entity: entity1, score: 1.0, source: 'embedding'),
+          GraphRAGScoredEntity(entity: entity2, score: 0.8, source: 'embedding'),
         ],
         communities: [],
         contextString: '',
-        metadata: QueryMetadata(
+        metadata: GraphRAGQueryMetadata(
           originalQuery: 'test',
-          totalEntitiesSearched: 2,
-          totalCommunitiesSearched: 0,
+          seedEntitiesCount: 2,
+          hopEntitiesCount: 0,
+          totalEntitiesBeforeBudget: 2,
+          totalEntitiesAfterBudget: 2,
+          tokenBudget: 3686,
+          estimatedTokensUsed: 0,
           executionTime: Duration.zero,
         ),
       );

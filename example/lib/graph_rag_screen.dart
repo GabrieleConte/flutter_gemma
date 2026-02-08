@@ -1019,8 +1019,8 @@ class _PermissionChip extends StatelessWidget {
 
 class _QueryResult {
   final String query;
-  final List<ScoredQueryEntity> entities;
-  final List<ScoredQueryCommunity> communities;
+  final List<GraphRAGScoredEntity> entities;
+  final List<GraphRAGScoredCommunity> communities;
   final String contextString;
   final DateTime timestamp;
   final bool isGlobalQuery;

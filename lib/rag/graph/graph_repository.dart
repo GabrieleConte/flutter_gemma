@@ -240,13 +240,13 @@ abstract class GraphRepository {
   // Similarity search
   Future<List<ScoredEntity>> searchEntitiesBySimilarity(
     List<double> queryEmbedding, {
-    int topK = 10,
+    int topK = 4,
     double threshold = 0.0,
     String? entityType,
   });
   Future<List<ScoredCommunity>> searchCommunitiesBySimilarity(
     List<double> queryEmbedding, {
-    int topK = 10,
+    int topK = 4,
     int? level,
   });
 

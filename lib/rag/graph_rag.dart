@@ -10,7 +10,7 @@ import 'graph/graph_repository.dart';
 import 'graph/entity_extractor.dart';
 import 'graph/community_detection.dart';
 import 'graph/cypher_parser.dart';
-import 'graph/hybrid_query_engine.dart';
+import 'graph/graphrag_query_engine.dart';
 import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
 import 'graph/link_prediction.dart';
@@ -22,8 +22,8 @@ class GraphRAGConfig {
   /// Path to the graph database file
   final String databasePath;
   
-  /// Configuration for hybrid queries
-  final HybridQueryConfig queryConfig;
+  /// Configuration for GraphRAG queries
+  final GraphRAGQueryConfig queryConfig;
   
   /// Configuration for entity extraction
   final EntityExtractionConfig extractionConfig;
@@ -42,13 +42,13 @@ class GraphRAGConfig {
 
   GraphRAGConfig({
     required this.databasePath,
-    HybridQueryConfig? queryConfig,
+    GraphRAGQueryConfig? queryConfig,
     EntityExtractionConfig? extractionConfig,
     CommunityDetectionConfig? communityConfig,
     IndexingConfig? indexingConfig,
     GraphRAGExtendedConfig? extendedConfig,
     this.autoIndex = false,
-  })  : queryConfig = queryConfig ?? HybridQueryConfig(),
+  })  : queryConfig = queryConfig ?? GraphRAGQueryConfig(),
         extractionConfig = extractionConfig ?? EntityExtractionConfig(),
         communityConfig = communityConfig ?? CommunityDetectionConfig(),
         indexingConfig = indexingConfig ?? IndexingConfig(),
@@ -83,7 +83,7 @@ class GraphRAG {
   late final NativeGraphRepository _repository;
   late final ConnectorManager _connectorManager;
   late final EntityExtractor _extractor;
-  late final HybridQueryEngine _queryEngine;
+  late final GraphRAGQueryEngine _queryEngine;
   late final BackgroundIndexingService _indexingService;
   
   /// Cache manager for model caching (5-10x faster reloads)
@@ -163,7 +163,7 @@ class GraphRAG {
   }
 
   /// Access to the query engine
-  HybridQueryEngine get queryEngine {
+  GraphRAGQueryEngine get queryEngine {
     _checkInitialized();
     return _queryEngine;
   }
@@ -255,7 +255,7 @@ class GraphRAG {
     }
 
     // Setup query engine with LLM for local answer generation
-    _queryEngine = HybridQueryEngine(
+    _queryEngine = GraphRAGQueryEngine(
       repository: _repository,
       embeddingCallback: _embeddingCallback,
       llmCallback: _llmCallback,
@@ -427,32 +427,36 @@ class GraphRAG {
 
   // === Querying ===
 
-  /// Execute a query (natural language or Cypher)
-  Future<HybridQueryResult> query(
+  /// Execute a local GraphRAG query (embedding similarity + N-hop traversal)
+  Future<GraphRAGQueryResult> query(
     String query, {
-    String? cypherQuery,
     List<String>? entityTypes,
+    int? topK,
+    int? maxHops,
   }) async {
     _checkInitialized();
     return await _queryEngine.query(
       query,
-      cypherQuery: cypherQuery,
       entityTypes: entityTypes,
+      topK: topK,
+      maxHops: maxHops,
     );
   }
   
   /// Execute a local query with answer generation
   /// Returns retrieval results plus a generated answer based on top entities
-  Future<HybridQueryResult> queryWithAnswer(
+  Future<GraphRAGQueryResult> queryWithAnswer(
     String query, {
-    String? cypherQuery,
     List<String>? entityTypes,
+    int? topK,
+    int? maxHops,
   }) async {
     _checkInitialized();
     return await _queryEngine.queryWithAnswer(
       query,
-      cypherQuery: cypherQuery,
       entityTypes: entityTypes,
+      topK: topK,
+      maxHops: maxHops,
     );
   }
   
@@ -460,23 +464,19 @@ class GraphRAG {
   /// Yields tokens as they are generated
   Stream<String> queryWithAnswerStreaming(
     String query, {
-    String? cypherQuery,
     List<String>? entityTypes,
+    int? topK,
+    int? maxHops,
     required Stream<String> Function(String prompt) llmStreamCallback,
   }) async* {
     _checkInitialized();
     yield* _queryEngine.queryWithAnswerStreaming(
       query,
-      cypherQuery: cypherQuery,
       entityTypes: entityTypes,
+      topK: topK,
+      maxHops: maxHops,
       llmStreamCallback: llmStreamCallback,
     );
-  }
-
-  /// Build a query fluently
-  HybridQueryBuilder buildQuery() {
-    _checkInitialized();
-    return HybridQueryBuilder();
   }
 
   /// Execute a Cypher query directly
@@ -1541,12 +1541,7 @@ extension GraphRAGQueryExtension on GraphRAG {
   Future<List<GraphEntity>> findPeopleAt(String organization) async {
     final result = await query(
       'people at $organization',
-      cypherQuery: '''
-MATCH (p:PERSON)-[:WORKS_AT]->(o:ORGANIZATION)
-WHERE o.name CONTAINS "$organization"
-RETURN p
-LIMIT 20
-''',
+      entityTypes: ['PERSON'],
     );
     return result.entities.map((e) => e.entity).toList();
   }
@@ -1555,12 +1550,7 @@ LIMIT 20
   Future<List<GraphEntity>> findEventsFor(String personName) async {
     final result = await query(
       'events with $personName',
-      cypherQuery: '''
-MATCH (e:EVENT)-[:ATTENDED_BY]->(p:PERSON)
-WHERE p.name CONTAINS "$personName"
-RETURN e
-LIMIT 20
-''',
+      entityTypes: ['EVENT'],
     );
     return result.entities
         .where((e) => e.entity.type == 'EVENT')
@@ -1572,12 +1562,7 @@ LIMIT 20
   Future<List<GraphEntity>> findConnectionsOf(String personName) async {
     final result = await query(
       'who knows $personName',
-      cypherQuery: '''
-MATCH (p:PERSON)-[:KNOWS|COLLEAGUE_OF]-(target:PERSON)
-WHERE target.name CONTAINS "$personName"
-RETURN p
-LIMIT 20
-''',
+      entityTypes: ['PERSON'],
     );
     return result.entities
         .where((e) => e.entity.type == 'PERSON')
