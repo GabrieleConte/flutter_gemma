@@ -153,6 +153,7 @@ class BackgroundIndexingService {
   late final EmbeddingSimilarityLinkPredictor? _embeddingSimilarityPredictor;
   late final DirectEntityExtractor _directExtractor;
   late final Future<List<double>> Function(String text) _embeddingCallback;
+  late final Future<String> Function(String prompt) _llmCallback;
   late final Future<String> Function(String prompt, Uint8List imageBytes)? _visionLlmCallback;
   final PlatformService _platform = PlatformService();
   
@@ -195,6 +196,7 @@ class BackgroundIndexingService {
     this.onBeforeSummarization,
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
+    _llmCallback = llmCallback;
     _embeddingCallback = embeddingCallback;
     _visionLlmCallback = visionLlmCallback;
     
@@ -737,9 +739,7 @@ class BackgroundIndexingService {
     // Create vision extractor and extract entities
     final visionExtractor = VisionEntityExtractor(
       visionLlmCallback: _visionLlmCallback!,
-      llmCallback: extractor is LLMEntityExtractor 
-          ? (extractor as LLMEntityExtractor).llmCallback
-          : (prompt) async => '', // Fallback if not LLM extractor
+      llmCallback: _llmCallback,
       embeddingCallback: _embeddingCallback,
     );
     
