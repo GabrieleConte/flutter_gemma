@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart' as global;
@@ -7,6 +8,7 @@ import 'package:flutter_gemma_example/services/graph_rag_service.dart';
 import 'package:flutter_gemma_example/services/auth_token_service.dart';
 import 'package:flutter_gemma_example/models/model.dart';
 import 'package:flutter_gemma_example/models/embedding_model.dart' as app_models;
+import 'package:url_launcher/url_launcher.dart';
 
 /// Screen for demonstrating GraphRAG capabilities
 class GraphRAGScreen extends StatefulWidget {
@@ -19,9 +21,11 @@ class GraphRAGScreen extends StatefulWidget {
 class _GraphRAGScreenState extends State<GraphRAGScreen> {
   final GraphRAGService _service = GraphRAGService.instance;
   final TextEditingController _queryController = TextEditingController();
+  final TextEditingController _tokenController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   
   // State
+  String _token = '';
   bool _isInitializing = false;
   bool _modelsReady = false;
   String? _initError;
@@ -46,12 +50,29 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
   @override
   void initState() {
     super.initState();
+    _loadSavedToken();
     _checkInitialization();
+  }
+  
+  Future<void> _loadSavedToken() async {
+    final savedToken = await AuthTokenService.loadToken();
+    if (savedToken != null && savedToken.isNotEmpty) {
+      setState(() {
+        _token = savedToken;
+        _tokenController.text = savedToken;
+      });
+    }
+  }
+  
+  Future<void> _saveToken(String token) async {
+    await AuthTokenService.saveToken(token);
+    setState(() => _token = token);
   }
   
   @override
   void dispose() {
     _queryController.dispose();
+    _tokenController.dispose();
     _scrollController.dispose();
     _progressSubscription?.cancel();
     super.dispose();
@@ -87,10 +108,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       if (inferenceModel.localModel) {
         await installer.fromAsset(inferenceModel.url).install();
       } else {
-        String? token;
-        if (inferenceModel.needsAuth) {
-          token = await AuthTokenService.loadToken();
-        }
+        final token = inferenceModel.needsAuth && _token.isNotEmpty ? _token : null;
         await installer.fromNetwork(inferenceModel.url, token: token).install();
       }
       
@@ -134,10 +152,7 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       // Use EmbeddingGemma (2048D embeddings)
       const embeddingModelDef = app_models.EmbeddingModel.embeddingGemma512;
       final embeddingInstaller = FlutterGemma.installEmbedder();
-      String? embeddingToken;
-      if (embeddingModelDef.needsAuth) {
-        embeddingToken = await AuthTokenService.loadToken();
-      }
+      final embeddingToken = embeddingModelDef.needsAuth && _token.isNotEmpty ? _token : null;
       await embeddingInstaller.modelFromNetwork(embeddingModelDef.url, token: embeddingToken)
           .tokenizerFromNetwork(embeddingModelDef.tokenizerUrl, token: embeddingToken)
           .install();
@@ -461,11 +476,13 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'GraphRAG builds a personal knowledge graph from your contacts and calendar, enabling intelligent queries about your data.',
+              'GraphRAG builds a personal knowledge graph from your phone local data, enabling intelligent queries about your data.',
               style: TextStyle(fontSize: 16, color: Colors.white70),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
+            _buildTokenInput(),
+            const SizedBox(height: 24),
             if (_initError != null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -502,6 +519,87 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildTokenInput() {
+    return Card(
+      color: const Color(0xFF1a3a5c),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'HuggingFace Access Token',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _tokenController,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Paste your Hugging Face access token here',
+                hintStyle: const TextStyle(color: Colors.white60),
+                border: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white30),
+                ),
+                enabledBorder: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white30),
+                ),
+                focusedBorder: const OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.blue),
+                ),
+                filled: true,
+                fillColor: const Color(0xFF2a4a6c),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.save, color: Colors.white),
+                  onPressed: () async {
+                    final token = _tokenController.text.trim();
+                    if (token.isNotEmpty) {
+                      await _saveToken(token);
+                      if (mounted) {
+                        _showSnackBar('Access Token saved successfully!');
+                      }
+                    }
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            RichText(
+              text: TextSpan(
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+                children: [
+                  const TextSpan(
+                    text: 'To create an access token, please visit ',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  TextSpan(
+                    text: 'https://huggingface.co/settings/tokens',
+                    style: TextStyle(
+                      color: Colors.blue[300],
+                      decoration: TextDecoration.underline,
+                    ),
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () async {
+                        final uri = Uri.parse('https://huggingface.co/settings/tokens');
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri);
+                        }
+                      },
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
