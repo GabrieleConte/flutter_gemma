@@ -1662,25 +1662,48 @@ Call validate_relationship now.''';
         final confidence = (args['confidence'] as num?)?.toDouble() ?? 0.0;
         final explanation = args['explanation'] as String?;
         
-        // Adjust confidence based on embedding similarity
-        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-        
-        print('[Structured Validation] Parsed: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
-        
-        if (relationshipType == 'NONE' || !isValid) {
+        if (relationshipType != null) {
+          // Proper structured response with expected parameters
+          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+          
+          print('[Structured Validation] Parsed: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
+          
+          if (relationshipType == 'NONE' || !isValid) {
+            return LinkValidationResult(
+              isValid: false,
+              relationshipType: relationshipType,
+              confidence: adjustedConfidence,
+              explanation: explanation ?? 'No relationship identified',
+            );
+          }
+          
           return LinkValidationResult(
-            isValid: false,
+            isValid: true,
             relationshipType: relationshipType,
-            confidence: adjustedConfidence,
-            explanation: explanation ?? 'No relationship identified',
+            confidence: adjustedConfidence.clamp(0.0, 1.0),
+            explanation: explanation,
           );
         }
         
+        // LLM called validate_relationship but used wrong parameter names.
+        // Try to extract a relationship keyword from the arg values or the
+        // raw response text (e.g. the LLM echoed entity names + a keyword).
+        print('[Structured Validation] Correct function but wrong args: $args');
+        final keywordFromArgs = extractRelationshipKeyword(args.values.join(' '));
+        final keywordFromResponse = keywordFromArgs ?? extractRelationshipKeyword(response);
+        if (keywordFromResponse != null) {
+          return _bareKeywordToResult(keywordFromResponse, candidate);
+        }
+        
+        // The model invoked validate_relationship without NONE and without
+        // a recognisable relationship keyword — treat as RELATED_TO since
+        // it at least acknowledged a relationship exists.
+        print('[Structured Validation] Inferring RELATED_TO from function call without recognisable type');
         return LinkValidationResult(
           isValid: true,
-          relationshipType: relationshipType,
-          confidence: adjustedConfidence.clamp(0.0, 1.0),
-          explanation: explanation,
+          relationshipType: 'RELATED_TO',
+          confidence: (candidate.similarity * 0.7).clamp(0.0, 1.0),
+          explanation: 'LLM called validate_relationship but used non-standard parameters',
         );
       }
       
@@ -1813,21 +1836,33 @@ Call validate_relationship now.''';
         final confidence = (args['confidence'] as num?)?.toDouble() ?? 0.0;
         final explanation = args['explanation'] as String?;
         
-        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-        
-        if (relationshipType == 'NONE' || !isValid) {
+        if (relationshipType != null) {
+          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
+          
+          if (relationshipType == 'NONE' || !isValid) {
+            return LinkValidationResult(
+              isValid: false,
+              explanation: explanation ?? 'No clear relationship identified',
+            );
+          }
+          
           return LinkValidationResult(
-            isValid: false,
-            explanation: explanation ?? 'No clear relationship identified',
+            isValid: true,
+            relationshipType: relationshipType,
+            confidence: adjustedConfidence.clamp(0.0, 1.0),
+            explanation: explanation,
           );
         }
         
-        return LinkValidationResult(
-          isValid: true,
-          relationshipType: relationshipType,
-          confidence: adjustedConfidence.clamp(0.0, 1.0),
-          explanation: explanation,
-        );
+        // LLM called validate_relationship but used wrong parameter names
+        // (e.g. entity_a, entity_b instead of relationship_type, is_valid).
+        // Try to recover a relationship keyword from the arg values or response.
+        print('[Structured PERSON] Correct function but wrong args: $args');
+        final keywordFromArgs = extractRelationshipKeyword(args.values.join(' '));
+        final keyword = keywordFromArgs ?? extractRelationshipKeyword(response);
+        if (keyword != null) {
+          return _bareKeywordToResult(keyword, candidate);
+        }
       }
       
       // If standard parsing failed, try Python variable assignment style

@@ -192,5 +192,21 @@ validate_relationship(relationship_type="FAMILY_MEMBER", is_valid=True, confiden
       expect(result.args['relationship_type'], equals('FAMILY_MEMBER'));
       expect(result.args['is_valid'], equals(true));
     });
+
+    test('parses tool_code block with nested parens in values', () {
+      // Real-world example: LLM wraps a Python function call in ```tool_code
+      // and values contain parentheses (e.g. "Dad (PERSON)")
+      const input = '''```tool_code
+validate_relationship(entity_a="Dad (PERSON)", entity_b="Dad's birthday (EVENT)", rules={"LOCATED_IN": "no proof"})
+```''';
+
+      final result = FunctionCallParser.parse(input, modelType: ModelType.gemmaIt);
+
+      expect(result, isNotNull);
+      expect(result!.name, equals('validate_relationship'));
+      // Should parse entity_a and entity_b correctly despite nested parens
+      expect(result.args['entity_a'], equals('Dad (PERSON)'));
+      expect(result.args['entity_b'], equals("Dad's birthday (EVENT)"));
+    });
   });
 }

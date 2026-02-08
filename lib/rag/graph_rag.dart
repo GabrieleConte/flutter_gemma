@@ -797,14 +797,21 @@ class GraphRAG {
       }
     }
     
-    // Create co-occurrence relationships between all entities from the same document
-    // This ensures entities extracted from the same file are connected
+    // Create co-occurrence relationships between entities from the same document
+    // — but only when they don't already share an explicit relationship.
     final extractedEntityIds = extraction.entities
         .map((e) => normalizeId(e.name, e.type))
         .toList();
     
     for (var i = 0; i < extractedEntityIds.length; i++) {
       for (var j = i + 1; j < extractedEntityIds.length; j++) {
+        final existingRels = await _repository.getRelationships(extractedEntityIds[i]);
+        final alreadyLinked = existingRels.any(
+          (r) => (r.targetId == extractedEntityIds[j] || r.sourceId == extractedEntityIds[j])
+                 && r.type != 'CO_OCCURS_IN',
+        );
+        if (alreadyLinked) continue;
+
         final coOccurRel = GraphRelationship(
           id: '${extractedEntityIds[i]}_co_occurs_${extractedEntityIds[j]}',
           sourceId: extractedEntityIds[i],
@@ -1076,10 +1083,20 @@ class GraphRAG {
       }
     }
 
-    // Create co-occurrence relationships between all entities across chunks
+    // Create co-occurrence relationships between entities that don't already
+    // share an explicit relationship. Avoids cluttering the graph with weak
+    // CO_OCCURS_IN edges between entities that are already linked.
     final uniqueEntityIds = allExtractedEntityIds.toSet().toList();
     for (var i = 0; i < uniqueEntityIds.length; i++) {
       for (var j = i + 1; j < uniqueEntityIds.length; j++) {
+        // Check if an explicit relationship already exists between these two
+        final existingRels = await _repository.getRelationships(uniqueEntityIds[i]);
+        final alreadyLinked = existingRels.any(
+          (r) => (r.targetId == uniqueEntityIds[j] || r.sourceId == uniqueEntityIds[j])
+                 && r.type != 'CO_OCCURS_IN',
+        );
+        if (alreadyLinked) continue;
+
         final coOccurRel = GraphRelationship(
           id: '${uniqueEntityIds[i]}_co_occurs_${uniqueEntityIds[j]}',
           sourceId: uniqueEntityIds[i],
@@ -1254,6 +1271,22 @@ class GraphRAG {
     try {
       await _repository.addRelationship(noteHubRel);
     } catch (_) {}
+
+    // Link extracted entities to the note via MENTIONED_IN so the
+    // note node is visually connected to its extracted persons/orgs/etc.
+    for (final entityId in uniqueEntityIds) {
+      final mentionedInRel = GraphRelationship(
+        id: '${entityId}_mentioned_in_$noteEntityId',
+        sourceId: entityId,
+        targetId: noteEntityId,
+        type: 'MENTIONED_IN',
+        weight: 0.8,
+        metadata: {'sourceNote': title},
+      );
+      try {
+        await _repository.addRelationship(mentionedInRel);
+      } catch (_) {}
+    }
 
     debugPrint('[GraphRAG] Indexed note "$title": ${chunks.length} chunk(s), '
         '${uniqueEntityIds.length} extracted entities');

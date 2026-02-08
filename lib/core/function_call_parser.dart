@@ -250,29 +250,64 @@ class FunctionCallParser {
   /// validate_relationship(relationship_type="FAMILY_MEMBER", is_valid=True, confidence=0.95)
   /// This handles Gemma models that output Python code instead of JSON
   static FunctionCallResponse? _parsePythonFunctionCall(String content) {
-    // Look for function call pattern: function_name(args)
-    // Can be anywhere in the content (often in markdown code blocks)
-    final funcCallRegex = RegExp(
-      r'(\w+)\s*\(\s*([^)]+)\s*\)',
-      multiLine: true,
-    );
+    // Strip markdown code block wrappers (```tool_code ... ```, ``` ... ```)
+    var cleaned = content;
+    final codeBlockRegex = RegExp(r'```\w*\s*([\s\S]*?)\s*```', multiLine: true);
+    final codeBlockMatch = codeBlockRegex.firstMatch(cleaned);
+    if (codeBlockMatch != null) {
+      cleaned = codeBlockMatch.group(1)!.trim();
+    }
 
-    for (final match in funcCallRegex.allMatches(content)) {
-      final functionName = match.group(1)!;
-      final argsStr = match.group(2)!;
+    // Use a balanced-paren approach: find "name(" then match the outermost ")"
+    // This correctly handles nested parens in values like entity_a="Dad (PERSON)"
+    final funcStartRegex = RegExp(r'(\w+)\s*\(');
+
+    for (final startMatch in funcStartRegex.allMatches(cleaned)) {
+      final functionName = startMatch.group(1)!;
 
       // Skip common Python patterns that aren't our function calls
-      if (functionName == 'def' || 
-          functionName == 'print' || 
-          functionName == 'return' ||
-          functionName == 'str' ||
-          functionName == 'int' ||
-          functionName == 'float' ||
-          functionName == 'bool' ||
-          functionName == 'list' ||
-          functionName == 'dict') {
+      if (const {'def', 'print', 'return', 'str', 'int', 'float', 'bool', 'list', 'dict'}
+          .contains(functionName)) {
         continue;
       }
+
+      // Find the matching closing paren using a depth counter
+      final openIndex = startMatch.end - 1; // index of '('
+      int depth = 0;
+      int? closeIndex;
+      bool inString = false;
+      String? stringChar;
+
+      for (int i = openIndex; i < cleaned.length; i++) {
+        final c = cleaned[i];
+
+        if (inString) {
+          if (c == stringChar && (i == 0 || cleaned[i - 1] != '\\')) {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (c == '"' || c == "'") {
+          inString = true;
+          stringChar = c;
+          continue;
+        }
+
+        if (c == '(') {
+          depth++;
+        } else if (c == ')') {
+          depth--;
+          if (depth == 0) {
+            closeIndex = i;
+            break;
+          }
+        }
+      }
+
+      if (closeIndex == null) continue;
+
+      final argsStr = cleaned.substring(openIndex + 1, closeIndex);
 
       // Parse keyword arguments: key="value" or key=value
       final params = <String, dynamic>{};
