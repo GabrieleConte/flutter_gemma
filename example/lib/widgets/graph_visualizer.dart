@@ -53,6 +53,8 @@ class GraphNode {
         return Colors.pinkAccent;
       case 'DATE':
         return Colors.brown;
+      case 'ALARM':
+        return Colors.redAccent;
       case 'EMAIL':
         return Colors.red.shade300;
       case 'PHONE':
@@ -92,6 +94,8 @@ class GraphNode {
         return Icons.tag;
       case 'DATE':
         return Icons.calendar_today;
+      case 'ALARM':
+        return Icons.alarm;
       case 'EMAIL':
         return Icons.email;
       case 'PHONE':
@@ -187,6 +191,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   static const double _velocityThreshold = 0.2;
   static const double _centerGravity = 0.005;
   static const double _youCenterGravity = 0.02;
+  int _simulationTick = 0;
 
   /// Rest-lengths per edge role
   static double _restLength(EdgeRole role) {
@@ -216,6 +221,10 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         baseRadius = 20.0 + min(node.childCount * 0.5, 8.0);
         break;
       case 'PERSON':
+        baseRadius = 14.0;
+        break;
+      case 'ALARM':
+      case 'EVENT':
         baseRadius = 14.0;
         break;
       default:
@@ -257,6 +266,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
   // =====================================================================
 
   void _initializeGraph() {
+    _simulationTick = 0;
     final random = Random(42);
     final totalEntities = widget.entities.length;
     _virtualCanvasSize = (1500.0 + totalEntities * 30).clamp(1500.0, 5000.0);
@@ -379,13 +389,27 @@ class _GraphVisualizerState extends State<GraphVisualizer>
     }
 
     // Place non-hub entities in a ring around "You"
+    // Transitive/metadata types should NOT link to You — they float
+    // near the primary entities they're connected to via data-layer edges.
+    const transitiveTypes = {
+      'DATE', 'LOCATION', 'ORGANIZATION', 'EMAIL', 'PHONE',
+      'TOPIC', 'PROJECT', 'NOTE_CHUNK',
+    };
     final nonHubEntities = visibleEntities
         .where(
             (e) => !nodeMap.containsKey(e.id) && e.type != 'SELF' && e.type != 'HUB')
         .toList();
-    final directRingRadius = 180.0 + min(nonHubEntities.length * 15.0, 300.0);
-    for (var i = 0; i < nonHubEntities.length; i++) {
-      final e = nonHubEntities[i];
+    final primaryNonHub = nonHubEntities
+        .where((e) => !transitiveTypes.contains(e.type.toUpperCase()))
+        .toList();
+    final transitiveNonHub = nonHubEntities
+        .where((e) => transitiveTypes.contains(e.type.toUpperCase()))
+        .toList();
+
+    // Primary entities: inner ring around You
+    final directRingRadius = 180.0 + min(primaryNonHub.length * 15.0, 300.0);
+    for (var i = 0; i < primaryNonHub.length; i++) {
+      final e = primaryNonHub[i];
       final angle = i * 2.39996;
       final ringIndex = i ~/ 8;
       final r = directRingRadius + ringIndex * 50.0;
@@ -397,6 +421,24 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         position: Offset(
           cx + cos(angle) * r + jitter,
           cy + sin(angle) * r + jitter,
+        ),
+      );
+    }
+
+    // Transitive entities: outer ring — spring forces pull them
+    // towards whichever primary entities they're related to.
+    final outerRingRadius = directRingRadius + 200.0;
+    for (var i = 0; i < transitiveNonHub.length; i++) {
+      final e = transitiveNonHub[i];
+      final angle = i * 2.39996;
+      final jitter = (random.nextDouble() - 0.5) * 30;
+      nodeMap[e.id] = GraphNode(
+        id: e.id,
+        name: e.name,
+        type: e.type,
+        position: Offset(
+          cx + cos(angle) * outerRingRadius + jitter,
+          cy + sin(angle) * outerRingRadius + jitter,
         ),
       );
     }
@@ -461,8 +503,10 @@ class _GraphVisualizerState extends State<GraphVisualizer>
       }
     }
 
-    // 7d. Non-hub entities connect directly to "You"
-    for (final e in nonHubEntities) {
+    // 7d. Only PRIMARY non-hub entities connect directly to "You".
+    //     Transitive entities (DATE, LOCATION, etc.) keep only their
+    //     data-layer edges — no synthetic link to You.
+    for (final e in primaryNonHub) {
       addEdge(youEntity.id, e.id, 'RELATED_TO', 0.4, EdgeRole.entityToYou);
     }
 
@@ -481,6 +525,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
 
   void _simulateStep() {
     if (_nodes.isEmpty) return;
+    _simulationTick++;
 
     final virtualCenter =
         Offset(_virtualCanvasSize / 2, _virtualCanvasSize / 2);
@@ -551,6 +596,27 @@ class _GraphVisualizerState extends State<GraphVisualizer>
         node.position.dx.clamp(50.0, _virtualCanvasSize - 50.0),
         node.position.dy.clamp(50.0, _virtualCanvasSize - 50.0),
       );
+    }
+
+    // --- Overlap resolution pass (only during initial settling) ---
+    if (_simulationTick <= 120) {
+      for (int i = 0; i < _nodes.length; i++) {
+        for (int j = i + 1; j < _nodes.length; j++) {
+          final a = _nodes[i];
+          final b = _nodes[j];
+          if (a.isDragging || b.isDragging) continue;
+          final delta = a.position - b.position;
+          final dist = max(delta.distance, 0.1);
+          final rA = _getNodeRadius(a);
+          final rB = _getNodeRadius(b);
+          final minSep = rA + rB + 6.0;
+          if (dist < minSep) {
+            final push = (delta / dist) * ((minSep - dist) * 0.4);
+            if (!a.isDragging) a.position += push;
+            if (!b.isDragging) b.position -= push;
+          }
+        }
+      }
     }
 
     setState(() {});
@@ -842,9 +908,81 @@ class _GraphVisualizerState extends State<GraphVisualizer>
               style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
           ],
+          // Show key metadata per entity type
+          ..._buildCompactMeta(entity, node),
         ],
       ),
     );
+  }
+
+  /// Return 1-2 lines of key metadata for the selected node.
+  List<Widget> _buildCompactMeta(GraphEntity entity, GraphNode node) {
+    final meta = entity.metadata;
+    if (meta == null || meta.isEmpty) return [];
+
+    String? line1;
+    String? line2;
+
+    switch (node.type.toUpperCase()) {
+      case 'ALARM':
+        final time = meta['time'];
+        final date = meta['date'];
+        final recurrence = meta['recurrence'];
+        line1 = [if (date != null) date, if (time != null) 'at $time']
+            .join(' ');
+        if (recurrence != null) line2 = 'Repeats: $recurrence';
+        break;
+      case 'PERSON':
+        final phones = meta['phoneNumbers'] ?? meta['telephoneNumber'];
+        final org = meta['organizationName'] ?? meta['organization'];
+        if (phones is List && phones.isNotEmpty) {
+          line1 = '\u{1F4DE} ${phones.first}';
+        } else if (phones != null) {
+          line1 = '\u{1F4DE} $phones';
+        }
+        if (org != null) line2 = '\u{1F3E2} $org';
+        break;
+      case 'PHOTO':
+        final date = meta['creationDate'];
+        final dims = (meta['width'] != null && meta['height'] != null)
+            ? '${meta['width']}\u00D7${meta['height']}'
+            : null;
+        if (date != null) line1 = '\u{1F4C5} $date';
+        if (dims != null) line2 = '\u{1F4D0} $dims';
+        break;
+      case 'PHONE_CALL':
+        final dir = meta['callDirection'] ?? meta['callType'];
+        final num = meta['phoneNumber'];
+        if (dir != null) line1 = '\u{1F4DE} ${dir.toString().toUpperCase()}';
+        if (num != null) line2 = num.toString();
+        break;
+      case 'EVENT':
+        final start = meta['startDate'];
+        final recurrence = meta['recurrenceInfo'];
+        if (start != null) line1 = '\u{1F4C5} $start';
+        if (recurrence == 'recurrent') {
+          line2 = '\u{1F501} ${meta['repeatFrequency'] ?? 'recurring'}';
+        }
+        break;
+      case 'NOTE':
+        final created = meta['dateCreated'];
+        if (created != null) line1 = '\u{1F4C5} $created';
+        break;
+    }
+
+    final widgets = <Widget>[];
+    if (line1 != null && line1.isNotEmpty) {
+      widgets.add(const SizedBox(height: 2));
+      widgets.add(Text(line1,
+          style: const TextStyle(color: Colors.white60, fontSize: 10),
+          overflow: TextOverflow.ellipsis));
+    }
+    if (line2 != null && line2.isNotEmpty) {
+      widgets.add(Text(line2,
+          style: const TextStyle(color: Colors.white60, fontSize: 10),
+          overflow: TextOverflow.ellipsis));
+    }
+    return widgets;
   }
 
   // =====================================================================

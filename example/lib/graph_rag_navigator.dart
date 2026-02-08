@@ -578,7 +578,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<T>(
-            value: selected,
+            initialValue: selected,
             dropdownColor: const Color(0xFF1a3a5c),
             style: const TextStyle(color: Colors.white, fontSize: 13),
             isExpanded: true,

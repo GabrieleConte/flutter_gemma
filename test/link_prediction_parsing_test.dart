@@ -69,7 +69,7 @@ void main() {
 
     test('returns null for long unrelated response', () {
       // Over 80 chars of unrelated text without any keyword
-      final longResponse = 'This is a very long response from the LLM that '
+      const longResponse = 'This is a very long response from the LLM that '
           'does not contain any known relationship type keyword at all and keeps going';
       expect(
         EmbeddingSimilarityLinkPredictor.extractRelationshipKeyword(longResponse),

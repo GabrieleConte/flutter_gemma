@@ -506,6 +506,23 @@ class LinkPredictor {
       }
     }
     
+    // Event → DATE link for transitive connections
+    final startDate = event['startDate'] ?? event['start'];
+    if (startDate != null) {
+      final dateStr = _formatDateForEntity(startDate);
+      if (dateStr.isNotEmpty) {
+        final dateId = _generateEntityId(dateStr, 'DATE');
+        links.add(PredictedLink(
+          sourceEntityId: eventId,
+          targetEntityId: dateId,
+          relationshipType: RelationshipTypes.occursOn,
+          confidence: config.templateWeight,
+          predictionMethod: 'template_event_date',
+          evidence: {'date': dateStr},
+        ));
+      }
+    }
+    
     return links;
   }
 

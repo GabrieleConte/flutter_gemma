@@ -179,6 +179,8 @@ class RelationshipTypes {
   static const String modifiedOn = 'MODIFIED_ON';
   static const String setFor = 'SET_FOR';
   static const String recurringOn = 'RECURRING_ON';
+  static const String occursOn = 'OCCURS_ON';
+  static const String occurredOn = 'OCCURRED_ON';
 }
 
 /// Configuration for entity extraction
@@ -1102,6 +1104,26 @@ class DirectEntityExtractor implements EntityExtractor {
           }
         }
       }
+
+      // Extract date entity from start date so events share transitive
+      // links with other data types (photos, calls, alarms) on the same date.
+      if (startDate != null) {
+        final dateStr = _formatDateForEntity(startDate);
+        if (dateStr.isNotEmpty) {
+          entities.add(ExtractedEntity(
+            name: dateStr,
+            type: EntityTypes.date,
+            confidence: 1.0,
+          ));
+
+          relationships.add(ExtractedRelationship(
+            sourceEntity: eventName,
+            targetEntity: dateStr,
+            type: RelationshipTypes.occursOn,
+            confidence: 1.0,
+          ));
+        }
+      }
     }
 
     return ExtractionResult(
@@ -1264,7 +1286,7 @@ class DirectEntityExtractor implements EntityExtractor {
     // Always create a PHONE_CALL entity for the call itself
     final callId = call['id']?.toString() ?? sourceId;
     final callLabel = contactName != null 
-        ? 'Call with ${contactName}'
+        ? 'Call with $contactName'
         : 'Call ${phoneNumber ?? callId}';
     
     entities.add(ExtractedEntity(
@@ -1330,6 +1352,13 @@ class DirectEntityExtractor implements EntityExtractor {
         entities.add(ExtractedEntity(
           name: dateStr,
           type: EntityTypes.date,
+          confidence: 1.0,
+        ));
+
+        relationships.add(ExtractedRelationship(
+          sourceEntity: callLabel,
+          targetEntity: dateStr,
+          type: RelationshipTypes.occurredOn,
           confidence: 1.0,
         ));
       }

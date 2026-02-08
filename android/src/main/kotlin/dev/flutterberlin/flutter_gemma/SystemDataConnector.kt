@@ -442,11 +442,11 @@ class SystemDataConnector(
         var count = 0
         val maxCount = limit?.toInt() ?: Int.MAX_VALUE
 
-        // Determine date range
+        // Determine date range (all timestamps in milliseconds)
         val calendar = Calendar.getInstance()
         val startMillis = when {
-            startDate != null -> startDate * 1000
-            sinceTimestamp != null -> sinceTimestamp * 1000
+            startDate != null -> startDate
+            sinceTimestamp != null -> sinceTimestamp
             else -> {
                 calendar.add(Calendar.YEAR, -1)
                 calendar.timeInMillis
@@ -454,7 +454,7 @@ class SystemDataConnector(
         }
 
         val endMillis = if (endDate != null) {
-            endDate * 1000
+            endDate
         } else {
             Calendar.getInstance().apply { add(Calendar.YEAR, 1) }.timeInMillis
         }
@@ -494,11 +494,11 @@ class SystemDataConnector(
                 val title = it.getString(titleIndex) ?: "Untitled Event"
                 val location = it.getString(locationIndex)
                 val description = it.getString(descriptionIndex)
-                val eventStart = it.getLong(startIndex) / 1000  // Convert to seconds
-                val eventEnd = (it.getLong(endIndex) / 1000).let { end ->
-                    if (end == 0L) eventStart + 3600 else end  // Default 1 hour duration
+                val eventStart = it.getLong(startIndex)  // Already in milliseconds
+                val eventEnd = it.getLong(endIndex).let { end ->
+                    if (end == 0L) eventStart + 3600000 else end  // Default 1 hour duration
                 }
-                val lastDate = it.getLong(lastDateIndex) / 1000
+                val lastDate = it.getLong(lastDateIndex)
 
                 // Get attendees for this event
                 val attendees = getEventAttendees(contentResolver, eventId)

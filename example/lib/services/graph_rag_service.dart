@@ -571,6 +571,7 @@ class GraphRAGService {
       'PROJECT',        // Projects, folders
       'TOPIC',          // Topics, tags
       'DATE',           // Dates
+      'ALARM',          // Alarms
       'EMAIL',          // Email addresses
       'PHONE',          // Phone numbers
       'HUB',            // Hub nodes (grouping by data type)

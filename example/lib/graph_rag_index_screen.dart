@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_example/services/graph_rag_service.dart';
 import 'package:flutter_gemma_example/widgets/graph_visualizer.dart';
+import 'package:android_intent_plus/android_intent.dart';
 
 /// Screen for managing the knowledge graph index and visualizing the graph
 class GraphRAGIndexScreen extends StatefulWidget {
@@ -221,10 +223,36 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
       await _loadGraphData();
 
       _showSnackBar('Alarm indexed successfully!');
+
+      // Open system clock app with pre-filled alarm data
+      await _launchSystemAlarm(label, dateTime);
     } catch (e) {
       _showSnackBar('Error indexing alarm: $e', isError: true);
     } finally {
       setState(() => _isIndexingAlarm = false);
+    }
+  }
+
+  /// Launch the system clock/alarm app with pre-filled data.
+  Future<void> _launchSystemAlarm(String label, DateTime dateTime) async {
+    try {
+      if (Platform.isAndroid) {
+        final intent = AndroidIntent(
+          action: 'android.intent.action.SET_ALARM',
+          arguments: <String, dynamic>{
+            'android.intent.extra.alarm.MESSAGE': label,
+            'android.intent.extra.alarm.HOUR': dateTime.hour,
+            'android.intent.extra.alarm.MINUTES': dateTime.minute,
+            'android.intent.extra.alarm.SKIP_UI': false,
+          },
+        );
+        await intent.launch();
+      } else {
+        _showSnackBar('Alarm indexed. Set it in your Clock app too!');
+      }
+    } catch (e) {
+      debugPrint('[GraphRAGIndexScreen] Could not launch clock app: $e');
+      _showSnackBar('Alarm indexed. Set it in your Clock app too!');
     }
   }
 
@@ -712,8 +740,12 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
             Text(
               entity.description!,
               style: const TextStyle(color: Colors.white70),
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
+          // Compact metadata summary per entity type
+          ..._buildMetadataSummary(entity),
           const SizedBox(height: 16),
           Text(
             'Connected to ${connectedEntities.length} entities:',
@@ -825,6 +857,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return Colors.lime;
       case 'DATE':
         return Colors.deepOrange;
+      case 'ALARM':
+        return Colors.redAccent;
       case 'EMAIL':
         return Colors.lightBlue;
       case 'PHONE':
@@ -833,6 +867,139 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return Colors.grey;
     }
   }
+
+  /// Build a compact metadata summary for an entity based on its type.
+  List<Widget> _buildMetadataSummary(GraphEntity entity) {
+    final meta = entity.metadata;
+    if (meta == null || meta.isEmpty) return [];
+
+    final rows = <_MetaRow>[];
+    switch (entity.type.toUpperCase()) {
+      case 'PERSON':
+        _addMeta(rows, Icons.phone, 'Phone', meta['phoneNumbers'] ?? meta['telephoneNumber']);
+        _addMeta(rows, Icons.email, 'Email', meta['emails'] ?? meta['emailAddresses']);
+        _addMeta(rows, Icons.business, 'Organization', meta['organizationName'] ?? meta['organization']);
+        _addMeta(rows, Icons.badge, 'Job', meta['jobTitle']);
+        _addMeta(rows, Icons.apps, 'Source', meta['source_app'] ?? meta['sourceApp']);
+        break;
+      case 'EVENT':
+        _addMeta(rows, Icons.calendar_today, 'Start', _formatTs(meta['startDate']));
+        _addMeta(rows, Icons.calendar_today, 'End', _formatTs(meta['endDate']));
+        _addMeta(rows, Icons.repeat, 'Recurrence', meta['recurrenceInfo'] == 'recurrent'
+            ? '${meta['repeatFrequency'] ?? 'recurring'}${meta['on'] != null ? ' on ${meta['on']}' : ''}'
+            : null);
+        _addMeta(rows, Icons.location_on, 'Location', meta['location']);
+        _addMeta(rows, Icons.apps, 'Source', meta['source_app'] ?? meta['sourceApp']);
+        break;
+      case 'ALARM':
+        _addMeta(rows, Icons.access_time, 'Time', meta['time']);
+        _addMeta(rows, Icons.calendar_today, 'Date', meta['date']);
+        _addMeta(rows, Icons.repeat, 'Repeat', meta['recurrence']);
+        _addMeta(rows, Icons.apps, 'Source', meta['sourceApp']);
+        break;
+      case 'PHOTO':
+        _addMeta(rows, Icons.calendar_today, 'Taken', meta['creationDate']);
+        if (meta['width'] != null && meta['height'] != null) {
+          rows.add(_MetaRow(Icons.aspect_ratio, 'Size', '${meta['width']}×${meta['height']}'));
+        }
+        _addMeta(rows, Icons.location_on, 'Location', meta['locationName'] ?? meta['location']);
+        _addMeta(rows, Icons.image, 'Type', meta['mediaType']);
+        _addMeta(rows, Icons.folder, 'Path', meta['path'] ?? meta['filePath']);
+        _addMeta(rows, Icons.apps, 'Source', meta['source_app'] ?? meta['sourceApp']);
+        break;
+      case 'PHONE_CALL':
+        _addMeta(rows, Icons.call_made, 'Direction', meta['callDirection'] ?? meta['callType']);
+        _addMeta(rows, Icons.phone, 'Number', meta['phoneNumber']);
+        _addMeta(rows, Icons.timer, 'Duration', meta['duration']?.toString());
+        _addMeta(rows, Icons.calendar_today, 'Date', meta['date']);
+        _addMeta(rows, Icons.access_time, 'Time', meta['startTime']);
+        _addMeta(rows, Icons.apps, 'Source', meta['source_app'] ?? meta['sourceApp']);
+        break;
+      case 'NOTE':
+        _addMeta(rows, Icons.calendar_today, 'Created', meta['dateCreated']);
+        _addMeta(rows, Icons.edit_calendar, 'Modified', meta['dateModified']);
+        if (meta['chunkCount'] != null) {
+          rows.add(_MetaRow(Icons.splitscreen, 'Chunks', meta['chunkCount'].toString()));
+        }
+        _addMeta(rows, Icons.apps, 'Source', meta['sourceApp']);
+        break;
+      case 'DOCUMENT':
+        _addMeta(rows, Icons.description, 'Type', meta['mimeType']);
+        if (meta['fileSize'] != null) {
+          rows.add(_MetaRow(Icons.storage, 'Size', _formatFileSize(meta['fileSize'])));
+        }
+        _addMeta(rows, Icons.calendar_today, 'Created', _formatTs(meta['createdDate']));
+        _addMeta(rows, Icons.apps, 'Source', meta['source_app'] ?? meta['sourceApp']);
+        break;
+    }
+
+    if (rows.isEmpty) return [];
+
+    return [
+      const SizedBox(height: 12),
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: rows
+              .map((r) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        Icon(r.icon, color: Colors.white38, size: 14),
+                        const SizedBox(width: 6),
+                        Text('${r.label}: ',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12)),
+                        Expanded(
+                          child: Text(r.value,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 12),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                    ),
+                  ))
+              .toList(),
+        ),
+      ),
+    ];
+  }
+
+  void _addMeta(List<_MetaRow> rows, IconData icon, String label, dynamic value) {
+    if (value == null) return;
+    final str = value is List ? value.join(', ') : value.toString();
+    if (str.isEmpty) return;
+    rows.add(_MetaRow(icon, label, str));
+  }
+
+  String _formatTs(dynamic ts) {
+    if (ts == null) return '';
+    if (ts is int) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+      return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
+          '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    }
+    return ts.toString();
+  }
+
+  String _formatFileSize(dynamic bytes) {
+    if (bytes == null) return '';
+    final b = bytes is int ? bytes : int.tryParse(bytes.toString()) ?? 0;
+    if (b < 1024) return '$b B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)} KB';
+    return '${(b / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+class _MetaRow {
+  final IconData icon;
+  final String label;
+  final String value;
+  const _MetaRow(this.icon, this.label, this.value);
 }
 
 // Helper widgets
@@ -1141,7 +1308,7 @@ class _AddAlarmDialogState extends State<_AddAlarmDialog> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String?>(
-              value: _selectedRecurrence,
+              initialValue: _selectedRecurrence,
               dropdownColor: const Color(0xFF1a3a5c),
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(
