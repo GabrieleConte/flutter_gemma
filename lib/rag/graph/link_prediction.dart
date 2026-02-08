@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../../core/tool.dart';
 import '../../core/function_call_parser.dart';
 import 'graph_repository.dart';
@@ -1744,6 +1745,12 @@ Call validate_relationship now.''';
         // JSON parsing failed, fall through to graceful failure
       }
       
+      // Try bare keyword / arrow-style fallback
+      final bareResult = _parseBareRelationshipType(response, candidate);
+      if (bareResult != null) {
+        return bareResult;
+      }
+
       // Structured parsing failed - return invalid result instead of falling back to main LLM
       // (main LLM may be closed due to memory pressure from multiple models)
       print('[Structured Validation] Failed to parse structured response, skipping link');
@@ -1878,6 +1885,12 @@ Call validate_relationship now.''';
         }
       } catch (_) {}
       
+      // Try bare keyword / arrow-style fallback
+      final bareResult = _parseBareRelationshipType(response, candidate);
+      if (bareResult != null) {
+        return bareResult;
+      }
+
       // Structured parsing failed - return invalid result instead of falling back to main LLM
       print('[Structured PERSON] Failed to parse, skipping link');
       return LinkValidationResult(
@@ -1891,6 +1904,84 @@ Call validate_relationship now.''';
         explanation: 'Structured PERSON validation error: $e',
       );
     }
+  }
+
+  /// Known relationship types from LinkValidationTools enum
+  @visibleForTesting
+  static const knownRelationshipTypes = {
+    'FAMILY_MEMBER', 'COLLEAGUE', 'FRIEND', 'WORKS_AT', 'KNOWS',
+    'RELATED_TO', 'ASSOCIATED_WITH', 'SIMILAR_TO', 'LOCATED_IN',
+    'PART_OF', 'MENTIONED_WITH', 'NONE',
+  };
+
+  /// Extract a relationship type keyword from an LLM response string.
+  ///
+  /// Returns the matched keyword (uppercase) or null if no known type is found.
+  /// Handles:
+  /// - Bare keyword: "FAMILY_MEMBER"
+  /// - Arrow-style: "validate_relationship(A, B) -> FAMILY_MEMBER"
+  /// - Keyword anywhere in a short response (< 80 chars)
+  @visibleForTesting
+  static String? extractRelationshipKeyword(String response) {
+    final trimmed = response.trim().toUpperCase();
+
+    // 1) Entire response is a known keyword
+    if (knownRelationshipTypes.contains(trimmed)) {
+      return trimmed;
+    }
+
+    // 2) Arrow-style: "... -> KEYWORD"
+    final arrowMatch = RegExp(r'->\s*(\w+)').firstMatch(trimmed);
+    if (arrowMatch != null) {
+      final keyword = arrowMatch.group(1)!;
+      if (knownRelationshipTypes.contains(keyword)) {
+        return keyword;
+      }
+    }
+
+    // 3) Last word in a short response (< 80 chars) is a known keyword
+    if (trimmed.length < 80) {
+      final words = trimmed.split(RegExp(r'[\s,;:]+'));
+      for (final word in words.reversed) {
+        final cleaned = word.replaceAll(RegExp(r'[^A-Z_]'), '');
+        if (knownRelationshipTypes.contains(cleaned)) {
+          return cleaned;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /// Parse a bare relationship type keyword from the LLM response.
+  LinkValidationResult? _parseBareRelationshipType(String response, EmbeddingCandidate candidate) {
+    final keyword = extractRelationshipKeyword(response);
+    if (keyword == null) return null;
+    return _bareKeywordToResult(keyword, candidate);
+  }
+
+  /// Convert a bare relationship type keyword into a [LinkValidationResult].
+  LinkValidationResult _bareKeywordToResult(String keyword, EmbeddingCandidate candidate) {
+    // Use embedding similarity as the sole confidence signal, slightly discounted
+    final confidence = (candidate.similarity * 0.85).clamp(0.0, 1.0);
+
+    if (keyword == 'NONE') {
+      print('[Structured Fallback] Bare keyword NONE => rejected');
+      return LinkValidationResult(
+        isValid: false,
+        relationshipType: 'NONE',
+        confidence: 0.0,
+        explanation: 'LLM indicated no relationship (bare keyword)',
+      );
+    }
+
+    print('[Structured Fallback] Bare keyword $keyword => accepted (confidence=$confidence)');
+    return LinkValidationResult(
+      isValid: true,
+      relationshipType: keyword,
+      confidence: confidence,
+      explanation: 'Relationship inferred from bare keyword response',
+    );
   }
 
   /// Get all entities with embeddings from repository
