@@ -9,7 +9,6 @@ import 'connectors/google_suite_connector.dart';
 import 'graph/graph_repository.dart';
 import 'graph/entity_extractor.dart';
 import 'graph/community_detection.dart';
-import 'graph/cypher_parser.dart';
 import 'graph/graphrag_query_engine.dart';
 import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
@@ -479,12 +478,6 @@ class GraphRAG {
     );
   }
 
-  /// Execute a Cypher query directly
-  Future<List<Map<String, dynamic>>> cypherQuery(String cypher) async {
-    _checkInitialized();
-    final executor = CypherQueryExecutor(_repository);
-    return await executor.execute(cypher);
-  }
 
   /// Search entities by similarity
   Future<List<ScoredEntity>> searchEntities(

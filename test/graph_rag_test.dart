@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_gemma/rag/graph/graph_repository.dart';
 import 'package:flutter_gemma/rag/graph/entity_extractor.dart';
 import 'package:flutter_gemma/rag/graph/community_detection.dart';
-import 'package:flutter_gemma/rag/graph/cypher_parser.dart';
 import 'package:flutter_gemma/rag/graph/graphrag_query_engine.dart';
 import 'package:flutter_gemma/rag/connectors/data_connector.dart';
 import 'package:flutter_gemma/rag/graph/background_indexing.dart';
@@ -192,58 +191,6 @@ void main() {
     });
   });
 
-  group('WhereCondition evaluation', () {
-    test('ComparisonCondition evaluates equality', () {
-      final condition = ComparisonCondition(
-        left: 'name',
-        operator: '=',
-        right: 'John',
-      );
-
-      expect(condition.evaluate({'name': 'John'}), isTrue);
-      expect(condition.evaluate({'name': 'Jane'}), isFalse);
-    });
-
-    test('ComparisonCondition evaluates CONTAINS', () {
-      final condition = ComparisonCondition(
-        left: 'name',
-        operator: 'CONTAINS',
-        right: 'oh',
-      );
-
-      expect(condition.evaluate({'name': 'John'}), isTrue);
-      expect(condition.evaluate({'name': 'Jane'}), isFalse);
-    });
-
-    test('AndCondition requires all true', () {
-      final condition = AndCondition([
-        ComparisonCondition(left: 'a', operator: '=', right: 1),
-        ComparisonCondition(left: 'b', operator: '=', right: 2),
-      ]);
-
-      expect(condition.evaluate({'a': 1, 'b': 2}), isTrue);
-      expect(condition.evaluate({'a': 1, 'b': 3}), isFalse);
-    });
-
-    test('OrCondition requires any true', () {
-      final condition = OrCondition([
-        ComparisonCondition(left: 'a', operator: '=', right: 1),
-        ComparisonCondition(left: 'b', operator: '=', right: 2),
-      ]);
-
-      expect(condition.evaluate({'a': 1, 'b': 3}), isTrue);
-      expect(condition.evaluate({'a': 2, 'b': 3}), isFalse);
-    });
-
-    test('NotCondition inverts result', () {
-      final condition = NotCondition(
-        ComparisonCondition(left: 'a', operator: '=', right: 1),
-      );
-
-      expect(condition.evaluate({'a': 1}), isFalse);
-      expect(condition.evaluate({'a': 2}), isTrue);
-    });
-  });
 
   group('GraphRAGQueryConfig', () {
     test('has default values', () {
