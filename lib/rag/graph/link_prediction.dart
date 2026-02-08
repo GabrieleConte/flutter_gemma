@@ -1631,23 +1631,18 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
     
     print('[Structured Validation] Validating ${entityA.name} <-> ${entityB.name}');
     
-    final prompt = '''Analyze these two entities and call the validate_relationship function with your assessment.
+    final prompt = '''Do these entities have a verifiable relationship? Call validate_relationship with your answer.
 
-Entity A: ${entityA.name} (${entityA.type})
-${entityA.description != null ? 'Description: ${entityA.description}' : ''}
+Entity A: ${entityA.name} (${entityA.type})${entityA.description != null ? ' - ${entityA.description}' : ''}
+Entity B: ${entityB.name} (${entityB.type})${entityB.description != null ? ' - ${entityB.description}' : ''}
 
-Entity B: ${entityB.name} (${entityB.type})
-${entityB.description != null ? 'Description: ${entityB.description}' : ''}
+Rules:
+- NONE if no evidence of connection
+- LOCATED_IN/PART_OF/WORKS_AT/ASSOCIATED_WITH/RELATED_TO only with proof
 
-Semantic similarity: ${(candidate.similarity * 100).toStringAsFixed(0)}%
+Example: "Meeting Room" (LOCATION) and "Conference" (EVENT) → is_valid=false, relationship_type=NONE (no proof meeting happened there)
 
-You MUST call validate_relationship with:
-- relationship_type: Choose from FAMILY_MEMBER, COLLEAGUE, FRIEND, WORKS_AT, KNOWS, RELATED_TO, ASSOCIATED_WITH, SIMILAR_TO, LOCATED_IN, PART_OF, MENTIONED_WITH, or NONE
-- is_valid: true if there's a meaningful relationship, false otherwise  
-- confidence: A number between 0.0 and 1.0
-- explanation: Brief reason for your assessment
-
-Call the function now.''';
+Call validate_relationship now.''';
 
     try {
       final response = await structuredLlmCallback!(
@@ -1776,22 +1771,24 @@ Call the function now.''';
     
     print('[Structured PERSON] Validating ${entityA.name} <-> ${entityB.name}');
     
-    final prompt = '''Analyze these two people and call validate_relationship with your assessment.
+    final prompt = '''Are these two people related? Call validate_relationship with your answer.
 
-Person A: ${entityA.name}
-${entityA.description != null ? 'Description: ${entityA.description}' : ''}
+Person A: ${entityA.name}${entityA.description != null ? ' (${entityA.description})' : ''}
+Person B: ${entityB.name}${entityB.description != null ? ' (${entityB.description})' : ''}
 
-Person B: ${entityB.name}
-${entityB.description != null ? 'Description: ${entityB.description}' : ''}
+Rules:
+- Names alone prove NOTHING. "Mom" and "Sarah" are NOT related just because one sounds like a role.
+- Same last name is NOT proof of family without explicit evidence.
+- Use NONE when uncertain.
 
-Semantic similarity: ${(candidate.similarity * 100).toStringAsFixed(0)}%
+Examples:
+- "John Smith" + "Jane Smith" → NONE (same surname ≠ family)
+- "Sarah" + "Sister" → NONE ("Sister" is just a contact name, not proof Sarah is someone's sister)
+- "Bob" + "Alice" with context "Bob's wife Alice" → FAMILY_MEMBER
 
-You MUST call validate_relationship with:
-- relationship_type: FAMILY_MEMBER, COLLEAGUE, FRIEND, KNOWS, or NONE
-- is_valid: true or false
-- confidence: 0.0 to 1.0
+Types: FAMILY_MEMBER, COLLEAGUE, FRIEND, KNOWS, NONE
 
-Call the function now.''';
+Call validate_relationship now.''';
 
     try {
       final response = await structuredLlmCallback!(

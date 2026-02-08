@@ -65,7 +65,7 @@ void main() {
 
     test('extractAll can be used as Tool', () {
       // Verify it can be used wherever Tool is expected
-      final Tool tool = ExtractionTools.extractAll;
+      const Tool tool = ExtractionTools.extractAll;
       expect(tool.name, equals('extract_entities_and_relationships'));
     });
   });
