@@ -22,12 +22,6 @@ class GraphRAGNavigator extends StatefulWidget {
   State<GraphRAGNavigator> createState() => _GraphRAGNavigatorState();
 }
 
-bool get _isDesktop =>
-    !kIsWeb &&
-    (defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.windows ||
-        defaultTargetPlatform == TargetPlatform.linux);
-
 class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
     with SingleTickerProviderStateMixin {
   final GraphRAGService _service = GraphRAGService.instance;
@@ -47,16 +41,10 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   late app_models.EmbeddingModel _selectedEmbeddingModel;
   String _token = '';
 
-  /// Get available inference models filtered by platform & function call support
+  /// Get available inference models — restricted to gemma3n_2B_litertlm
+  /// which supports both text generation and vision (image captioning).
   List<Model> get _availableInferenceModels {
-    var models = Model.values.where((m) => m.supportsFunctionCalls).toList();
-    if (_isDesktop) {
-      models = models.where((m) => m.localModel || m.supportsDesktop).toList();
-    }
-    if (kIsWeb) {
-      models = models.where((m) => m.localModel || m.webUrl != null).toList();
-    }
-    return models;
+    return [Model.gemma3n_2B_litertlm];
   }
 
   /// Get available embedding models
@@ -68,10 +56,8 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    // Set defaults
-    _selectedInferenceModel = _availableInferenceModels.isNotEmpty
-        ? _availableInferenceModels.first
-        : Model.gemma3n_2B_litertlm;
+    // Set default — only gemma3n_2B_litertlm is available for GraphRAG
+    _selectedInferenceModel = Model.gemma3n_2B_litertlm;
     _selectedEmbeddingModel = _availableEmbeddingModels.isNotEmpty
         ? _availableEmbeddingModels.first
         : app_models.EmbeddingModel.embeddingGemma512;
@@ -170,12 +156,28 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         await installer.fromNetwork(_selectedInferenceModel.url, token: token).install();
       }
 
-      // Now get the active model - used for both main chat and extraction
-      // Use CPU backend for emulator compatibility (GPU/OpenCL not available)
-      final model = await FlutterGemma.getActiveModel(
-        maxTokens: _selectedInferenceModel.maxTokens,
-        preferredBackend: PreferredBackend.cpu,
-      );
+      // Try GPU first (required for vision encoder), fall back to CPU if unavailable
+      InferenceModel model;
+      bool gpuAvailable = true;
+      try {
+        setState(() => _statusMessage = 'Loading model with GPU...');
+        model = await FlutterGemma.getActiveModel(
+          maxTokens: _selectedInferenceModel.maxTokens,
+          preferredBackend: _selectedInferenceModel.preferredBackend,
+          supportImage: _selectedInferenceModel.supportImage,
+          maxNumImages: _selectedInferenceModel.maxNumImages,
+        );
+        debugPrint('[GraphRAGNavigator] Model loaded with GPU + vision support');
+      } catch (e) {
+        debugPrint('[GraphRAGNavigator] GPU init failed ($e), falling back to CPU (no vision)');
+        gpuAvailable = false;
+        setState(() => _statusMessage = 'GPU unavailable, loading model with CPU...');
+        model = await FlutterGemma.getActiveModel(
+          maxTokens: _selectedInferenceModel.maxTokens,
+          preferredBackend: PreferredBackend.cpu,
+        );
+        debugPrint('[GraphRAGNavigator] Model loaded with CPU (image captioning disabled)');
+      }
 
       // Create main chat for text generation
       final chat = await model.createChat(
@@ -203,6 +205,22 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       );
       debugPrint('[GraphRAGNavigator] Extraction chat created with ${extractionTools.length} tools');
 
+      // Create vision chat only if GPU is available (vision encoder requires GPU)
+      InferenceChat? visionChat;
+      if (gpuAvailable && _selectedInferenceModel.supportImage) {
+        setState(() => _statusMessage = 'Creating vision chat for image captioning...');
+        visionChat = await model.createChat(
+          temperature: 0.3,
+          randomSeed: 1,
+          topK: _selectedInferenceModel.topK,
+          supportImage: true,
+          modelType: _selectedInferenceModel.modelType,
+        );
+        debugPrint('[GraphRAGNavigator] Vision chat created for image captioning');
+      } else {
+        debugPrint('[GraphRAGNavigator] Vision chat skipped (GPU not available or model does not support images)');
+      }
+
       setState(() => _statusMessage = 'Loading embedding model...');
 
       // Same for embedding model - install to activate
@@ -221,12 +239,14 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
 
       setState(() => _statusMessage = 'Initializing GraphRAG...');
 
-      // Initialize service - both chats use the same model, no need for lifecycle management
+      // Initialize service — enable image captioning only if vision chat is available
+      final enableCaptioning = visionChat != null;
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
         extractionChat: extractionChat,
-        // No separate extraction model - same model instance
+        visionChat: visionChat,
+        enableImageCaptioning: enableCaptioning,
       );
 
       setState(() {
@@ -234,7 +254,8 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         _statusMessage = '';
       });
 
-      _showSnackBar('GraphRAG ready! 🎉');
+      final modeLabel = enableCaptioning ? 'with image captioning' : 'text-only (no GPU)';
+      _showSnackBar('GraphRAG ready $modeLabel! 🎉');
     } catch (e) {
       setState(() {
         _isInitializing = false;
