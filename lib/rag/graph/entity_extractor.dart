@@ -140,10 +140,13 @@ class EntityTypes {
   static const String phone = 'PHONE';
   static const String skill = 'SKILL';
   static const String topic = 'TOPIC';
-  
+  static const String note = 'NOTE';
+  static const String noteChunk = 'NOTE_CHUNK';
+
   static const List<String> all = [
     person, organization, location, event, date,
     project, document, email, phone, skill, topic,
+    note, noteChunk,
   ];
 }
 

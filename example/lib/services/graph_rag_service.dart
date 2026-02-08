@@ -567,11 +567,13 @@ class GraphRAGService {
       'PHONE_CALL',     // Phone calls
       'DOCUMENT',       // Documents
       'NOTE',           // Notes
+      'NOTE_CHUNK',     // Note chunks (parts of long notes)
       'PROJECT',        // Projects, folders
       'TOPIC',          // Topics, tags
       'DATE',           // Dates
       'EMAIL',          // Email addresses
       'PHONE',          // Phone numbers
+      'HUB',            // Hub nodes (grouping by data type)
     ];
     final entities = <GraphEntity>[];
     
@@ -678,6 +680,37 @@ class GraphRAGService {
     }
     
     debugPrint('[GraphRAGService] Finished indexing selected documents');
+  }
+
+  /// Index a user-typed note.
+  ///
+  /// The note content is split into chunks if it exceeds the LLM extraction
+  /// limit. Each chunk gets entity extraction, and chunks are linked with
+  /// NEXT_CHUNK relationships.
+  Future<void> indexNote({
+    required String title,
+    required String content,
+  }) async {
+    _checkInitialized();
+
+    if (content.isEmpty) {
+      debugPrint('[GraphRAGService] Empty note content, skipping');
+      return;
+    }
+
+    debugPrint(
+        '[GraphRAGService] Indexing note: "$title" (${content.length} chars)');
+
+    final noteId =
+        '${title.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
+
+    await _graphRag!.indexNoteContent(
+      noteId: noteId,
+      title: title,
+      content: content,
+    );
+
+    debugPrint('[GraphRAGService] Note "$title" indexed successfully');
   }
   
   /// Dispose resources

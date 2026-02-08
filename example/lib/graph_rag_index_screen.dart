@@ -155,6 +155,41 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
 
   bool _isPickingDocuments = false;
 
+  bool _isIndexingNote = false;
+
+  Future<void> _addNote() async {
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => const _AddNoteDialog(),
+    );
+
+    if (result == null || result['content']?.isEmpty == true) {
+      return;
+    }
+
+    setState(() => _isIndexingNote = true);
+
+    try {
+      final title = result['title']?.isNotEmpty == true
+          ? result['title']!
+          : 'Note ${DateTime.now().toIso8601String().substring(0, 16)}';
+      final content = result['content']!;
+
+      _showSnackBar('Indexing note "$title"...');
+
+      await _service.indexNote(title: title, content: content);
+
+      await _loadStats();
+      await _loadGraphData();
+
+      _showSnackBar('Note indexed successfully!');
+    } catch (e) {
+      _showSnackBar('Error indexing note: $e', isError: true);
+    } finally {
+      setState(() => _isIndexingNote = false);
+    }
+  }
+
   Future<void> _pickAndIndexDocuments() async {
     if (_isPickingDocuments) return;
     
@@ -523,11 +558,13 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
               ),
             ],
             const SizedBox(height: 8),
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 TextButton.icon(
                   onPressed: _isPickingDocuments ? null : _pickAndIndexDocuments,
-                  icon: _isPickingDocuments 
+                  icon: _isPickingDocuments
                     ? const SizedBox(
                         width: 18,
                         height: 18,
@@ -540,7 +577,21 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                   label: Text(_isPickingDocuments ? 'Selecting...' : 'Select Files'),
                   style: TextButton.styleFrom(foregroundColor: Colors.lightBlue),
                 ),
-                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: _isIndexingNote ? null : _addNote,
+                  icon: _isIndexingNote
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white70,
+                        ),
+                      )
+                    : const Icon(Icons.note_add, size: 18),
+                  label: Text(_isIndexingNote ? 'Indexing...' : 'Add Note'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.cyan),
+                ),
                 TextButton.icon(
                   onPressed: _clearGraph,
                   icon: const Icon(Icons.delete_outline, size: 18),
@@ -714,6 +765,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return Colors.brown;
       case 'NOTE':
         return Colors.cyan;
+      case 'NOTE_CHUNK':
+        return Colors.cyan.shade700;
       case 'PROJECT':
         return Colors.indigo;
       case 'TOPIC':
@@ -797,6 +850,94 @@ class _PermissionChip extends StatelessWidget {
       avatar: Icon(icon, color: color, size: 18),
       label: Text(label),
       backgroundColor: const Color(0xFF0b2351),
+    );
+  }
+}
+
+class _AddNoteDialog extends StatefulWidget {
+  const _AddNoteDialog();
+
+  @override
+  State<_AddNoteDialog> createState() => _AddNoteDialogState();
+}
+
+class _AddNoteDialogState extends State<_AddNoteDialog> {
+  final _titleController = TextEditingController();
+  final _contentController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _contentController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1a3a5c),
+      title: const Text(
+        'Add Note',
+        style: TextStyle(color: Colors.white),
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _titleController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Title (optional)',
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.cyan),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _contentController,
+              style: const TextStyle(color: Colors.white),
+              maxLines: 8,
+              minLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Note content',
+                labelStyle: TextStyle(color: Colors.white54),
+                hintText: 'Type your note here...',
+                hintStyle: TextStyle(color: Colors.white24),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.cyan),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () {
+            if (_contentController.text.trim().isEmpty) return;
+            Navigator.pop(context, {
+              'title': _titleController.text.trim(),
+              'content': _contentController.text.trim(),
+            });
+          },
+          style: TextButton.styleFrom(foregroundColor: Colors.cyan),
+          child: const Text('Index'),
+        ),
+      ],
     );
   }
 }

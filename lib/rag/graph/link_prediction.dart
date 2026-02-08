@@ -1898,8 +1898,9 @@ Call validate_relationship now.''';
     final allEntities = <GraphEntity>[];
     
     final types = [
-      'SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION', 
-      'PHOTO', 'PHONE_CALL', 'DOCUMENT', 'NOTE', 'PROJECT', 'TOPIC', 'DATE',
+      'SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION',
+      'PHOTO', 'PHONE_CALL', 'DOCUMENT', 'NOTE', 'NOTE_CHUNK',
+      'PROJECT', 'TOPIC', 'DATE',
     ];
     
     for (final type in types) {

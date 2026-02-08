@@ -881,6 +881,384 @@ class GraphRAG {
     }
   }
 
+  // === Note Content Indexing ===
+
+  /// Split text into chunks of approximately [maxChunkSize] characters.
+  /// Splits on paragraph boundaries first, then sentence boundaries,
+  /// then hard-splits as a last resort.
+  static List<String> _splitIntoChunks(String text, {int maxChunkSize = 2500}) {
+    if (text.length <= maxChunkSize) {
+      return [text];
+    }
+
+    final chunks = <String>[];
+
+    // Split on paragraph boundaries
+    final paragraphs = text.split('\n\n');
+    var currentChunk = StringBuffer();
+
+    for (final paragraph in paragraphs) {
+      // If adding this paragraph would exceed the limit
+      if (currentChunk.length + paragraph.length + 2 > maxChunkSize) {
+        // Save current chunk if it has content
+        if (currentChunk.isNotEmpty) {
+          chunks.add(currentChunk.toString().trim());
+          currentChunk = StringBuffer();
+        }
+
+        // If the paragraph itself is too long, split by sentences
+        if (paragraph.length > maxChunkSize) {
+          final sentenceChunks = _splitBySentences(paragraph, maxChunkSize);
+          for (var i = 0; i < sentenceChunks.length - 1; i++) {
+            chunks.add(sentenceChunks[i].trim());
+          }
+          currentChunk.write(sentenceChunks.last);
+        } else {
+          currentChunk.write(paragraph);
+        }
+      } else {
+        if (currentChunk.isNotEmpty) {
+          currentChunk.write('\n\n');
+        }
+        currentChunk.write(paragraph);
+      }
+    }
+
+    if (currentChunk.isNotEmpty) {
+      chunks.add(currentChunk.toString().trim());
+    }
+
+    return chunks.where((c) => c.isNotEmpty).toList();
+  }
+
+  /// Split a single large paragraph by sentence boundaries.
+  /// Falls back to hard-splitting if individual sentences exceed limit.
+  static List<String> _splitBySentences(String text, int maxChunkSize) {
+    final chunks = <String>[];
+    final sentences = RegExp(r'(?<=[.!?])\s+').allMatches(text);
+
+    var lastEnd = 0;
+    var currentChunk = StringBuffer();
+
+    for (final match in sentences) {
+      final sentence = text.substring(lastEnd, match.end);
+      if (currentChunk.length + sentence.length > maxChunkSize) {
+        if (currentChunk.isNotEmpty) {
+          chunks.add(currentChunk.toString().trim());
+          currentChunk = StringBuffer();
+        }
+        if (sentence.length > maxChunkSize) {
+          for (var i = 0; i < sentence.length; i += maxChunkSize) {
+            final end = (i + maxChunkSize).clamp(0, sentence.length);
+            chunks.add(sentence.substring(i, end).trim());
+          }
+        } else {
+          currentChunk.write(sentence);
+        }
+      } else {
+        currentChunk.write(sentence);
+      }
+      lastEnd = match.end;
+    }
+
+    if (lastEnd < text.length) {
+      final remainder = text.substring(lastEnd);
+      if (currentChunk.length + remainder.length > maxChunkSize) {
+        if (currentChunk.isNotEmpty) {
+          chunks.add(currentChunk.toString().trim());
+        }
+        chunks.add(remainder.trim());
+      } else {
+        currentChunk.write(remainder);
+      }
+    }
+
+    if (currentChunk.isNotEmpty) {
+      chunks.add(currentChunk.toString().trim());
+    }
+
+    return chunks.where((c) => c.isNotEmpty).toList();
+  }
+
+  /// Index a note by extracting entities and relationships, with chunking
+  /// for long notes.
+  ///
+  /// Short notes (<= 2500 chars) are processed as a single entity.
+  /// Longer notes are split into chunks, each processed for entity extraction,
+  /// with NEXT_CHUNK sequential links and PART_OF links to the parent NOTE.
+  Future<void> indexNoteContent({
+    required String noteId,
+    required String title,
+    required String content,
+  }) async {
+    _checkInitialized();
+
+    if (content.isEmpty) {
+      return;
+    }
+
+    String normalizeId(String name, String type) {
+      final normalized =
+          name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+      final typePrefix = type.isNotEmpty ? '${type.toLowerCase()}_' : '';
+      return '$typePrefix$normalized';
+    }
+
+    final now = DateTime.now();
+    final sourceId = 'note_$noteId';
+
+    // Split content into chunks
+    final chunks = _splitIntoChunks(content);
+    debugPrint(
+        '[GraphRAG] Note "$title": ${content.length} chars -> ${chunks.length} chunk(s)');
+
+    // Collect all extracted entity IDs across all chunks (for co-occurrence)
+    final allExtractedEntityIds = <String>[];
+
+    // Process each chunk for entity extraction
+    for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      final chunkContent = chunks[chunkIndex];
+      final chunkSourceId = '${sourceId}_chunk_$chunkIndex';
+
+      final extraction = await _extractor.extractFromText(
+        chunkContent,
+        sourceId: chunkSourceId,
+        sourceType: 'NOTE',
+      );
+
+      // Add extracted entities
+      for (final entity in extraction.entities) {
+        final embedding = await _embeddingCallback(
+          '${entity.name} ${entity.description ?? ""}',
+        );
+
+        final graphEntity = GraphEntity(
+          id: normalizeId(entity.name, entity.type),
+          name: entity.name,
+          type: entity.type,
+          description: entity.description,
+          embedding: embedding,
+          metadata: {'sourceId': chunkSourceId},
+          lastModified: now,
+        );
+
+        try {
+          await _repository.addEntity(graphEntity);
+        } catch (_) {
+          await _repository.updateEntity(
+            graphEntity.id,
+            name: graphEntity.name,
+            type: graphEntity.type,
+            embedding: embedding,
+            description: graphEntity.description,
+            metadata: graphEntity.metadata,
+            lastModified: now,
+          );
+        }
+
+        allExtractedEntityIds.add(graphEntity.id);
+      }
+
+      // Add extracted relationships
+      for (final rel in extraction.relationships) {
+        final graphRelationship = GraphRelationship(
+          id: '${normalizeId(rel.sourceEntity, '')}_${rel.type.toLowerCase()}_${normalizeId(rel.targetEntity, '')}',
+          sourceId: normalizeId(rel.sourceEntity, ''),
+          targetId: normalizeId(rel.targetEntity, ''),
+          type: rel.type,
+          weight: rel.weight,
+          metadata: {'description': rel.description},
+        );
+
+        try {
+          await _repository.addRelationship(graphRelationship);
+        } catch (_) {}
+      }
+    }
+
+    // Create co-occurrence relationships between all entities across chunks
+    final uniqueEntityIds = allExtractedEntityIds.toSet().toList();
+    for (var i = 0; i < uniqueEntityIds.length; i++) {
+      for (var j = i + 1; j < uniqueEntityIds.length; j++) {
+        final coOccurRel = GraphRelationship(
+          id: '${uniqueEntityIds[i]}_co_occurs_${uniqueEntityIds[j]}',
+          sourceId: uniqueEntityIds[i],
+          targetId: uniqueEntityIds[j],
+          type: 'CO_OCCURS_IN',
+          weight: 0.5,
+          metadata: {'sourceNote': title, 'sourceId': sourceId},
+        );
+        try {
+          await _repository.addRelationship(coOccurRel);
+        } catch (_) {}
+      }
+    }
+
+    // --- Create parent NOTE entity ---
+    final noteEntityId = normalizeId(title, 'NOTE');
+    final noteEmbedding = await _embeddingCallback(
+      '$title ${content.length > 200 ? content.substring(0, 200) : content}',
+    );
+
+    final noteEntity = GraphEntity(
+      id: noteEntityId,
+      name: title,
+      type: 'NOTE',
+      description: content.length > 500
+          ? '${content.substring(0, 500)}...'
+          : content,
+      embedding: noteEmbedding,
+      metadata: {
+        'sourceId': sourceId,
+        'noteId': noteId,
+        'chunkCount': chunks.length,
+        'totalLength': content.length,
+      },
+      lastModified: now,
+    );
+
+    try {
+      await _repository.addEntity(noteEntity);
+    } catch (_) {
+      await _repository.updateEntity(
+        noteEntity.id,
+        name: noteEntity.name,
+        type: noteEntity.type,
+        embedding: noteEmbedding,
+        description: noteEntity.description,
+        metadata: noteEntity.metadata,
+        lastModified: now,
+      );
+    }
+
+    // --- Create chunk entities and link them (only if multiple chunks) ---
+    if (chunks.length > 1) {
+      String? previousChunkId;
+
+      for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        final chunkContent = chunks[chunkIndex];
+        final chunkId = '${noteEntityId}_chunk_$chunkIndex';
+
+        final chunkEmbedding = await _embeddingCallback(
+          chunkContent.length > 200
+              ? chunkContent.substring(0, 200)
+              : chunkContent,
+        );
+
+        final chunkEntity = GraphEntity(
+          id: chunkId,
+          name: '$title (part ${chunkIndex + 1}/${chunks.length})',
+          type: 'NOTE_CHUNK',
+          description: chunkContent.length > 500
+              ? '${chunkContent.substring(0, 500)}...'
+              : chunkContent,
+          embedding: chunkEmbedding,
+          metadata: {
+            'sourceId': sourceId,
+            'chunkIndex': chunkIndex,
+            'totalChunks': chunks.length,
+            'parentNoteId': noteEntityId,
+          },
+          lastModified: now,
+        );
+
+        try {
+          await _repository.addEntity(chunkEntity);
+        } catch (_) {
+          await _repository.updateEntity(
+            chunkEntity.id,
+            name: chunkEntity.name,
+            type: chunkEntity.type,
+            embedding: chunkEmbedding,
+            description: chunkEntity.description,
+            metadata: chunkEntity.metadata,
+            lastModified: now,
+          );
+        }
+
+        // PART_OF: chunk -> parent note
+        final partOfRel = GraphRelationship(
+          id: '${chunkId}_part_of_$noteEntityId',
+          sourceId: chunkId,
+          targetId: noteEntityId,
+          type: 'PART_OF',
+          weight: 1.0,
+          metadata: {'chunkIndex': chunkIndex},
+        );
+        try {
+          await _repository.addRelationship(partOfRel);
+        } catch (_) {}
+
+        // NEXT_CHUNK: previousChunk -> currentChunk
+        if (previousChunkId != null) {
+          final nextChunkRel = GraphRelationship(
+            id: '${previousChunkId}_next_chunk_$chunkId',
+            sourceId: previousChunkId,
+            targetId: chunkId,
+            type: 'NEXT_CHUNK',
+            weight: 1.0,
+            metadata: {},
+          );
+          try {
+            await _repository.addRelationship(nextChunkRel);
+          } catch (_) {}
+        }
+
+        previousChunkId = chunkId;
+      }
+    }
+
+    // --- Link to You node via hub pattern ---
+    const youId = YouEntity.id;
+    final youEntity = await _repository.getEntity(youId);
+    if (youEntity == null) {
+      final youEmbedding =
+          await _embeddingCallback('You - personal user self');
+      final you = YouEntity.create(embedding: youEmbedding);
+      await _repository.addEntity(you);
+    }
+
+    // Ensure hub entity exists: You -> HAS_DATA -> My Notes
+    final hubId = DataHubEntity.idFor(DataSourceTypes.note);
+    final existingHub = await _repository.getEntity(hubId);
+    if (existingHub == null) {
+      final hubEmbedding = await _embeddingCallback(
+        DataHubEntity.nameFor(DataSourceTypes.note),
+      );
+      await _repository.addEntity(
+        DataHubEntity.create(DataSourceTypes.note, embedding: hubEmbedding),
+      );
+
+      final hubRel = GraphRelationship(
+        id: '${youId}_${YouRelationshipTypes.hasData}_$hubId',
+        sourceId: youId,
+        targetId: hubId,
+        type: YouRelationshipTypes.hasData,
+        weight: 1.0,
+        metadata: {},
+      );
+      try {
+        await _repository.addRelationship(hubRel);
+      } catch (_) {}
+    }
+
+    // Link note to hub: My Notes Hub -> WROTE_NOTE -> Note
+    final noteHubRel = GraphRelationship(
+      id: '${hubId}_${YouRelationshipTypes.wroteNote}_$noteEntityId',
+      sourceId: hubId,
+      targetId: noteEntityId,
+      type: YouRelationshipTypes.wroteNote,
+      weight: 1.0,
+      metadata: {},
+    );
+    try {
+      await _repository.addRelationship(noteHubRel);
+    } catch (_) {}
+
+    debugPrint('[GraphRAG] Indexed note "$title": ${chunks.length} chunk(s), '
+        '${uniqueEntityIds.length} extracted entities');
+  }
+
   // === Community Detection ===
 
   /// Run community detection on current graph
