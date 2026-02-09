@@ -1,0 +1,12 @@
+SUMMARY:
+This paper proposes the Transformer, a novel network architecture for sequence transduction that relies entirely on attention mechanisms. Unlike previous dominant models that used complex recurrent or convolutional neural networks, the Transformer dispenses with recurrence and convolutions entirely.
+	
+RESULTS OF THE PAPER:
+
+1. Machine Translation
+The Transformer established new state-of-the-art results on two major benchmarks:
+- English-to-German: Achieved a score of 28.4 BLEU on the WMT 2014 task, improving upon the previous best results (including ensembles) by over 2 BLEU.
+- English-to-French: Achieved a 41.8 BLEU score after training for 3.5 days on eight GPUs, which is a small fraction of the training costs of previous best models.
+
+2. Training Efficiency
+The Transformer is significantly faster to train than architectures based on recurrent or convolutional layers. For instance, the base model reached a new state of the art in translation quality after being trained for only 12 hours on eight P100 GPUs. ”

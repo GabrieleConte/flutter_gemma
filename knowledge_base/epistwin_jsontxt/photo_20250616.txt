@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250616",
+	"metadata": {
+		"path": "Downloads/photo_20250616.jpg",
+		"creation_date": "16-Jun-2025",
+		"creation_time": "15:00",
+		"location": Colombus Statue, Barcelona
+	}
+}

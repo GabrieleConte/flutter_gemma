@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_8”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Business lunch”,
+	"date": “27-Aug-2025",
+        "start_time": “13:00",
+	"end_time": “14:00"
+    }
+}

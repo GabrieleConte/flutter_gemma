@@ -1,0 +1,12 @@
+{
+    "source_app": "calendar",
+    "event": "recurrentEvent_5”,
+    "reurrence_type": "recurrent",
+    "metadata": {
+	"label": "Work",
+        "start_time": "09:00",
+	"end_time": "18:00",
+        "repeat_frequency": “yearly”,
+        "on": “11-Sep”
+    }
+}

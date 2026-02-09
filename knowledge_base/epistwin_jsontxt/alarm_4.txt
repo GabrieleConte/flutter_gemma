@@ -1,0 +1,10 @@
+{
+    "source_app": "alarm",
+    "alarm": "alarm_4”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Running”,
+	"date": "06-Sep-2025",
+        "time": “05:00"
+    }
+}

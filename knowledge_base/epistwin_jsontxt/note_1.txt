@@ -1,0 +1,11 @@
+{
+     "source_app": "note",
+     "note": "note_1”,
+     "metadata": {
+     “title: "Dream trips for the new year",
+     "creation_date": "01-Jan-2025",
+     "creation_time": "10:00",
+      "date_modified": "01-Jan-2025",
+      "modified_time": "10:00"
+    }
+}

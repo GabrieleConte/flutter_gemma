@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250614”,
+	"metadata": {
+		"path": "Downloads/photo_20250614.jpg",
+		"creation_date": “14-Jun-2025",
+		"creation_time": “12:00",
+		"location": Casa Batlló , Pg. de Gràcia, 43, L'Eixample, Barcelona, Spain
+	}
+}

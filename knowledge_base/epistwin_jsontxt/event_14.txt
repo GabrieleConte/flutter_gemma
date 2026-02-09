@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_14”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Departure for Milan”,
+	"date": “19-Sep-2025",
+        "start_time": “16:00",
+	"end_time": “18:00"
+    }
+}

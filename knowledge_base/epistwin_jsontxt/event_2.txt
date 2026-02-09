@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_2”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": "Visit statue of Christopher Columbus",
+	"date": "16-Jun-2025",
+        "start_time": "15:00",
+	"end_time": "15:30"
+    }
+}

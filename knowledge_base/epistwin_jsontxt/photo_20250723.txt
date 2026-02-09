@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250723”,
+	"metadata": {
+		"path": "Downloads/photo_20250723.jpg",
+		"creation_date": “23-Jul-2025",
+		"creation_time": “22:00",
+		"location": Tour Eiffel, Av. Gustave Eiffel, Paris, France
+	}
+}

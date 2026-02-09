@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250602”,
+	"metadata": {
+		"path": "Downloads/photo_20250602.jpg",
+		"creation_date": “02-Jun-2025",
+		"creation_time": “23:00",
+		"location": Florida Street , Rome , Italy
+	}
+}

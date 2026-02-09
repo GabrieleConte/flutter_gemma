@@ -1,0 +1,11 @@
+{
+    "source_app": "note",
+    "note": "note_7”,
+    "metadata": {
+	"title": "Shopping list",
+	"creation_date": “15-Aug-2025",
+	"creation_time": "18:00",
+	"date_modified": “15-Aug-2025",
+	"modified_time": "18:00"
+    }
+}

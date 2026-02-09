@@ -1,0 +1,12 @@
+{
+    "source_app": "calendar",
+    "event": "recurrentEvent_4”,
+    "reurrence_type": "recurrent",
+    "metadata": {
+	"label": “ Football Match”,
+        "start_time": “15:00",
+	"end_time": "17:00",
+        "repeat_frequency": "weekly",
+        "on": “Sunday”
+    }
+}

@@ -1,0 +1,12 @@
+{
+    "source_app": "calendar",
+    "event": "recurrentEvent_3”,
+    "reurrence_type": "recurrent",
+    "metadata": {
+	"label": “Disco”,
+        "start_time": “23:30",
+	"end_time": “04:00",
+        "repeat_frequency": "weekly",
+        "on": “Saturday”
+    }
+}

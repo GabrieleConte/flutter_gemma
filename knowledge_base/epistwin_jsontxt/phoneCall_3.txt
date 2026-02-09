@@ -1,0 +1,12 @@
+{
+    "source_app": "phone",
+    "call": "phoneCall_3”,
+    "metadata": {
+        "date": "01-Sep-2025",
+        "start_time": "10:30:00",
+        "end_time": "10:45:00",
+        "duration": "0h, 15min, 23sec",
+        "call_direction": "incoming",
+        "with_contact": "SarahGreen_521"
+    }
+}

@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250612”,
+	"metadata": {
+		"path": "Downloads/photo_20250612.jpg",
+		"creation_date": “12-Jun-2025",
+		"creation_time": “10:00",
+		"location":  Sagrada Familia, Carrer de Mallorca, 401, L'Eixample, Barcellona , Spain
+	}
+}

@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250615”,
+	"metadata": {
+		"path": "Downloads/photo_20250615.jpg",
+		"creation_date": “15-Jun-2025",
+		"creation_time": “13:00",
+		"location": La Rambla, 91, Ciutat Vella, Barcelona, Spain
+	}
+}

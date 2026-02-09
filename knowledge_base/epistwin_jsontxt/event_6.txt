@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_6”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Dinner in Naples”,
+	"date": “15-Aug-2025",
+        "start_time": “21:00",
+	"end_time": “22:30"
+    }
+}

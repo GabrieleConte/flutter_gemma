@@ -1,0 +1,9 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250830”,
+	"metadata": {
+		"path": "Downloads/photo_20250830.jpg",
+		"creation_date": “30-Aug-2025",
+		"creation_time": “20:00",
+		"location”: Eurospin, California Street, Rome , Italy
+}

@@ -1,0 +1,10 @@
+{
+    "source_app": "alarm",
+    "alarm": "alarm_2”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": "Football",
+	"date": "01-Sep-2025",
+        "time": “16:00"
+    }
+}

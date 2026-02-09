@@ -1,0 +1,11 @@
+{
+    "source_app": "alarm",
+    "alarm": "recurrentAlarm_1”,
+    "reurrence_type": "recurrent",
+    "metadata": {
+	"label": "Work",
+        "time": "06:00",
+        "repeat_frequency": "weekly",
+        "on": "Monday, Tuesday, Wednesday, Thursday, Friday"
+    }
+}
