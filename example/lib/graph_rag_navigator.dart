@@ -43,7 +43,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   /// Get available inference models — restricted to gemma3n_2B_litertlm
   /// which supports both text generation and vision (image captioning).
   List<Model> get _availableInferenceModels {
-    return [Model.gemma3n_2B_litertlm];
+    return [Model.deepseek, Model.gemma3n_2B_litertlm, Model.gemma3_1B];
   }
 
   /// Get available embedding models
@@ -54,9 +54,11 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     // Set default — only gemma3n_2B_litertlm is available for GraphRAG
-    _selectedInferenceModel = Model.gemma3n_2B_litertlm;
+    _selectedInferenceModel = _availableInferenceModels.isNotEmpty
+        ? _availableInferenceModels.first
+        : Model.gemma3n_2B_litertlm;
     _selectedEmbeddingModel = _availableEmbeddingModels.isNotEmpty
         ? _availableEmbeddingModels.first
         : app_models.EmbeddingModel.embeddingGemma512;
@@ -313,6 +315,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           tabs: const [
             Tab(icon: Icon(Icons.account_tree), text: 'Index'),
             Tab(icon: Icon(Icons.chat), text: 'Chat'),
+            Tab(icon: Icon(Icons.settings), text: 'Settings'),
           ],
           indicatorColor: Colors.orange,
           labelColor: Colors.orange,
@@ -321,18 +324,56 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: const [
-          GraphRAGIndexScreen(),
-          GraphRAGChatScreen(),
+        children: [
+          const GraphRAGIndexScreen(),
+          const GraphRAGChatScreen(),
+          _buildSettingsTab(),
+        ],
+      ),
+    );
+  }
+
+  /// Settings tab that allows changing models after initialization
+  Widget _buildSettingsTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Center(
+            child: Icon(
+              Icons.settings,
+              size: 60,
+              color: Colors.white54,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Center(
+            child: Text(
+              'Model Settings',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Center(
+            child: Text(
+              'Change models and reinitialize GraphRAG',
+              style: TextStyle(fontSize: 14, color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 24),
+          _buildModelSelectionContent(),
         ],
       ),
     );
   }
 
   Widget _buildSetupView() {
-    final needsToken = _selectedInferenceModel.needsAuth ||
-        _selectedEmbeddingModel.needsAuth;
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
       child: Column(
@@ -365,15 +406,28 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
             ),
           ),
           const SizedBox(height: 24),
+          _buildModelSelectionContent(),
+        ],
+      ),
+    );
+  }
 
-          // Token input (shown when any selected model needs auth)
-          if (needsToken) ...[  
-            _buildTokenInput(),
-            const SizedBox(height: 24),
-          ],
+  /// Shared content for model selection used in both setup and settings
+  Widget _buildModelSelectionContent() {
+    final needsToken = _selectedInferenceModel.needsAuth ||
+        _selectedEmbeddingModel.needsAuth;
 
-          // LLM model selector
-          _buildModelSelector<Model>(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Token input (shown when any selected model needs auth)
+        if (needsToken) ...[  
+          _buildTokenInput(),
+          const SizedBox(height: 24),
+        ],
+
+        // LLM model selector
+        _buildModelSelector<Model>(
             title: 'Inference Model (LLM)',
             icon: Icons.smart_toy,
             models: _availableInferenceModels,
@@ -387,82 +441,81 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
             },
             displayName: (m) => '${m.displayName} (${m.size})',
             subtitle: 'Only function-call capable models are shown',
-          ),
-          const SizedBox(height: 12),
-
-          // Embedding model selector
-          _buildModelSelector<app_models.EmbeddingModel>(
-            title: 'Embedding Model',
-            icon: Icons.search,
-            models: _availableEmbeddingModels,
-            selected: _selectedEmbeddingModel,
-            isReady: _embeddingModelReady,
-            onChanged: (model) {
-              if (model != null) {
-                setState(() => _selectedEmbeddingModel = model);
-                _recheckModels();
-              }
-            },
-            displayName: (m) => '${m.displayName} (${m.size})',
-          ),
-
-          const SizedBox(height: 24),
-
-          // Error display
-          if (_initError != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _initError!,
-                  style: const TextStyle(color: Colors.red),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Progress indicator
-            if (_isInitializing || _checkingModels) ...[
-              const Center(child: CircularProgressIndicator(color: Colors.white)),
-              const SizedBox(height: 16),
-              Text(
-                _statusMessage,
-                style: const TextStyle(color: Colors.white70),
-                textAlign: TextAlign.center,
-              ),
-            ] else ...[
-              // Action button
-              Center(
-                child: _inferenceModelReady && _embeddingModelReady
-                    ? ElevatedButton.icon(
-                        onPressed: _initializeWithExistingModels,
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Initialize GraphRAG'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 12),
-                          backgroundColor: Colors.green,
-                        ),
-                      )
-                    : ElevatedButton.icon(
-                        onPressed: _downloadAndInitialize,
-                        icon: const Icon(Icons.download),
-                        label: Text(!_inferenceModelReady && !_embeddingModelReady
-                            ? 'Download & Initialize'
-                            : 'Download Missing & Initialize'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 12),
-                        ),
-                      ),
-              ),
-            ],
-          ],
         ),
+        const SizedBox(height: 12),
+
+        // Embedding model selector
+        _buildModelSelector<app_models.EmbeddingModel>(
+          title: 'Embedding Model',
+          icon: Icons.search,
+          models: _availableEmbeddingModels,
+          selected: _selectedEmbeddingModel,
+          isReady: _embeddingModelReady,
+          onChanged: (model) {
+            if (model != null) {
+              setState(() => _selectedEmbeddingModel = model);
+              _recheckModels();
+            }
+          },
+          displayName: (m) => '${m.displayName} (${m.size})',
+        ),
+
+        const SizedBox(height: 24),
+
+        // Error display
+        if (_initError != null) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _initError!,
+              style: const TextStyle(color: Colors.red),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Progress indicator
+        if (_isInitializing || _checkingModels) ...[
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
+          const SizedBox(height: 16),
+          Text(
+            _statusMessage,
+            style: const TextStyle(color: Colors.white70),
+            textAlign: TextAlign.center,
+          ),
+        ] else ...[
+          // Action button
+          Center(
+            child: _inferenceModelReady && _embeddingModelReady
+                ? ElevatedButton.icon(
+                    onPressed: _initializeWithExistingModels,
+                    icon: const Icon(Icons.play_arrow),
+                    label: Text(_service.isInitialized ? 'Reinitialize GraphRAG' : 'Initialize GraphRAG'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                      backgroundColor: Colors.green,
+                    ),
+                  )
+                : ElevatedButton.icon(
+                    onPressed: _downloadAndInitialize,
+                    icon: const Icon(Icons.download),
+                    label: Text(!_inferenceModelReady && !_embeddingModelReady
+                        ? 'Download & Initialize'
+                        : 'Download Missing & Initialize'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                    ),
+                  ),
+          ),
+        ],
+      ],
     );
   }
 
