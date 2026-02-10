@@ -53,6 +53,9 @@ class GraphRAGQueryResult {
   /// Retrieved entities with relevance scores
   final List<GraphRAGScoredEntity> entities;
 
+  /// Retrieved relationships connecting entities in the context
+  final List<GraphRelationship> relationships;
+
   /// Related community summaries
   final List<GraphRAGScoredCommunity> communities;
 
@@ -67,6 +70,7 @@ class GraphRAGQueryResult {
 
   GraphRAGQueryResult({
     required this.entities,
+    this.relationships = const [],
     required this.communities,
     required this.contextString,
     required this.metadata,
@@ -77,6 +81,7 @@ class GraphRAGQueryResult {
   GraphRAGQueryResult withAnswer(String answer) {
     return GraphRAGQueryResult(
       entities: entities,
+      relationships: relationships,
       communities: communities,
       contextString: contextString,
       metadata: metadata,
@@ -119,6 +124,7 @@ class GraphRAGQueryMetadata {
   final int hopEntitiesCount;
   final int totalEntitiesBeforeBudget;
   final int totalEntitiesAfterBudget;
+  final int relationshipsCount;
   final int tokenBudget;
   final int estimatedTokensUsed;
   final Duration executionTime;
@@ -130,6 +136,7 @@ class GraphRAGQueryMetadata {
     required this.hopEntitiesCount,
     required this.totalEntitiesBeforeBudget,
     required this.totalEntitiesAfterBudget,
+    this.relationshipsCount = 0,
     required this.tokenBudget,
     required this.estimatedTokensUsed,
     required this.executionTime,
@@ -137,15 +144,18 @@ class GraphRAGQueryMetadata {
 }
 
 /// GraphRAG query engine: embedding similarity + N-hop graph traversal
-/// with token-budget-aware context construction.
+/// with relationship-aware, token-budget-aware context construction.
 ///
-/// Hub entity types (e.g. DATE, EMAIL, PHONE …) are excluded from both
-/// seed retrieval and hop expansion to avoid noisy, highly-connected nodes.
+/// Hub entity types (e.g. HUB) are excluded from both seed retrieval and
+/// hop expansion to avoid noisy, highly-connected nodes. DATE entities are
+/// kept in the graph for traversal but excluded from the LLM context since
+/// their information is already conveyed through relationships.
 ///
 /// Retrieval steps:
 /// 1. Embedding similarity → top-K seed entities + top-1 community
 /// 2. N-hop graph traversal from each seed entity → neighbor entities
-/// 3. Token-budget-aware context construction (90% of context window)
+/// 3. Fetch relationships connecting retrieved entities
+/// 4. Token-budget-aware context construction with relationship grouping
 ///
 /// When the token budget is exceeded, entities are discarded in order:
 ///   a) Hop nodes with lowest scores
@@ -215,19 +225,7 @@ class GraphRAGQueryEngine {
       return;
     }
 
-    // Use the token-budget-aware context string built during retrieval
-    final prompt =
-        '''Answer ONLY using the information below. Do NOT add external knowledge.
-
-${result.contextString}
-
-Question: $query
-
-Rules:
-- Use ONLY entities/context above
-- If insufficient data, say so
-
-Answer:''';
+    final prompt = _buildAnswerPrompt(query, result.contextString);
 
     await for (final token in llmStreamCallback(prompt)) {
       yield token;
@@ -328,7 +326,19 @@ Answer:''';
     final hopCount = hopEntities.length;
     final totalBeforeBudget = seedCount + hopCount;
 
-    // --- Step 3: Token-budget-aware context construction ---
+    // --- Step 3: Fetch relationships connecting retrieved entities ---
+    final allEntityIds = <String>{
+      ...seedEntities.keys,
+      ...hopEntities.keys,
+    };
+    final allEntityMap = <String, GraphEntity>{
+      for (final e in seedEntities.values) e.entity.id: e.entity,
+      for (final e in hopEntities.values) e.entity.id: e.entity,
+    };
+    final contextRelationships =
+        await _fetchContextRelationships(allEntityIds, allEntityMap);
+
+    // --- Step 4: Token-budget-aware context construction ---
     final tokenBudget =
         (effective.maxContextTokens * effective.contextBudgetRatio).toInt();
 
@@ -344,6 +354,8 @@ Answer:''';
     final budgetResult = _applyTokenBudget(
       seeds: sortedSeeds,
       hops: sortedHops,
+      relationships: contextRelationships,
+      entityMap: allEntityMap,
       communities: communityResults,
       tokenBudget: tokenBudget,
       communityDropThreshold: effective.communityDropThreshold,
@@ -353,6 +365,7 @@ Answer:''';
 
     return GraphRAGQueryResult(
       entities: budgetResult.entities,
+      relationships: contextRelationships,
       communities: budgetResult.communities,
       contextString: budgetResult.contextString,
       metadata: GraphRAGQueryMetadata(
@@ -362,6 +375,7 @@ Answer:''';
         hopEntitiesCount: hopCount,
         totalEntitiesBeforeBudget: totalBeforeBudget,
         totalEntitiesAfterBudget: budgetResult.entities.length,
+        relationshipsCount: contextRelationships.length,
         tokenBudget: tokenBudget,
         estimatedTokensUsed: budgetResult.estimatedTokens,
         executionTime: stopwatch.elapsed,
@@ -377,37 +391,313 @@ Answer:''';
   /// Uses ~4 characters per token heuristic (matches codebase convention).
   int _estimateTokens(String text) => (text.length / 4).ceil();
 
-  /// Format a single entity for the context string, including relevant metadata.
-  String _formatEntity(GraphRAGScoredEntity scored) {
+  /// Fetch relationships between retrieved entities, filtering out noise.
+  ///
+  /// Keeps relationships where both endpoints are in the retrieved entity set.
+  /// Excludes HUB-originating relationships (HAS_EVENT, HAS_DATA, etc.)
+  /// and auto-generated RELATED_TO links (embedding similarity predictions).
+  Future<List<GraphRelationship>> _fetchContextRelationships(
+    Set<String> entityIds,
+    Map<String, GraphEntity> entityMap,
+  ) async {
+    final seen = <String>{};
+    final result = <GraphRelationship>[];
+
+    for (final id in entityIds) {
+      final rels = await repository.getRelationships(id);
+      for (final rel in rels) {
+        // Deduplicate (relationships appear from both endpoints)
+        if (seen.contains(rel.id)) continue;
+        seen.add(rel.id);
+
+        // Both endpoints must be in retrieved set
+        if (!entityIds.contains(rel.sourceId) ||
+            !entityIds.contains(rel.targetId)) {
+          continue;
+        }
+
+        // Skip hub-originating relationships
+        final sourceType = entityMap[rel.sourceId]?.type;
+        final targetType = entityMap[rel.targetId]?.type;
+        if (sourceType == EntityTypes.hub || targetType == EntityTypes.hub) {
+          continue;
+        }
+
+        // Skip auto-generated RELATED_TO (embedding similarity predictions)
+        if (rel.type == RelationshipTypes.relatedTo) continue;
+
+        result.add(rel);
+      }
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Entity type display names (human-readable labels)
+  // ---------------------------------------------------------------------------
+
+  /// Human-readable labels for entity types shown in context.
+  static const _entityTypeLabels = {
+    EntityTypes.person: 'Person',
+    EntityTypes.organization: 'Organization',
+    EntityTypes.location: 'Location',
+    EntityTypes.event: 'Calendar Event',
+    EntityTypes.date: 'Date',
+    EntityTypes.project: 'Project',
+    EntityTypes.document: 'Document',
+    EntityTypes.email: 'Email',
+    EntityTypes.phone: 'Phone',
+    EntityTypes.skill: 'Skill',
+    EntityTypes.topic: 'Topic',
+    EntityTypes.note: 'Note',
+    EntityTypes.noteChunk: 'Note Excerpt',
+    EntityTypes.phoneCall: 'Phone Call',
+    EntityTypes.alarm: 'Alarm',
+    EntityTypes.photo: 'Photo',
+  };
+
+  /// Get human-readable label for an entity type, with fallback.
+  static String _entityTypeLabel(String type) =>
+      _entityTypeLabels[type] ?? type;
+
+  // ---------------------------------------------------------------------------
+  // Relationship type human-readable labels
+  // ---------------------------------------------------------------------------
+
+  /// Human-readable relationship descriptions for context rendering.
+  static const _relationshipLabels = {
+    RelationshipTypes.worksAt: 'works at',
+    RelationshipTypes.worksFor: 'works for',
+    RelationshipTypes.colleagueOf: 'colleague of',
+    RelationshipTypes.knows: 'knows',
+    RelationshipTypes.attendedBy: 'attended by',
+    RelationshipTypes.locatedIn: 'located in',
+    RelationshipTypes.partOf: 'part of',
+    RelationshipTypes.createdBy: 'created by',
+    RelationshipTypes.ownedBy: 'owned by',
+    RelationshipTypes.mentionedIn: 'mentioned in',
+    RelationshipTypes.relatedTo: 'related to',
+    RelationshipTypes.hasSkill: 'has skill',
+    RelationshipTypes.interestedIn: 'interested in',
+    RelationshipTypes.contactOf: 'contact of',
+    RelationshipTypes.scheduledFor: 'scheduled for',
+    RelationshipTypes.calledContact: 'called',
+    RelationshipTypes.receivedCallFrom: 'received call from',
+    RelationshipTypes.takenAt: 'taken at',
+    RelationshipTypes.takenOn: 'taken on',
+    RelationshipTypes.picturedIn: 'pictured in',
+    RelationshipTypes.createdOn: 'created on',
+    RelationshipTypes.modifiedOn: 'modified on',
+    RelationshipTypes.setFor: 'set for',
+    RelationshipTypes.recurringOn: 'recurring on',
+    RelationshipTypes.occursOn: 'occurs on',
+    RelationshipTypes.occurredOn: 'occurred on',
+  };
+
+  /// Get human-readable label for a relationship type, with fallback.
+  static String _relationshipLabel(String type) =>
+      _relationshipLabels[type] ?? type.toLowerCase().replaceAll('_', ' ');
+
+  // ---------------------------------------------------------------------------
+  // Entity formatting — type-specific, human-readable context for the LLM
+  // ---------------------------------------------------------------------------
+
+  /// Entity types that are purely structural (graph connectivity nodes)
+  /// and should not appear as standalone entries in the LLM context.
+  /// They are still used during graph traversal and their information is
+  /// conveyed through relationship labels instead.
+  static const _contextExcludedTypes = {EntityTypes.date};
+
+  /// Format a single entity for the context string using type-specific
+  /// formatting for optimal LLM comprehension.
+  String _formatEntity(
+    GraphRAGScoredEntity scored, {
+    List<_ResolvedRelationship>? outgoing,
+  }) {
     final e = scored.entity;
     final buf = StringBuffer();
-    buf.write('**${e.name}** (${e.type})');
-    if (e.description != null && e.description!.isNotEmpty) {
-      buf.write('\n${e.description}');
+
+    // --- Type-specific formatting ---
+    switch (e.type) {
+      case EntityTypes.person:
+        _formatPerson(buf, e);
+      case EntityTypes.event:
+        _formatEvent(buf, e);
+      case EntityTypes.photo:
+        _formatPhoto(buf, e);
+      case EntityTypes.phoneCall:
+        _formatPhoneCall(buf, e);
+      case EntityTypes.alarm:
+        _formatAlarm(buf, e);
+      case EntityTypes.note:
+        _formatNote(buf, e);
+      case EntityTypes.document:
+        _formatDocument(buf, e);
+      default:
+        // Generic formatting for ORGANIZATION, LOCATION, SKILL, TOPIC, etc.
+        _formatGeneric(buf, e);
     }
-    // Append useful metadata fields
+
+    // --- Append outgoing relationships ---
+    if (outgoing != null && outgoing.isNotEmpty) {
+      for (final rel in outgoing) {
+        final label = _relationshipLabel(rel.type);
+        final targetLabel = _entityTypeLabel(rel.targetType);
+        buf.writeln('  → $label → ${rel.targetName} ($targetLabel)');
+      }
+    }
+
+    buf.writeln();
+    return buf.toString();
+  }
+
+  /// Format PERSON entity: name, job, contact info.
+  void _formatPerson(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    final meta = e.metadata;
+    if (e.description != null && e.description!.isNotEmpty) {
+      buf.write(' — ${e.description}');
+    } else if (meta != null && meta['jobTitle'] != null) {
+      buf.write(' — ${meta['jobTitle']}');
+    }
+    buf.writeln();
+    if (meta != null) {
+      final parts = <String>[];
+      final emails = meta['emails'];
+      if (emails is List && emails.isNotEmpty) {
+        parts.add('email: ${emails.join(', ')}');
+      }
+      final phones = meta['phones'];
+      if (phones is List && phones.isNotEmpty) {
+        parts.add('phone: ${phones.join(', ')}');
+      }
+      if (parts.isNotEmpty) buf.writeln('  ${parts.join(' | ')}');
+    }
+  }
+
+  /// Format EVENT entity: title, date range, recurrence, description.
+  void _formatEvent(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    final meta = e.metadata;
+    if (meta != null) {
+      final startDate = _formatDateTimeValue(meta['startDate']);
+      final endDate = _formatDateTimeValue(meta['endDate']);
+      if (startDate != null) {
+        buf.write(' — $startDate');
+        if (endDate != null && endDate != startDate) buf.write(' to $endDate');
+      }
+      final recurrence = meta['recurrenceInfo']?.toString();
+      if (recurrence == 'recurrent') {
+        final freq = meta['repeatFrequency']?.toString();
+        final on = meta['on']?.toString();
+        final recParts = <String>[];
+        if (freq != null) recParts.add(freq);
+        if (on != null) recParts.add('on $on');
+        if (recParts.isNotEmpty) buf.write(' (${recParts.join(', ')})');
+      }
+    }
+    buf.writeln();
+    if (e.description != null && e.description!.isNotEmpty) {
+      // Truncate long event descriptions (e.g. holiday boilerplate)
+      final desc = e.description!.length > 150
+          ? '${e.description!.substring(0, 150)}…'
+          : e.description!;
+      buf.writeln('  $desc');
+    }
+  }
+
+  /// Format PHOTO entity: filename, human-readable date.
+  void _formatPhoto(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    final meta = e.metadata;
+    if (meta != null) {
+      final dateStr = _formatDateTimeValue(meta['creationDate']);
+      if (dateStr != null) buf.write(' — taken on $dateStr');
+    }
+    buf.writeln();
+  }
+
+  /// Format PHONE_CALL entity: call direction, contact, timestamp, duration.
+  void _formatPhoneCall(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    final meta = e.metadata;
+    if (meta != null) {
+      final direction = meta['callDirection']?.toString();
+      if (direction != null) buf.write(' [$direction]');
+      final dateStr = _formatDateTimeValue(meta['timestamp'] ?? meta['startTime']);
+      if (dateStr != null) buf.write(' — $dateStr');
+      final duration = meta['duration']?.toString();
+      if (duration != null && duration.isNotEmpty) {
+        buf.write(', ${_formatDuration(duration)}');
+      }
+    }
+    buf.writeln();
+  }
+
+  /// Format ALARM entity: label, time, recurrence — as a single sentence.
+  void _formatAlarm(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    // Description already contains the full sentence from the extractor
+    if (e.description != null && e.description!.isNotEmpty) {
+      buf.write(' — ${e.description}');
+    }
+    buf.writeln();
+  }
+
+  /// Format NOTE entity: title, creation date, content preview.
+  void _formatNote(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    final meta = e.metadata;
+    if (meta != null) {
+      final dateStr = _formatDateTimeValue(meta['dateCreated']);
+      if (dateStr != null) buf.write(' — created $dateStr');
+    }
+    buf.writeln();
+    if (e.description != null && e.description!.isNotEmpty) {
+      final preview = e.description!.length > 200
+          ? '${e.description!.substring(0, 200)}…'
+          : e.description!;
+      buf.writeln('  $preview');
+    }
+  }
+
+  /// Format DOCUMENT entity: name, type, dates.
+  void _formatDocument(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    if (e.description != null && e.description!.isNotEmpty) {
+      final preview = e.description!.length > 200
+          ? '${e.description!.substring(0, 200)}…'
+          : e.description!;
+      buf.write(' — $preview');
+    }
+    buf.writeln();
+  }
+
+  /// Generic formatting for entity types without specialized formatting.
+  void _formatGeneric(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    if (e.description != null && e.description!.isNotEmpty) {
+      buf.write(' — ${e.description}');
+    }
+    buf.writeln();
+    // Show non-skipped metadata for generic types
     final meta = e.metadata;
     if (meta != null && meta.isNotEmpty) {
       final parts = <String>[];
       for (final key in meta.keys) {
         final value = meta[key];
         if (value == null) continue;
-        // Skip internal/technical keys
         if (_skipMetadataKeys.contains(key)) continue;
-        // Skip empty lists/strings
         if (value is String && value.isEmpty) continue;
         if (value is List && value.isEmpty) continue;
-        // Format lists nicely; prettify date-like strings
         final display =
             value is List ? value.join(', ') : _formatMetadataValue(value);
-        parts.add('$key: $display');
+        parts.add('${_humanizeKey(key)}: $display');
       }
       if (parts.isNotEmpty) {
-        buf.write('\n${parts.join(' | ')}');
+        buf.writeln('  ${parts.join(' | ')}');
       }
     }
-    buf.writeln();
-    return buf.toString();
   }
 
   /// Metadata keys to exclude from LLM context (internal identifiers, etc.)
@@ -428,6 +718,8 @@ Answer:''';
     'noteId',
     'alarmId',
     'callId',
+    'recurrenceType',
+    'predictionMethod',
   };
 
   /// Month names for human-readable date formatting.
@@ -446,16 +738,21 @@ Answer:''';
     'December',
   ];
 
-  /// Format a metadata value, converting ISO-8601 dates to human-readable form.
-  static String _formatMetadataValue(dynamic value) {
-    if (value is! String) return '$value';
-    // Try to parse ISO-8601 date/datetime strings
-    final dt = DateTime.tryParse(value);
-    if (dt == null) return value;
+  /// Parse a dynamic value (ISO-8601 string, epoch millis string, int, or
+  /// DateTime) into a human-readable date/time string.
+  ///
+  /// Handles the real data patterns found in the graph:
+  /// - ISO-8601: `"2025-02-14T01:00:00.000"`
+  /// - Epoch millis as string: `"1770670730000"`
+  /// - Epoch millis as int: `1770670730000`
+  /// - Date-only: `"2025-02-14"`
+  static String? _formatDateTimeValue(dynamic value) {
+    if (value == null) return null;
+    final dt = _parseDateTimeValue(value);
+    if (dt == null) return null;
     final month = _months[dt.month - 1];
     final day = dt.day;
     final year = dt.year;
-    // Include time only when it's not midnight (00:00)
     if (dt.hour == 0 && dt.minute == 0) {
       return '$month $day, $year';
     }
@@ -464,7 +761,61 @@ Answer:''';
     return '$month $day, $year at $hour:$minute';
   }
 
-  /// Apply token budget with priority-based trimming.
+  /// Parse a dynamic value into a DateTime, supporting ISO-8601, epoch millis
+  /// (as int or numeric string), and DateTime objects.
+  static DateTime? _parseDateTimeValue(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is! String) return null;
+    // Try epoch millis (numeric string > 1e9)
+    final asInt = int.tryParse(value);
+    if (asInt != null && asInt > 1000000000) {
+      // Distinguish seconds vs milliseconds
+      if (asInt > 1e12) {
+        return DateTime.fromMillisecondsSinceEpoch(asInt);
+      }
+      return DateTime.fromMillisecondsSinceEpoch(asInt * 1000);
+    }
+    // Try ISO-8601
+    return DateTime.tryParse(value);
+  }
+
+  /// Format a metadata value, converting dates and timestamps to
+  /// human-readable form.
+  static String _formatMetadataValue(dynamic value) {
+    if (value is! String) return '$value';
+    // Try date parsing (handles ISO-8601 and epoch millis strings)
+    final formatted = _formatDateTimeValue(value);
+    if (formatted != null) return formatted;
+    return value;
+  }
+
+  /// Convert a camelCase metadata key to a human-readable label.
+  static String _humanizeKey(String key) {
+    // Insert space before uppercase letters and lowercase the result
+    final spaced =
+        key.replaceAllMapped(RegExp(r'[A-Z]'), (m) => ' ${m[0]!.toLowerCase()}');
+    // Capitalize first letter
+    return spaced[0].toUpperCase() + spaced.substring(1);
+  }
+
+  /// Format a duration value (seconds string) to a human-readable form.
+  static String _formatDuration(String durationStr) {
+    final seconds = int.tryParse(durationStr);
+    if (seconds == null) return '${durationStr}s';
+    if (seconds < 60) return '${seconds}s';
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds > 0 ? '${minutes}m ${remainingSeconds}s' : '${minutes}m';
+    }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? '${hours}h ${remainingMinutes}m' : '${hours}h';
+  }
+
+  /// Apply token budget with priority-based trimming and relationship-aware
+  /// context construction.
   ///
   /// Discard order:
   ///   1. Hop nodes with lowest scores
@@ -476,13 +827,15 @@ Answer:''';
   _BudgetResult _applyTokenBudget({
     required List<GraphRAGScoredEntity> seeds,
     required List<GraphRAGScoredEntity> hops,
+    required List<GraphRelationship> relationships,
+    required Map<String, GraphEntity> entityMap,
     required List<GraphRAGScoredCommunity> communities,
     required int tokenBudget,
     required double communityDropThreshold,
   }) {
     // Pre-compute header tokens
-    const entityHeader = '=== Relevant Entities ===\n\n';
-    const communityHeader = '\n=== Community Context ===\n\n';
+    const entityHeader = '=== Retrieved Knowledge ===\n\n';
+    const communityHeader = '\n=== Background Context ===\n\n';
     int runningTokens = _estimateTokens(entityHeader);
 
     // Pre-compute community text for later
@@ -491,20 +844,42 @@ Answer:''';
 
     if (communities.isNotEmpty) {
       final c = communities.first;
-      final cText = '**Community at Level ${c.community.level}:**\n'
-          '${c.community.summary}\n';
+      final cText = '${c.community.summary}\n';
       communityTokens =
           _estimateTokens(communityHeader) + _estimateTokens(cText);
       communityText = cText;
     }
 
-    // --- Phase 1: Fit entities using full budget (no community reservation) ---
+    // Build relationship lookup: entityId → list of outgoing relationships
+    // resolved with target entity names for rendering.
+    final outgoingRels = <String, List<_ResolvedRelationship>>{};
+    for (final rel in relationships) {
+      final targetEntity = entityMap[rel.targetId];
+      final sourceEntity = entityMap[rel.sourceId];
+      if (targetEntity == null || sourceEntity == null) continue;
+
+      // Skip relationships pointing TO date entities (already in entity text)
+      // but keep relationships FROM date entities (rare but valid)
+      if (targetEntity.type == EntityTypes.date) continue;
+
+      outgoingRels.putIfAbsent(rel.sourceId, () => []).add(
+        _ResolvedRelationship(
+          type: rel.type,
+          targetName: targetEntity.name,
+          targetType: targetEntity.type,
+        ),
+      );
+    }
+
+    // --- Phase 1: Fit entities using full budget ---
     final allEntities = <GraphRAGScoredEntity>[];
     final entityTexts = <String>[];
 
-    // Add seeds
+    // Add seeds (skip DATE entities from context — they are structural)
     for (final seed in seeds) {
-      final text = _formatEntity(seed);
+      if (_contextExcludedTypes.contains(seed.entity.type)) continue;
+      final text = _formatEntity(seed,
+          outgoing: outgoingRels[seed.entity.id]);
       final tokens = _estimateTokens(text);
       if (runningTokens + tokens <= tokenBudget) {
         allEntities.add(seed);
@@ -513,9 +888,11 @@ Answer:''';
       }
     }
 
-    // Add hops (already sorted desc by score)
+    // Add hops (already sorted desc by score, skip DATE entities)
     for (final hop in hops) {
-      final text = _formatEntity(hop);
+      if (_contextExcludedTypes.contains(hop.entity.type)) continue;
+      final text = _formatEntity(hop,
+          outgoing: outgoingRels[hop.entity.id]);
       final tokens = _estimateTokens(text);
       if (runningTokens + tokens <= tokenBudget) {
         allEntities.add(hop);
@@ -552,7 +929,8 @@ Answer:''';
     if (allEntities.isNotEmpty) {
       buf.write(entityHeader);
       for (final scored in allEntities) {
-        buf.write(_formatEntity(scored));
+        buf.write(_formatEntity(scored,
+            outgoing: outgoingRels[scored.entity.id]));
       }
     }
     if (survivingCommunities.isNotEmpty) {
@@ -576,6 +954,34 @@ Answer:''';
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // LLM Prompt Construction
+  // ---------------------------------------------------------------------------
+
+  /// System prompt for the personal assistant answering from graph context.
+  static const _systemPrompt = '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
+
+The context includes entities (people, events, photos, notes, calls, locations, documents) and the relationships connecting them (shown as "→ relationship → target").
+
+Instructions:
+- Answer based ONLY on the context provided. Do not use external knowledge.
+- Be specific: use names, dates, and details from the entities.
+- Use the relationships to connect information (e.g., who attended an event, where a photo was taken, when a call happened).
+- If the context does not contain enough information to answer, say so honestly rather than guessing.
+- Be conversational and concise.''';
+
+  /// Build the full prompt for answer generation.
+  String _buildAnswerPrompt(String query, String contextString) {
+    return '''$_systemPrompt
+
+Context:
+$contextString
+
+User question: $query
+
+Answer:''';
+  }
+
   /// Generate a focused answer from local retrieval results.
   Future<String> _generateLocalAnswer(
     String query,
@@ -589,18 +995,7 @@ Answer:''';
       return "I couldn't find relevant information to answer your question.";
     }
 
-    final shortQuery =
-        query.length > 100 ? '${query.substring(0, 100)}...' : query;
-
-    // Use the token-budget-aware context string built during retrieval
-    final prompt =
-        '''Answer ONLY using this data. Do NOT add external information.
-
-${result.contextString}
-
-Q: $shortQuery
-
-Answer using ONLY the data above. If insufficient, say "No relevant data found.":''';
+    final prompt = _buildAnswerPrompt(query, result.contextString);
 
     try {
       final response = await llmCallback!(prompt);
@@ -609,6 +1004,19 @@ Answer using ONLY the data above. If insufficient, say "No relevant data found."
       return 'Unable to generate an answer: $e';
     }
   }
+}
+
+/// Resolved relationship with target entity name for context rendering.
+class _ResolvedRelationship {
+  final String type;
+  final String targetName;
+  final String targetType;
+
+  _ResolvedRelationship({
+    required this.type,
+    required this.targetName,
+    required this.targetType,
+  });
 }
 
 /// Internal result of token-budget trimming

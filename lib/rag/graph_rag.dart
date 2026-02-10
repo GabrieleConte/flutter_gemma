@@ -1568,12 +1568,21 @@ extension GraphRAGQueryExtension on GraphRAG {
 extension GraphRAGIntegration on GraphRAG {
   /// Get augmented prompt with graph context
   Future<String> augmentPrompt(String userQuery, {
-    String promptTemplate = '''Based on the following context from your personal knowledge graph, answer the user's question.
+    String promptTemplate = '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
+
+The context includes entities (people, events, photos, notes, calls, locations, documents) and the relationships connecting them (shown as "→ relationship → target").
+
+Instructions:
+- Answer based ONLY on the context provided. Do not use external knowledge.
+- Be specific: use names, dates, and details from the entities.
+- Use the relationships to connect information (e.g., who attended an event, where a photo was taken, when a call happened).
+- If the context does not contain enough information to answer, say so honestly rather than guessing.
+- Be conversational and concise.
 
 Context:
 {context}
 
-User Question: {query}
+User question: {query}
 
 Answer:''',
   }) async {
