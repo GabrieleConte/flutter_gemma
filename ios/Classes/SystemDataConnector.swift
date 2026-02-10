@@ -269,7 +269,8 @@ class SystemDataConnector {
                 startDate: Int64(event.startDate.timeIntervalSince1970),
                 endDate: Int64(event.endDate.timeIntervalSince1970),
                 attendees: attendees,
-                lastModified: Int64(lastModified)
+                lastModified: Int64(lastModified),
+                calendarName: event.calendar.title
             )
         }
     }

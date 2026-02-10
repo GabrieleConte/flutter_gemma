@@ -419,6 +419,7 @@ class CalendarEventResult {
     required this.endDate,
     required this.attendees,
     required this.lastModified,
+    this.calendarName,
   });
 
   String id;
@@ -437,6 +438,8 @@ class CalendarEventResult {
 
   int lastModified;
 
+  String? calendarName;
+
   Object encode() {
     return <Object?>[
       id,
@@ -447,6 +450,7 @@ class CalendarEventResult {
       endDate,
       attendees,
       lastModified,
+      calendarName,
     ];
   }
 
@@ -461,6 +465,7 @@ class CalendarEventResult {
       endDate: result[5]! as int,
       attendees: (result[6] as List<Object?>?)!.cast<String?>(),
       lastModified: result[7]! as int,
+      calendarName: result[8] as String?,
     );
   }
 }

@@ -119,6 +119,12 @@ class IndexingConfig {
   /// When enabled, photos will be analyzed using the vision model to
   /// generate descriptive captions for richer entity extraction
   final bool enableImageCaptioning;
+  
+  /// When non-null, only calendar events whose calendar display name is in
+  /// this set will be indexed. Matching is case-insensitive.
+  /// For example: `{'My calendar'}` to index only the user's primary calendar.
+  /// When null, events from all calendars are indexed.
+  final Set<String>? calendarNameFilter;
 
   IndexingConfig({
     this.batchSize = 10,
@@ -131,6 +137,7 @@ class IndexingConfig {
     this.enableLinkPrediction = true,
     this.linkPredictionConfig,
     this.enableImageCaptioning = false,
+    this.calendarNameFilter,
   });
 }
 
@@ -1241,6 +1248,7 @@ class BackgroundIndexingService {
         'attendees': item.attendees,
         'recurrenceRule': item.recurrenceRule,
         'isRecurring': item.isRecurring,
+        'calendarName': item.calendarName,
         'sourceApp': 'system_calendar',
       };
     }

@@ -199,7 +199,10 @@ class GraphRAG {
       ContactsConnector(_platform),
     );
     _connectorManager.registerConnector(
-      CalendarConnector(_platform),
+      CalendarConnector(
+        _platform,
+        calendarNameFilter: _config.indexingConfig.calendarNameFilter,
+      ),
     );
     _connectorManager.registerConnector(
       PhotosConnector(_platform),

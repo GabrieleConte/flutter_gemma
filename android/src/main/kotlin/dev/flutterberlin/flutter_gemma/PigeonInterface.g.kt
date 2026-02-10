@@ -390,7 +390,8 @@ data class CalendarEventResult (
   val startDate: Long,
   val endDate: Long,
   val attendees: List<String?>,
-  val lastModified: Long
+  val lastModified: Long,
+  val calendarName: String? = null
 )
  {
   companion object {
@@ -403,7 +404,8 @@ data class CalendarEventResult (
       val endDate = pigeonVar_list[5] as Long
       val attendees = pigeonVar_list[6] as List<String?>
       val lastModified = pigeonVar_list[7] as Long
-      return CalendarEventResult(id, title, location, notes, startDate, endDate, attendees, lastModified)
+      val calendarName = pigeonVar_list[8] as String?
+      return CalendarEventResult(id, title, location, notes, startDate, endDate, attendees, lastModified, calendarName)
     }
   }
   fun toList(): List<Any?> {
@@ -416,6 +418,7 @@ data class CalendarEventResult (
       endDate,
       attendees,
       lastModified,
+      calendarName,
     )
   }
 }

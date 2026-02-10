@@ -497,6 +497,7 @@ class CalendarEventResult {
   final int endDate;
   final List<String?> attendees;
   final int lastModified;
+  final String? calendarName;
 
   CalendarEventResult({
     required this.id,
@@ -507,6 +508,7 @@ class CalendarEventResult {
     required this.endDate,
     required this.attendees,
     required this.lastModified,
+    this.calendarName,
   });
 }
 

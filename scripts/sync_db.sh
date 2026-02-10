@@ -96,19 +96,20 @@ case "$ACTION" in
 
         echo "⬆️  Pushing $LOCAL_DB → $REMOTE_DB_REL"
 
-        # Push to /sdcard first, then use run-as + cp
-        adb_cmd push "$LOCAL_DB" "$TMP_DB" > /dev/null
+        # Push to /data/local/tmp first, then pipe via cat into run-as
+        # (cp inside run-as fails on newer Android due to SELinux restrictions)
+        adb_cmd push "$LOCAL_DB" /data/local/tmp/graph_rag_push.db > /dev/null
 
-        # run-as can read from /sdcard even though it can't write there
-        adb_cmd shell "cp $TMP_DB /data/local/tmp/graph_rag_push.db && run-as $APP_ID sh -c 'cp /data/local/tmp/graph_rag_push.db $REMOTE_DB_REL'" 2>/dev/null \
-            || adb_cmd shell "run-as $APP_ID sh -c 'dd if=$TMP_DB of=$REMOTE_DB_REL 2>/dev/null'" 2>/dev/null \
+        adb_cmd shell "run-as $APP_ID sh -c 'mkdir -p \$(dirname $REMOTE_DB_REL)'" 2>/dev/null || true
+
+        adb_cmd shell "cat /data/local/tmp/graph_rag_push.db | run-as $APP_ID sh -c 'cat > $REMOTE_DB_REL'" 2>/dev/null \
             || {
                 echo "ERROR: Could not push DB into app storage."
-                adb_cmd shell "rm -f $TMP_DB /data/local/tmp/graph_rag_push.db" 2>/dev/null || true
+                adb_cmd shell "rm -f /data/local/tmp/graph_rag_push.db" 2>/dev/null || true
                 exit 1
             }
 
-        adb_cmd shell "rm -f $TMP_DB /data/local/tmp/graph_rag_push.db" 2>/dev/null || true
+        adb_cmd shell "rm -f /data/local/tmp/graph_rag_push.db" 2>/dev/null || true
 
         SIZE=$(wc -c < "$LOCAL_DB" | tr -d ' ')
         echo "✅ Pushed successfully ($(( SIZE / 1024 )) KB)"

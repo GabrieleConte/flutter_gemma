@@ -466,7 +466,8 @@ class SystemDataConnector(
             CalendarContract.Events.DESCRIPTION,
             CalendarContract.Events.DTSTART,
             CalendarContract.Events.DTEND,
-            CalendarContract.Events.LAST_DATE
+            CalendarContract.Events.LAST_DATE,
+            CalendarContract.Events.CALENDAR_DISPLAY_NAME
         )
 
         val selection = "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?"
@@ -488,6 +489,7 @@ class SystemDataConnector(
             val startIndex = it.getColumnIndex(CalendarContract.Events.DTSTART)
             val endIndex = it.getColumnIndex(CalendarContract.Events.DTEND)
             val lastDateIndex = it.getColumnIndex(CalendarContract.Events.LAST_DATE)
+            val calendarNameIndex = it.getColumnIndex(CalendarContract.Events.CALENDAR_DISPLAY_NAME)
 
             while (it.moveToNext() && count < maxCount) {
                 val eventId = it.getString(idIndex)
@@ -499,6 +501,7 @@ class SystemDataConnector(
                     if (end == 0L) eventStart + 3600000 else end  // Default 1 hour duration
                 }
                 val lastDate = it.getLong(lastDateIndex)
+                val calendarName = it.getString(calendarNameIndex)
 
                 // Get attendees for this event
                 val attendees = getEventAttendees(contentResolver, eventId)
@@ -511,7 +514,8 @@ class SystemDataConnector(
                     startDate = eventStart,
                     endDate = eventEnd,
                     attendees = attendees,
-                    lastModified = if (lastDate > 0) lastDate else eventStart
+                    lastModified = if (lastDate > 0) lastDate else eventStart,
+                    calendarName = calendarName
                 ))
 
                 count++

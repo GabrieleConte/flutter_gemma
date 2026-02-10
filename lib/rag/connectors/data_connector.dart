@@ -84,6 +84,7 @@ class CalendarEvent {
   final DateTime lastModified;
   final String? recurrenceRule;
   final bool isRecurring;
+  final String? calendarName;
 
   CalendarEvent({
     required this.id,
@@ -96,6 +97,7 @@ class CalendarEvent {
     required this.lastModified,
     this.recurrenceRule,
     this.isRecurring = false,
+    this.calendarName,
   });
 
   Duration get duration => endDate.difference(startDate);
@@ -114,6 +116,7 @@ class CalendarEvent {
       // Recurrence fields will be populated once Pigeon interface is extended
       recurrenceRule: null,
       isRecurring: false,
+      calendarName: result.calendarName,
     );
   }
 
@@ -517,11 +520,16 @@ class CalendarConnector implements DataConnector {
   final DateTime? startDate;
   final DateTime? endDate;
 
+  /// When non-null, only index events whose calendar display name is in this set.
+  /// Matching is case-insensitive. For example: `{'My calendar'}`.
+  final Set<String>? calendarNameFilter;
+
   CalendarConnector(
     this._platform, {
     ConnectorConfig? config,
     this.startDate,
     this.endDate,
+    this.calendarNameFilter,
   }) : config = config ?? ConnectorConfig();
 
   @override
@@ -557,9 +565,24 @@ class CalendarConnector implements DataConnector {
     );
     
     _lastSyncTime = DateTime.now();
-    config.onProgress?.call(1.0, 'Fetched ${results.length} calendar events');
     
-    return results.map((r) => CalendarEvent.fromCalendarEventResult(r)).toList();
+    var events = results.map((r) => CalendarEvent.fromCalendarEventResult(r)).toList();
+    
+    // Filter by calendar name if a filter is configured
+    if (calendarNameFilter != null && calendarNameFilter!.isNotEmpty) {
+      final filterLower = calendarNameFilter!.map((n) => n.toLowerCase()).toSet();
+      final beforeCount = events.length;
+      events = events.where((e) {
+        if (e.calendarName == null) return true; // keep events with unknown calendar
+        return filterLower.contains(e.calendarName!.toLowerCase());
+      }).toList();
+      config.onProgress?.call(1.0, 
+        'Fetched $beforeCount calendar events, kept ${events.length} after calendar filter');
+    } else {
+      config.onProgress?.call(1.0, 'Fetched ${events.length} calendar events');
+    }
+    
+    return events;
   }
 
   @override

@@ -426,6 +426,7 @@ struct CalendarEventResult {
   var endDate: Int64
   var attendees: [String?]
   var lastModified: Int64
+  var calendarName: String? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -438,6 +439,7 @@ struct CalendarEventResult {
     let endDate = pigeonVar_list[5] as! Int64
     let attendees = pigeonVar_list[6] as! [String?]
     let lastModified = pigeonVar_list[7] as! Int64
+    let calendarName: String? = nilOrValue(pigeonVar_list[8])
 
     return CalendarEventResult(
       id: id,
@@ -447,7 +449,8 @@ struct CalendarEventResult {
       startDate: startDate,
       endDate: endDate,
       attendees: attendees,
-      lastModified: lastModified
+      lastModified: lastModified,
+      calendarName: calendarName
     )
   }
   func toList() -> [Any?] {
@@ -460,6 +463,7 @@ struct CalendarEventResult {
       endDate,
       attendees,
       lastModified,
+      calendarName,
     ]
   }
 }

@@ -145,6 +145,7 @@ class GraphRAGService {
         ),
         indexingConfig: IndexingConfig(
           enableImageCaptioning: enableImageCaptioning && visionChat != null,
+          calendarNameFilter: {'EpisTwin'},
         ),
         extendedConfig: GraphRAGExtendedConfig(
           enableFunctionCalling: extractionCallback != null,
