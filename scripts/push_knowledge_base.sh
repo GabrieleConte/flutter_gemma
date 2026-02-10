@@ -76,16 +76,178 @@ echo "📁 Creating directories on device..."
 adb_cmd shell mkdir -p "$DEST_IMAGES"
 adb_cmd shell mkdir -p "$DEST_DOCS"
 
+# ---------- Clean up previous data ----------
+echo ""
+echo "🧹 Cleaning up previous EpisTwin data on device..."
+
+# 1. Remove old images & documents
+adb_cmd shell "rm -rf '$DEST_IMAGES'/*" 2>/dev/null || true
+adb_cmd shell "rm -rf '$DEST_DOCS'/*" 2>/dev/null || true
+echo "   ✅ Old files removed from device."
+
+# 2. Delete MediaStore entries for the old files so stale records don't linger
+adb_cmd shell "content delete --uri content://media/external/images/media \
+    --where \"_data LIKE '$DEST_IMAGES/%'\"" > /dev/null 2>&1 || true
+adb_cmd shell "content delete --uri content://media/external/file \
+    --where \"_data LIKE '$DEST_DOCS/%'\"" > /dev/null 2>&1 || true
+echo "   ✅ Old MediaStore entries removed."
+
+# 3. Delete all events from the EpisTwin local calendar (if it exists)
+OLD_CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calendars --projection _id --where \"account_type='LOCAL' AND account_name='EpisTwin'\" 2>/dev/null" \
+    | grep -oE '_id=[0-9]+' | head -1 | cut -d= -f2 || true)
+if [ -n "$OLD_CAL_ID" ]; then
+    adb_cmd shell "content delete --uri content://com.android.calendar/events \
+        --where \"calendar_id=$OLD_CAL_ID\"" > /dev/null 2>&1 || true
+    echo "   ✅ Old calendar events deleted (calendar $OLD_CAL_ID)."
+fi
+
+# 4. Delete all EpisTwin contacts
+OLD_RAW_IDS=$(adb_cmd shell "content query --uri content://com.android.contacts/raw_contacts --projection _id --where \"account_name='EpisTwin' AND account_type='LOCAL'\"" \
+    | grep -oE '_id=[0-9]+' | cut -d= -f2)
+if [ -n "$OLD_RAW_IDS" ]; then
+    for rid in $OLD_RAW_IDS; do
+        adb_cmd shell "content delete --uri content://com.android.contacts/raw_contacts/$rid" > /dev/null 2>&1 || true
+    done
+    echo "   ✅ Old contacts deleted."
+fi
+
+# 5. Delete EpisTwin call log entries (by matching known contact numbers)
+#    We read the phone numbers from the knowledge base so we know what to clean
+for f in "$KB_JSON"/contact_*.txt; do
+    [ -f "$f" ] || continue
+    # Quick extraction — json_field is not defined yet at this point in some
+    # code paths, but we moved it earlier, so it is available.
+    OLD_PHONE=$(json_field "$f" "metadata.telephone_number" 2>/dev/null || true)
+    if [ -n "$OLD_PHONE" ]; then
+        adb_cmd shell "content delete --uri content://call_log/calls \
+            --where \"number='$OLD_PHONE'\"" > /dev/null 2>&1 || true
+    fi
+done
+echo "   ✅ Old call log entries deleted."
+
+echo "   🧹 Cleanup complete."
+
+# We need python3 for reliable JSON parsing
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 is required for JSON parsing. Install it and re-run."
+    exit 1
+fi
+
+# Helper: extract a JSON field using python3 (handles nested .metadata.field)
+json_field() {
+    local file="$1" field="$2"
+    python3 - "$file" "$field" <<'PYEOF'
+import json, sys, re
+with open(sys.argv[1]) as f:
+    txt = f.read()
+
+# Replace Unicode smart quotes with standard ASCII quotes
+txt = txt.replace('\u201c', '"').replace('\u201d', '"')
+txt = txt.replace('\u2018', "'").replace('\u2019', "'")
+
+# Fix unquoted values: lines like   "location": La Rambla, 91, ...
+# Process line-by-line to fix values that are not properly quoted
+lines = txt.split('\n')
+fixed = []
+for line in lines:
+    # Match key-value lines where value isn't quoted/numeric/bool/null/brace
+    m = re.match(r'^(\s*"[^"]+"\s*:\s*)([^"{}\[\]0-9tfn\s][^\n]*)$', line)
+    if m:
+        prefix = m.group(1)
+        raw_val = m.group(2).rstrip()
+        # Strip trailing comma
+        has_comma = raw_val.endswith(',')
+        if has_comma:
+            raw_val = raw_val[:-1].rstrip()
+        # Escape any embedded double quotes inside the value
+        raw_val = raw_val.replace('"', '\\"')
+        line = prefix + '"' + raw_val + '"' + (',' if has_comma else '')
+    fixed.append(line)
+txt = '\n'.join(fixed)
+
+# Fix missing closing braces (some files are malformed)
+open_braces = txt.count('{')
+close_braces = txt.count('}')
+txt += '}' * (open_braces - close_braces)
+
+d = json.loads(txt)
+keys = sys.argv[2].split('.')
+v = d
+for k in keys:
+    v = v[k]
+print(v)
+PYEOF
+}
+
+# Helper: find the photo JSON metadata file matching an image filename.
+# e.g.  photo_20250615.JPG  →  photo_20250615.txt
+#        photo_20250615(2).JPG → photo_20250615(2).txt
+#        photo_photo_20250615(2).JPG → photo_20250615(2).txt  (strip extra prefix)
+find_photo_json() {
+    local img_basename="$1"
+    # Strip extension
+    local stem="${img_basename%.*}"
+    # Strip a spurious leading "photo_" duplicate (photo_photo_… → photo_…)
+    stem="${stem/#photo_photo_/photo_}"
+    local candidate="$KB_JSON/${stem}.txt"
+    if [ -f "$candidate" ]; then
+        echo "$candidate"
+    fi
+}
+
+# Helper: convert "dd-Mon-yyyy HH:MM" → "YYYYMMDDhhmm.ss" for touch -t
+to_touch_ts() {
+    local date_str="$1" time_str="$2"
+    python3 -c "
+from datetime import datetime
+dt = datetime.strptime('$date_str $time_str', '%d-%b-%Y %H:%M')
+print(dt.strftime('%Y%m%d%H%M.%S'))
+"
+}
+
+# Helper: convert "dd-Mon-yyyy HH:MM" → epoch seconds
+to_epoch_sec() {
+    local date_str="$1" time_str="$2"
+    python3 -c "
+from datetime import datetime
+dt = datetime.strptime('$date_str $time_str', '%d-%b-%Y %H:%M')
+print(int(dt.timestamp()))
+"
+}
+
 # ---------- Push images ----------
 shopt -s nullglob
 echo ""
 echo "🖼️  Pushing images to $DEST_IMAGES ..."
 IMAGE_COUNT=0
+# Collect image basenames and their correct epoch timestamps for MediaStore update
+declare -a IMAGE_BASENAMES=()
+declare -a IMAGE_EPOCHS=()
+
 for img in "$KB_IMAGES"/*.JPG "$KB_IMAGES"/*.jpeg "$KB_IMAGES"/*.jpg "$KB_IMAGES"/*.png; do
     [ -f "$img" ] || continue
     BASENAME="$(basename "$img")"
     echo "   -> $BASENAME"
     adb_cmd push "$img" "$DEST_IMAGES/$BASENAME" > /dev/null
+
+    # Look up the creation date from the corresponding JSON metadata file
+    JSON_FILE=$(find_photo_json "$BASENAME")
+    if [ -n "$JSON_FILE" ]; then
+        CREATION_DATE=$(json_field "$JSON_FILE" "metadata.creation_date")
+        CREATION_TIME=$(json_field "$JSON_FILE" "metadata.creation_time")
+        TOUCH_TS=$(to_touch_ts "$CREATION_DATE" "$CREATION_TIME")
+        EPOCH_SEC=$(to_epoch_sec "$CREATION_DATE" "$CREATION_TIME")
+
+        # Set the file modification time on the device so MediaScanner picks it up
+        adb_cmd shell "touch -t $TOUCH_TS '$DEST_IMAGES/$BASENAME'" 2>/dev/null || true
+
+        IMAGE_BASENAMES+=("$BASENAME")
+        IMAGE_EPOCHS+=("$EPOCH_SEC")
+        echo "      📅 date set to $CREATION_DATE $CREATION_TIME"
+    else
+        echo "      ⚠️  no metadata file found, keeping push timestamp"
+    fi
+
     IMAGE_COUNT=$((IMAGE_COUNT + 1))
 done
 echo "   ✅ $IMAGE_COUNT image(s) pushed."
@@ -144,35 +306,35 @@ adb_cmd shell "content call --uri content://media/none/media_scanner --method sc
 
 echo "   ✅ Media scan triggered."
 
+# ---------- Fix photo dates in MediaStore ----------
+echo ""
+echo "📅 Updating photo dates in MediaStore..."
+# Wait a moment for the media scanner to finish indexing
+sleep 2
+
+FIXED_COUNT=0
+for i in "${!IMAGE_BASENAMES[@]}"; do
+    BNAME="${IMAGE_BASENAMES[$i]}"
+    EPOCH="${IMAGE_EPOCHS[$i]}"
+
+    # Escape parentheses in display name for the SQL where clause
+    BNAME_ESC="${BNAME//\(/\\(}"
+    BNAME_ESC="${BNAME_ESC//\)/\\)}"
+
+    # Update date_added and date_modified in MediaStore (values in seconds)
+    adb_cmd shell "content update --uri content://media/external/images/media \
+        --bind date_added:i:$EPOCH \
+        --bind date_modified:i:$EPOCH \
+        --where \"_display_name='$BNAME_ESC'\"" > /dev/null 2>&1 || true
+
+    echo "   -> $BNAME → epoch $EPOCH"
+    FIXED_COUNT=$((FIXED_COUNT + 1))
+done
+echo "   ✅ $FIXED_COUNT photo date(s) fixed in MediaStore."
+
 # ==========================================================================
 #  PART 2 — Insert structured data via Android content providers
 # ==========================================================================
-
-# We need python3 for reliable JSON parsing
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 is required for JSON parsing. Install it and re-run."
-    exit 1
-fi
-
-# Helper: extract a JSON field using python3 (handles nested .metadata.field)
-json_field() {
-    local file="$1" field="$2"
-    python3 -c "
-import json, sys
-with open(sys.argv[1]) as f:
-    txt = f.read()
-    # fix missing closing braces (some files are malformed)
-    open_braces = txt.count('{')
-    close_braces = txt.count('}')
-    txt += '}' * (open_braces - close_braces)
-    d = json.loads(txt)
-keys = sys.argv[2].split('.')
-v = d
-for k in keys:
-    v = v[k]
-print(v)
-" "$file" "$field"
-}
 
 # Helper: convert "dd-Mon-yyyy HH:MM" to epoch millis
 # Input: date="23-Jul-2025"  time="09:00"
@@ -228,7 +390,7 @@ CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calen
 
 if [ -z "$CAL_ID" ]; then
     echo "   Creating local calendar..."
-    adb_cmd shell "content insert --uri content://com.android.calendar/calendars \
+    adb_cmd shell "content insert --uri 'content://com.android.calendar/calendars?caller_is_syncadapter=true&account_name=EpisTwin&account_type=LOCAL' \
         --bind account_name:s:EpisTwin \
         --bind account_type:s:LOCAL \
         --bind name:s:EpisTwin \
@@ -259,10 +421,13 @@ for f in "$KB_JSON"/event_*.txt; do
     START_MS=$(to_epoch_ms "$DATE" "$START_TIME")
     END_MS=$(to_epoch_ms "$DATE" "$END_TIME")
 
+    # Escape double quotes in label for adb shell
+    LABEL_ESC=$(printf '%s' "$LABEL" | sed 's/"/\\"/g')
+
     echo "   -> $LABEL ($DATE $START_TIME-$END_TIME)"
     adb_cmd shell "content insert --uri content://com.android.calendar/events \
         --bind calendar_id:i:$CAL_ID \
-        --bind title:s:'$LABEL' \
+        --bind title:s:\"$LABEL_ESC\" \
         --bind dtstart:l:$START_MS \
         --bind dtend:l:$END_MS \
         --bind eventTimezone:s:Europe/Rome \
@@ -319,10 +484,13 @@ for f in "$KB_JSON"/recurrentEvent_*.txt; do
         RRULE="FREQ=$FREQ_UPPER"
     fi
 
+    # Escape double quotes in label for adb shell
+    LABEL_ESC=$(printf '%s' "$LABEL" | sed 's/"/\\"/g')
+
     echo "   -> $LABEL ($RRULE, $START_TIME-$END_TIME)"
     adb_cmd shell "content insert --uri content://com.android.calendar/events \
         --bind calendar_id:i:$CAL_ID \
-        --bind title:s:'$LABEL' \
+        --bind title:s:\"$LABEL_ESC\" \
         --bind dtstart:l:$START_MS \
         --bind duration:s:$DURATION_RFC \
         --bind rrule:s:'$RRULE' \
@@ -337,9 +505,9 @@ echo ""
 echo "👤 Inserting contacts..."
 CONTACT_COUNT=0
 
-# Build a lookup map: contact_id -> phone number
-declare -A CONTACT_PHONES
-declare -A CONTACT_NAMES
+# Build a lookup map: contact_id -> phone number / name (using temp file for bash 3 compat)
+CONTACT_MAP_FILE=$(mktemp)
+trap "rm -f $CONTACT_MAP_FILE" EXIT
 
 for f in "$KB_JSON"/contact_*.txt; do
     [ -f "$f" ] || continue
@@ -347,8 +515,8 @@ for f in "$KB_JSON"/contact_*.txt; do
     NAME=$(json_field "$f" "metadata.name")
     PHONE=$(json_field "$f" "metadata.telephone_number")
 
-    CONTACT_PHONES["$CONTACT_ID"]="$PHONE"
-    CONTACT_NAMES["$CONTACT_ID"]="$NAME"
+    # Store in lookup file: CONTACT_ID|PHONE|NAME
+    echo "${CONTACT_ID}|${PHONE}|${NAME}" >> "$CONTACT_MAP_FILE"
 
     echo "   -> $NAME ($PHONE)"
 
@@ -362,11 +530,14 @@ for f in "$KB_JSON"/contact_*.txt; do
         --projection _id --sort '_id DESC LIMIT 1'" \
         | grep -oE '_id=[0-9]+' | head -1 | cut -d= -f2)
 
+    # Escape double quotes in name for adb shell
+    NAME_ESC=$(printf '%s' "$NAME" | sed 's/"/\\"/g')
+
     # Step 2: Insert display name
     adb_cmd shell "content insert --uri content://com.android.contacts/data \
         --bind raw_contact_id:i:$RAW_ID \
         --bind mimetype:s:vnd.android.cursor.item/name \
-        --bind data1:s:'$NAME'" > /dev/null
+        --bind data1:s:\"$NAME_ESC\"" > /dev/null
 
     # Step 3: Insert phone number
     adb_cmd shell "content insert --uri content://com.android.contacts/data \
@@ -404,17 +575,24 @@ for f in "$KB_JSON"/phoneCall_*.txt; do
         CALL_TYPE=3
     fi
 
-    # Resolve contact phone number
-    PHONE="${CONTACT_PHONES[$WITH_CONTACT]:-unknown}"
-    CNAME="${CONTACT_NAMES[$WITH_CONTACT]:-$WITH_CONTACT}"
+    # Resolve contact phone number and name from lookup file
+    CONTACT_LINE=$(grep "^${WITH_CONTACT}|" "$CONTACT_MAP_FILE" 2>/dev/null | head -1)
+    if [ -n "$CONTACT_LINE" ]; then
+        PHONE=$(echo "$CONTACT_LINE" | cut -d'|' -f2)
+        CNAME=$(echo "$CONTACT_LINE" | cut -d'|' -f3)
+    else
+        PHONE="unknown"
+        CNAME="$WITH_CONTACT"
+    fi
 
     echo "   -> $DIRECTION call with $CNAME ($DATE $START_TIME, ${DURATION_SEC}s)"
+    CNAME_ESC=$(printf '%s' "$CNAME" | sed 's/"/\\"/g')
     adb_cmd shell "content insert --uri content://call_log/calls \
         --bind number:s:'$PHONE' \
         --bind date:l:$START_MS \
         --bind duration:l:$DURATION_SEC \
         --bind type:i:$CALL_TYPE \
-        --bind name:s:'$CNAME' \
+        --bind name:s:\"$CNAME_ESC\" \
         --bind new:i:0" > /dev/null
     CALL_COUNT=$((CALL_COUNT + 1))
 done
