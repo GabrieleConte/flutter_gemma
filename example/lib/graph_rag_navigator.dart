@@ -43,7 +43,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   /// Get available inference models — restricted to gemma3n_2B_litertlm
   /// which supports both text generation and vision (image captioning).
   List<Model> get _availableInferenceModels {
-    return [Model.deepseek, Model.gemma3n_2B_litertlm, Model.gemma3_1B];
+    return [Model.gemma3n_2B_litertlm, Model.gemma3_1B];
   }
 
   /// Get available embedding models
@@ -190,7 +190,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       );
       // Create main chat for text generation
       final chat = await model.createChat(
-        temperature: 0.7,
+        temperature: _selectedInferenceModel.temperature,
         randomSeed: 1,
         topK: _selectedInferenceModel.topK,
         modelType: _selectedInferenceModel.modelType,

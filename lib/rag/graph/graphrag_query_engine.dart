@@ -29,14 +29,7 @@ class GraphRAGQueryConfig {
 
   /// Default hub entity types that are excluded from retrieval.
   static const Set<String> defaultHubEntityTypes = {
-    EntityTypes.date,
-    EntityTypes.email,
-    EntityTypes.phone,
-    EntityTypes.topic,
-    EntityTypes.noteChunk,
-    EntityTypes.alarm,
-    EntityTypes.phoneCall,
-    EntityTypes.photo,
+    EntityTypes.hub
   };
 
   GraphRAGQueryConfig({

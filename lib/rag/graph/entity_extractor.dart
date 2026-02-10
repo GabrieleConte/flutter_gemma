@@ -145,11 +145,12 @@ class EntityTypes {
   static const String phoneCall = 'PHONE_CALL';
   static const String alarm = 'ALARM';
   static const String photo = 'PHOTO';
+  static const String hub = 'HUB';
 
   static const List<String> all = [
     person, organization, location, event, date,
     project, document, email, phone, skill, topic,
-    note, noteChunk, phoneCall, alarm, photo,
+    note, noteChunk, phoneCall, alarm, photo, hub
   ];
 }
 
