@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../utils/math_utils.dart';
 import 'entity_extractor.dart';
 import 'graph_repository.dart';
 
@@ -20,6 +21,11 @@ class GraphRAGQueryConfig {
   /// Fraction of maxContextTokens to use as budget (0-1)
   final double contextBudgetRatio;
 
+  /// Community context is dropped when entity tokens alone exceed this
+  /// fraction of the total token budget (0-1). Prevents community context
+  /// from crowding out entity information.
+  final double communityDropThreshold;
+
   /// Include top community context in results
   final bool includeCommunityContext;
 
@@ -28,9 +34,7 @@ class GraphRAGQueryConfig {
   final Set<String> hubEntityTypes;
 
   /// Default hub entity types that are excluded from retrieval.
-  static const Set<String> defaultHubEntityTypes = {
-    EntityTypes.hub
-  };
+  static const Set<String> defaultHubEntityTypes = {EntityTypes.hub};
 
   GraphRAGQueryConfig({
     this.topK = 4,
@@ -38,6 +42,7 @@ class GraphRAGQueryConfig {
     this.similarityThreshold = 0.5,
     this.maxContextTokens = 4096,
     this.contextBudgetRatio = 0.9,
+    this.communityDropThreshold = 0.7,
     this.includeCommunityContext = true,
     Set<String>? hubEntityTypes,
   }) : hubEntityTypes = hubEntityTypes ?? defaultHubEntityTypes;
@@ -172,6 +177,7 @@ class GraphRAGQueryEngine {
       similarityThreshold: config.similarityThreshold,
       maxContextTokens: config.maxContextTokens,
       contextBudgetRatio: config.contextBudgetRatio,
+      communityDropThreshold: config.communityDropThreshold,
       includeCommunityContext: config.includeCommunityContext,
       hubEntityTypes: config.hubEntityTypes,
     );
@@ -184,7 +190,8 @@ class GraphRAGQueryEngine {
     int? topK,
     int? maxHops,
   }) async {
-    final result = await this.query(query, entityTypes: entityTypes, topK: topK, maxHops: maxHops);
+    final result = await this
+        .query(query, entityTypes: entityTypes, topK: topK, maxHops: maxHops);
 
     if (llmCallback == null) return result;
 
@@ -200,7 +207,8 @@ class GraphRAGQueryEngine {
     int? maxHops,
     required Stream<String> Function(String prompt) llmStreamCallback,
   }) async* {
-    final result = await this.query(query, entityTypes: entityTypes, topK: topK, maxHops: maxHops);
+    final result = await this
+        .query(query, entityTypes: entityTypes, topK: topK, maxHops: maxHops);
 
     if (result.entities.isEmpty) {
       yield "I couldn't find relevant information to answer your question.";
@@ -208,7 +216,8 @@ class GraphRAGQueryEngine {
     }
 
     // Use the token-budget-aware context string built during retrieval
-    final prompt = '''Answer ONLY using the information below. Do NOT add external knowledge.
+    final prompt =
+        '''Answer ONLY using the information below. Do NOT add external knowledge.
 
 ${result.contextString}
 
@@ -272,7 +281,9 @@ Answer:''';
     }
 
     // --- Step 2: Graph traversal from each seed entity (up to maxHops) ---
-    final hopEntities = <String, GraphRAGScoredEntity>{};
+    // Collect all unique neighbor IDs first, then batch-fetch embeddings.
+    final neighborIdSet = <String>{};
+    final neighborEntities = <String, GraphEntity>{};
 
     for (final seed in seedEntities.values) {
       final neighbors = await repository.getEntityNeighbors(
@@ -280,21 +291,36 @@ Answer:''';
         depth: effective.maxHops,
       );
       for (final neighbor in neighbors) {
-        // Skip if already a seed entity
         if (seedEntities.containsKey(neighbor.id)) continue;
-
-        // Skip hub entity types
         if (effective.hubEntityTypes.contains(neighbor.type)) continue;
+        neighborIdSet.add(neighbor.id);
+        neighborEntities[neighbor.id] = neighbor;
+      }
+    }
 
-        // Deduplicate: keep highest score
-        final existing = hopEntities[neighbor.id];
-        if (existing == null || seed.score > existing.score) {
-          hopEntities[neighbor.id] = GraphRAGScoredEntity(
-            entity: neighbor,
-            score: seed.score, // inherit parent seed score
-            source: 'graph_traversal',
-          );
+    // Batch-fetch embeddings for all hop candidates and compute similarity
+    final hopEntities = <String, GraphRAGScoredEntity>{};
+    if (neighborIdSet.isNotEmpty) {
+      final entitiesWithEmbeddings = await repository
+          .getEntitiesWithEmbeddingsByIds(neighborIdSet.toList());
+      final embeddingMap = <String, List<double>>{};
+      for (final e in entitiesWithEmbeddings) {
+        if (e.embedding != null) {
+          embeddingMap[e.id] = e.embedding!;
         }
+      }
+
+      for (final id in neighborIdSet) {
+        final embedding = embeddingMap[id];
+        if (embedding == null) continue; // skip entities without embeddings
+
+        final similarity =
+            MathUtils.cosineSimilarity(queryEmbedding, embedding);
+        hopEntities[id] = GraphRAGScoredEntity(
+          entity: neighborEntities[id]!,
+          score: similarity,
+          source: 'graph_traversal',
+        );
       }
     }
 
@@ -320,6 +346,7 @@ Answer:''';
       hops: sortedHops,
       communities: communityResults,
       tokenBudget: tokenBudget,
+      communityDropThreshold: effective.communityDropThreshold,
     );
 
     stopwatch.stop();
@@ -371,9 +398,8 @@ Answer:''';
         if (value is String && value.isEmpty) continue;
         if (value is List && value.isEmpty) continue;
         // Format lists nicely; prettify date-like strings
-        final display = value is List
-            ? value.join(', ')
-            : _formatMetadataValue(value);
+        final display =
+            value is List ? value.join(', ') : _formatMetadataValue(value);
         parts.add('$key: $display');
       }
       if (parts.isNotEmpty) {
@@ -406,8 +432,18 @@ Answer:''';
 
   /// Month names for human-readable date formatting.
   static const _months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   /// Format a metadata value, converting ISO-8601 dates to human-readable form.
@@ -434,21 +470,24 @@ Answer:''';
   ///   1. Hop nodes with lowest scores
   ///   2. Seed nodes with lowest scores
   ///   3. Truncate remaining context text
+  ///
+  /// Community context is included only when entity tokens alone stay
+  /// below [communityDropThreshold] of the total [tokenBudget].
   _BudgetResult _applyTokenBudget({
     required List<GraphRAGScoredEntity> seeds,
     required List<GraphRAGScoredEntity> hops,
     required List<GraphRAGScoredCommunity> communities,
     required int tokenBudget,
+    required double communityDropThreshold,
   }) {
     // Pre-compute header tokens
     const entityHeader = '=== Relevant Entities ===\n\n';
     const communityHeader = '\n=== Community Context ===\n\n';
     int runningTokens = _estimateTokens(entityHeader);
 
-    // Reserve space for community context if present
+    // Pre-compute community text for later
     int communityTokens = 0;
     String communityText = '';
-    final survivingCommunities = <GraphRAGScoredCommunity>[];
 
     if (communities.isNotEmpty) {
       final c = communities.first;
@@ -459,11 +498,7 @@ Answer:''';
       communityText = cText;
     }
 
-    // Budget available for entities (reserve community space)
-    int entityBudget = tokenBudget - communityTokens;
-    if (entityBudget < 0) entityBudget = 0;
-
-    // --- Phase 1: Try to fit all entities (seeds first, then hops) ---
+    // --- Phase 1: Fit entities using full budget (no community reservation) ---
     final allEntities = <GraphRAGScoredEntity>[];
     final entityTexts = <String>[];
 
@@ -471,7 +506,7 @@ Answer:''';
     for (final seed in seeds) {
       final text = _formatEntity(seed);
       final tokens = _estimateTokens(text);
-      if (runningTokens + tokens <= entityBudget) {
+      if (runningTokens + tokens <= tokenBudget) {
         allEntities.add(seed);
         entityTexts.add(text);
         runningTokens += tokens;
@@ -482,7 +517,7 @@ Answer:''';
     for (final hop in hops) {
       final text = _formatEntity(hop);
       final tokens = _estimateTokens(text);
-      if (runningTokens + tokens <= entityBudget) {
+      if (runningTokens + tokens <= tokenBudget) {
         allEntities.add(hop);
         entityTexts.add(text);
         runningTokens += tokens;
@@ -490,17 +525,20 @@ Answer:''';
       // If budget exceeded, remaining hops are silently discarded (lowest scores)
     }
 
-    // If we still exceeded budget (shouldn't happen with above logic,
-    // but as safety), trim from the end (hops first, then seeds).
-    while (runningTokens > entityBudget && allEntities.isNotEmpty) {
-      // Remove last entity (lowest priority: hops were added last)
+    // Safety: trim from the end if still over budget
+    while (runningTokens > tokenBudget && allEntities.isNotEmpty) {
       final removed = entityTexts.removeLast();
       allEntities.removeLast();
       runningTokens -= _estimateTokens(removed);
     }
 
-    // Include community if fits
+    // --- Phase 2: Conditionally include community context ---
+    // Drop community when entity tokens alone exceed the threshold
+    final survivingCommunities = <GraphRAGScoredCommunity>[];
+    final entityTokenRatio = runningTokens / tokenBudget;
+
     if (communityTokens > 0 &&
+        entityTokenRatio <= communityDropThreshold &&
         runningTokens + communityTokens <= tokenBudget) {
       survivingCommunities.addAll(communities);
       runningTokens += communityTokens;

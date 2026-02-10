@@ -1018,6 +1018,7 @@ interface PlatformService {
   fun getEntity(id: String, callback: (Result<EntityResult?>) -> Unit)
   fun getEntitiesByType(type: String, callback: (Result<List<EntityResult>>) -> Unit)
   fun getEntitiesWithEmbeddingsByType(type: String, callback: (Result<List<EntityWithEmbedding>>) -> Unit)
+  fun getEntitiesWithEmbeddingsByIds(ids: List<String>, callback: (Result<List<EntityWithEmbedding>>) -> Unit)
   fun addRelationship(id: String, sourceId: String, targetId: String, type: String, weight: Double, metadata: String?, callback: (Result<Unit>) -> Unit)
   fun deleteRelationship(id: String, callback: (Result<Unit>) -> Unit)
   fun getRelationships(entityId: String, callback: (Result<List<RelationshipResult>>) -> Unit)
@@ -1597,6 +1598,26 @@ interface PlatformService {
             val args = message as List<Any?>
             val typeArg = args[0] as String
             api.getEntitiesWithEmbeddingsByType(typeArg) { result: Result<List<EntityWithEmbedding>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesWithEmbeddingsByIds$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idsArg = args[0] as List<String>
+            api.getEntitiesWithEmbeddingsByIds(idsArg) { result: Result<List<EntityWithEmbedding>> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

@@ -179,6 +179,9 @@ abstract class PlatformService {
   List<EntityWithEmbedding> getEntitiesWithEmbeddingsByType(String type);
 
   @async
+  List<EntityWithEmbedding> getEntitiesWithEmbeddingsByIds(List<String> ids);
+
+  @async
   void addRelationship({
     required String id,
     required String sourceId,

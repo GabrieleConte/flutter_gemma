@@ -864,6 +864,72 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
         }
     }
 
+    func getEntitiesWithEmbeddingsByType(type: String, completion: @escaping (Result<[EntityWithEmbedding], Error>) -> Void) {
+        print("[PLUGIN] Getting entities with embeddings by type: \(type)")
+
+        guard let graphStore = graphStore else {
+            completion(.failure(PigeonError(
+                code: "GraphStoreNotInitialized",
+                message: "Graph store not initialized. Call initializeGraphStore first.",
+                details: nil
+            )))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let entities = try graphStore.getEntitiesWithEmbeddingsByType(type: type)
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Found \(entities.count) entities with embeddings")
+                    completion(.success(entities))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to get entities with embeddings: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "GetEntitiesWithEmbeddingsFailed",
+                        message: "Failed to get entities with embeddings: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
+    func getEntitiesWithEmbeddingsByIds(ids: [String], completion: @escaping (Result<[EntityWithEmbedding], Error>) -> Void) {
+        print("[PLUGIN] Getting entities with embeddings by IDs: \(ids.count) IDs")
+
+        guard let graphStore = graphStore else {
+            completion(.failure(PigeonError(
+                code: "GraphStoreNotInitialized",
+                message: "Graph store not initialized. Call initializeGraphStore first.",
+                details: nil
+            )))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let entities = try graphStore.getEntitiesWithEmbeddingsByIds(ids: ids)
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Found \(entities.count) entities with embeddings by IDs")
+                    completion(.success(entities))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to get entities with embeddings by IDs: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "GetEntitiesWithEmbeddingsByIdsFailed",
+                        message: "Failed to get entities with embeddings by IDs: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
     func addRelationship(
         id: String,
         sourceId: String,

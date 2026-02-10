@@ -355,6 +355,72 @@ class GraphStore {
 
     // MARK: - Relationship Methods
 
+    /// Get entities with embeddings by type
+    func getEntitiesWithEmbeddingsByType(type: String) throws -> [EntityWithEmbedding] {
+        guard let db = db else {
+            throw GraphStoreError.databaseNotInitialized
+        }
+
+        let querySQL = """
+        SELECT \(Self.columnId), \(Self.columnName), \(Self.columnType),
+               \(Self.columnDescription), \(Self.columnMetadata), \(Self.columnLastModified),
+               \(Self.columnEmbedding)
+        FROM \(Self.tableEntities)
+        WHERE \(Self.columnType) = ?;
+        """
+
+        var stmt: OpaquePointer?
+        var results: [EntityWithEmbedding] = []
+
+        if sqlite3_prepare_v2(db, querySQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (type as NSString).utf8String, -1, nil)
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let entity = extractEntityWithEmbeddingFromRow(stmt) {
+                    results.append(entity)
+                }
+            }
+        }
+
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    /// Get entities with embeddings by IDs
+    func getEntitiesWithEmbeddingsByIds(ids: [String]) throws -> [EntityWithEmbedding] {
+        guard let db = db else {
+            throw GraphStoreError.databaseNotInitialized
+        }
+        if ids.isEmpty { return [] }
+
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let querySQL = """
+        SELECT \(Self.columnId), \(Self.columnName), \(Self.columnType),
+               \(Self.columnDescription), \(Self.columnMetadata), \(Self.columnLastModified),
+               \(Self.columnEmbedding)
+        FROM \(Self.tableEntities)
+        WHERE \(Self.columnId) IN (\(placeholders));
+        """
+
+        var stmt: OpaquePointer?
+        var results: [EntityWithEmbedding] = []
+
+        if sqlite3_prepare_v2(db, querySQL, -1, &stmt, nil) == SQLITE_OK {
+            for (index, id) in ids.enumerated() {
+                sqlite3_bind_text(stmt, Int32(index + 1), (id as NSString).utf8String, -1, nil)
+            }
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let entity = extractEntityWithEmbeddingFromRow(stmt) {
+                    results.append(entity)
+                }
+            }
+        }
+
+        sqlite3_finalize(stmt)
+        return results
+    }
+
     /// Add relationship between entities
     func addRelationship(
         id: String,
@@ -1065,6 +1131,46 @@ class GraphStore {
             description: description,
             metadata: metadata,
             lastModified: Int64(lastModified)
+        )
+    }
+
+    /// Extract an entity with embedding from a query row.
+    /// Expected column order: id(0), name(1), type(2), description(3), metadata(4), lastModified(5), embedding(6)
+    private func extractEntityWithEmbeddingFromRow(_ stmt: OpaquePointer?) -> EntityWithEmbedding? {
+        guard let stmt = stmt else { return nil }
+
+        let id = String(cString: sqlite3_column_text(stmt, 0))
+        let name = String(cString: sqlite3_column_text(stmt, 1))
+        let type = String(cString: sqlite3_column_text(stmt, 2))
+
+        var description: String? = nil
+        if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
+            description = String(cString: sqlite3_column_text(stmt, 3))
+        }
+
+        var metadata: String? = nil
+        if sqlite3_column_type(stmt, 4) != SQLITE_NULL {
+            metadata = String(cString: sqlite3_column_text(stmt, 4))
+        }
+
+        let lastModified = Int(sqlite3_column_int64(stmt, 5))
+
+        guard let embeddingBlob = sqlite3_column_blob(stmt, 6) else { return nil }
+        let embeddingSize = sqlite3_column_bytes(stmt, 6)
+        var embeddingData = Data(count: Int(embeddingSize))
+        embeddingData.withUnsafeMutableBytes { destPtr in
+            destPtr.copyMemory(from: UnsafeRawBufferPointer(start: embeddingBlob, count: Int(embeddingSize)))
+        }
+        let embedding = blobToEmbedding(embeddingData)
+
+        return EntityWithEmbedding(
+            id: id,
+            name: name,
+            type: type,
+            description: description,
+            metadata: metadata,
+            lastModified: Int64(lastModified),
+            embedding: embedding
         )
     }
 

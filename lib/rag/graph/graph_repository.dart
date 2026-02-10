@@ -23,16 +23,16 @@ class GraphEntity {
   });
 
   /// Create from EntityResult - note: embedding is stored separately
-  factory GraphEntity.fromEntityResult(EntityResult result, {List<double>? embedding}) {
+  factory GraphEntity.fromEntityResult(EntityResult result,
+      {List<double>? embedding}) {
     return GraphEntity(
       id: result.id,
       name: result.name,
       type: result.type,
       embedding: embedding,
       description: result.description,
-      metadata: result.metadata != null
-          ? _parseMetadataJson(result.metadata!)
-          : null,
+      metadata:
+          result.metadata != null ? _parseMetadataJson(result.metadata!) : null,
       lastModified: DateTime.fromMillisecondsSinceEpoch(result.lastModified),
     );
   }
@@ -45,9 +45,8 @@ class GraphEntity {
       type: result.type,
       embedding: result.embedding,
       description: result.description,
-      metadata: result.metadata != null
-          ? _parseMetadataJson(result.metadata!)
-          : null,
+      metadata:
+          result.metadata != null ? _parseMetadataJson(result.metadata!) : null,
       lastModified: DateTime.fromMillisecondsSinceEpoch(result.lastModified),
     );
   }
@@ -82,9 +81,8 @@ class GraphRelationship {
       targetId: result.targetId,
       type: result.type,
       weight: result.weight,
-      metadata: result.metadata != null
-          ? _parseMetadataJson(result.metadata!)
-          : null,
+      metadata:
+          result.metadata != null ? _parseMetadataJson(result.metadata!) : null,
     );
   }
 
@@ -101,7 +99,7 @@ class GraphCommunity {
   final List<String> entityIds;
   final List<double>? embedding;
   final Map<String, dynamic>? metadata;
-  
+
   /// Child community IDs for hierarchical summarization
   List<String>? get childCommunityIds {
     final children = metadata?['childCommunityIds'];
@@ -121,7 +119,8 @@ class GraphCommunity {
   });
 
   /// Create from CommunityResult - note: embedding is stored separately
-  factory GraphCommunity.fromCommunityResult(CommunityResult result, {List<double>? embedding}) {
+  factory GraphCommunity.fromCommunityResult(CommunityResult result,
+      {List<double>? embedding}) {
     return GraphCommunity(
       id: result.id,
       level: result.level,
@@ -129,9 +128,8 @@ class GraphCommunity {
       // Filter out nulls and cast to non-nullable list
       entityIds: result.entityIds.whereType<String>().toList(),
       embedding: embedding,
-      metadata: result.metadata != null
-          ? _parseMetadataJson(result.metadata!)
-          : null,
+      metadata:
+          result.metadata != null ? _parseMetadataJson(result.metadata!) : null,
     );
   }
 
@@ -205,7 +203,8 @@ abstract class GraphRepository {
 
   // Entity operations
   Future<void> addEntity(GraphEntity entity);
-  Future<void> updateEntity(String id, {
+  Future<void> updateEntity(
+    String id, {
     String? name,
     String? type,
     List<double>? embedding,
@@ -216,8 +215,12 @@ abstract class GraphRepository {
   Future<void> deleteEntity(String id);
   Future<GraphEntity?> getEntity(String id);
   Future<List<GraphEntity>> getEntitiesByType(String type);
+
   /// Get entities with embeddings (for similarity calculations)
   Future<List<GraphEntity>> getEntitiesWithEmbeddingsByType(String type);
+
+  /// Get entities with embeddings by IDs (for hop reranking)
+  Future<List<GraphEntity>> getEntitiesWithEmbeddingsByIds(List<String> ids);
 
   // Relationship operations
   Future<void> addRelationship(GraphRelationship relationship);
@@ -291,7 +294,9 @@ class NativeGraphRepository implements GraphRepository {
       type: entity.type,
       embedding: entity.embedding ?? [],
       description: entity.description,
-      metadata: entity.metadata != null ? _encodeMetadataJson(entity.metadata!) : null,
+      metadata: entity.metadata != null
+          ? _encodeMetadataJson(entity.metadata!)
+          : null,
       lastModified: entity.lastModified.millisecondsSinceEpoch,
     );
   }
@@ -342,6 +347,15 @@ class NativeGraphRepository implements GraphRepository {
   Future<List<GraphEntity>> getEntitiesWithEmbeddingsByType(String type) async {
     _checkInitialized();
     final results = await _platform.getEntitiesWithEmbeddingsByType(type);
+    return results.map((r) => GraphEntity.fromEntityWithEmbedding(r)).toList();
+  }
+
+  @override
+  Future<List<GraphEntity>> getEntitiesWithEmbeddingsByIds(
+      List<String> ids) async {
+    _checkInitialized();
+    if (ids.isEmpty) return [];
+    final results = await _platform.getEntitiesWithEmbeddingsByIds(ids);
     return results.map((r) => GraphEntity.fromEntityWithEmbedding(r)).toList();
   }
 
@@ -440,7 +454,9 @@ class NativeGraphRepository implements GraphRepository {
       threshold: threshold,
       entityType: entityType,
     );
-    return results.map((r) => ScoredEntity.fromEntityWithScoreResult(r)).toList();
+    return results
+        .map((r) => ScoredEntity.fromEntityWithScoreResult(r))
+        .toList();
   }
 
   @override
@@ -475,7 +491,8 @@ class NativeGraphRepository implements GraphRepository {
 
   void _checkInitialized() {
     if (!_isInitialized) {
-      throw StateError('Graph repository not initialized. Call initialize() first.');
+      throw StateError(
+          'Graph repository not initialized. Call initialize() first.');
     }
   }
 }
@@ -489,7 +506,7 @@ Map<String, dynamic> _parseMetadataJson(String json) {
     if (json.startsWith('{') && json.endsWith('}')) {
       final content = json.substring(1, json.length - 1);
       if (content.isEmpty) return result;
-      
+
       // This is a simplified parser - for production, use jsonDecode
       final pairs = _splitJsonPairs(content);
       for (final pair in pairs) {
@@ -497,12 +514,12 @@ Map<String, dynamic> _parseMetadataJson(String json) {
         if (colonIdx > 0) {
           final key = pair.substring(0, colonIdx).trim();
           final value = pair.substring(colonIdx + 1).trim();
-          
+
           // Remove quotes from key
           final cleanKey = key.startsWith('"') && key.endsWith('"')
               ? key.substring(1, key.length - 1)
               : key;
-          
+
           // Parse value
           result[cleanKey] = _parseJsonValue(value);
         }
@@ -519,10 +536,10 @@ List<String> _splitJsonPairs(String content) {
   var depth = 0;
   var start = 0;
   var inString = false;
-  
+
   for (var i = 0; i < content.length; i++) {
     final char = content[i];
-    
+
     if (char == '"' && (i == 0 || content[i - 1] != '\\')) {
       inString = !inString;
     } else if (!inString) {
@@ -536,11 +553,11 @@ List<String> _splitJsonPairs(String content) {
       }
     }
   }
-  
+
   if (start < content.length) {
     pairs.add(content.substring(start).trim());
   }
-  
+
   return pairs;
 }
 

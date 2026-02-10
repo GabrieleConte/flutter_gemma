@@ -1078,6 +1078,7 @@ protocol PlatformService {
   func getEntity(id: String, completion: @escaping (Result<EntityResult?, Error>) -> Void)
   func getEntitiesByType(type: String, completion: @escaping (Result<[EntityResult], Error>) -> Void)
   func getEntitiesWithEmbeddingsByType(type: String, completion: @escaping (Result<[EntityWithEmbedding], Error>) -> Void)
+  func getEntitiesWithEmbeddingsByIds(ids: [String], completion: @escaping (Result<[EntityWithEmbedding], Error>) -> Void)
   func addRelationship(id: String, sourceId: String, targetId: String, type: String, weight: Double, metadata: String?, completion: @escaping (Result<Void, Error>) -> Void)
   func deleteRelationship(id: String, completion: @escaping (Result<Void, Error>) -> Void)
   func getRelationships(entityId: String, completion: @escaping (Result<[RelationshipResult], Error>) -> Void)
@@ -1599,6 +1600,23 @@ class PlatformServiceSetup {
       }
     } else {
       getEntitiesWithEmbeddingsByTypeChannel.setMessageHandler(nil)
+    }
+    let getEntitiesWithEmbeddingsByIdsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getEntitiesWithEmbeddingsByIds\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getEntitiesWithEmbeddingsByIdsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idsArg = args[0] as! [String]
+        api.getEntitiesWithEmbeddingsByIds(ids: idsArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getEntitiesWithEmbeddingsByIdsChannel.setMessageHandler(nil)
     }
     let addRelationshipChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.addRelationship\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
