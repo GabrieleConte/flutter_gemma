@@ -531,6 +531,8 @@ class GraphRAGQueryEngine {
         _formatAlarm(buf, e);
       case EntityTypes.note:
         _formatNote(buf, e);
+      case EntityTypes.noteChunk:
+        _formatNoteChunk(buf, e);
       case EntityTypes.document:
         _formatDocument(buf, e);
       default:
@@ -634,11 +636,39 @@ class GraphRAGQueryEngine {
     buf.writeln();
   }
 
-  /// Format ALARM entity: label, time, recurrence — as a single sentence.
+  /// Format ALARM entity: label, time, recurrence from metadata fields.
+  ///
+  /// Reads metadata directly for consistent output across indexing paths
+  /// (DirectEntityExtractor stores `recurrenceType`, `repeatFrequency`, `on`,
+  /// `date`, `time`, `label`; `indexAlarmContent` stores `recurrence`,
+  /// `date`, `time`). Falls back to `e.description` when metadata is absent.
   void _formatAlarm(StringBuffer buf, GraphEntity e) {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
-    // Description already contains the full sentence from the extractor
-    if (e.description != null && e.description!.isNotEmpty) {
+    final meta = e.metadata;
+    if (meta != null) {
+      final time = meta['time']?.toString();
+      final isRecurrent = meta['recurrenceType'] == 'recurrent' ||
+          meta['recurrence']?.toString().isNotEmpty == true;
+
+      if (isRecurrent) {
+        // Recurrent alarm: show time + frequency + days
+        final freq = meta['repeatFrequency']?.toString() ??
+            meta['recurrence']?.toString();
+        final on = meta['on']?.toString();
+        final parts = <String>[];
+        if (time != null) parts.add(time);
+        if (freq != null) parts.add(freq);
+        if (on != null) parts.add('on $on');
+        if (parts.isNotEmpty) buf.write(' — ${parts.join(', ')}');
+      } else {
+        // Single-occurrence alarm: show time + date
+        final date = _formatDateTimeValue(meta['date']);
+        final parts = <String>[];
+        if (time != null) parts.add(time);
+        if (date != null) parts.add('on $date');
+        if (parts.isNotEmpty) buf.write(' — ${parts.join(' ')}');
+      }
+    } else if (e.description != null && e.description!.isNotEmpty) {
       buf.write(' — ${e.description}');
     }
     buf.writeln();
@@ -652,6 +682,18 @@ class GraphRAGQueryEngine {
       final dateStr = _formatDateTimeValue(meta['dateCreated']);
       if (dateStr != null) buf.write(' — created $dateStr');
     }
+    buf.writeln();
+    if (e.description != null && e.description!.isNotEmpty) {
+      final preview = e.description!.length > 200
+          ? '${e.description!.substring(0, 200)}…'
+          : e.description!;
+      buf.writeln('  $preview');
+    }
+  }
+
+  /// Format NOTE_CHUNK entity: title (part X/Y) + content preview.
+  void _formatNoteChunk(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     buf.writeln();
     if (e.description != null && e.description!.isNotEmpty) {
       final preview = e.description!.length > 200
@@ -718,7 +760,9 @@ class GraphRAGQueryEngine {
     'noteId',
     'alarmId',
     'callId',
+    'parentNoteId',
     'recurrenceType',
+    'recurrence',
     'predictionMethod',
   };
 
@@ -777,7 +821,29 @@ class GraphRAGQueryEngine {
       return DateTime.fromMillisecondsSinceEpoch(asInt * 1000);
     }
     // Try ISO-8601
-    return DateTime.tryParse(value);
+    final iso = DateTime.tryParse(value);
+    if (iso != null) return iso;
+    // Try DD-Mon-YYYY (e.g. "14-Jun-2025", "01-Jan-2025")
+    return _parseDDMonYYYY(value);
+  }
+
+  /// Month abbreviation lookup for DD-Mon-YYYY parsing.
+  static const _monthAbbreviations = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
+    'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+    'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+  };
+
+  /// Parse a date in DD-Mon-YYYY format (e.g. "14-Jun-2025").
+  static DateTime? _parseDDMonYYYY(String value) {
+    final match = RegExp(r'^(\d{1,2})-(\w{3})-(\d{4})$').firstMatch(value);
+    if (match == null) return null;
+    final day = int.tryParse(match.group(1)!);
+    final monthStr = match.group(2)!.toLowerCase();
+    final year = int.tryParse(match.group(3)!);
+    final month = _monthAbbreviations[monthStr];
+    if (day == null || month == null || year == null) return null;
+    return DateTime(year, month, day);
   }
 
   /// Format a metadata value, converting dates and timestamps to
@@ -800,9 +866,11 @@ class GraphRAGQueryEngine {
   }
 
   /// Format a duration value (seconds string) to a human-readable form.
+  /// If the value is already human-readable (e.g. "0h, 35min, 10sec"),
+  /// returns it as-is.
   static String _formatDuration(String durationStr) {
     final seconds = int.tryParse(durationStr);
-    if (seconds == null) return '${durationStr}s';
+    if (seconds == null) return durationStr;
     if (seconds < 60) return '${seconds}s';
     final minutes = seconds ~/ 60;
     final remainingSeconds = seconds % 60;
