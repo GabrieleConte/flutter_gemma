@@ -188,7 +188,8 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           maxTokens: _selectedInferenceModel.maxTokens,
           preferredBackend: PreferredBackend.cpu,
       );
-      // Create main chat for text generation
+
+      // Create main chat for text generation (no tools)
       final chat = await model.createChat(
         temperature: _selectedInferenceModel.temperature,
         randomSeed: 1,
@@ -214,7 +215,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       );
       debugPrint('[GraphRAGNavigator] Extraction chat created with ${extractionTools.length} tools');
 
-      // Create vision chat only if GPU is available (vision encoder requires GPU)
+      // Vision chat only if GPU is available (vision encoder requires GPU)
       InferenceChat? visionChat;
       if (gpuAvailable && _selectedInferenceModel.supportImage) {
         setState(() => _statusMessage = 'Creating vision chat for image captioning...');
@@ -250,12 +251,33 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
 
       // Initialize service — enable image captioning only if vision chat is available
       final enableCaptioning = visionChat != null;
+      
+      // Provide a factory that can recreate the model+chat from scratch
+      // if the native model/session goes stale ("Model is closed").
+      Future<InferenceChat> chatFactory() async {
+        debugPrint('[GraphRAGNavigator] chatFactory: recreating model + chat...');
+        final freshModel = await FlutterGemma.getActiveModel(
+          maxTokens: _selectedInferenceModel.maxTokens,
+          preferredBackend: PreferredBackend.cpu,
+        );
+        final freshChat = await freshModel.createChat(
+          temperature: _selectedInferenceModel.temperature,
+          randomSeed: 1,
+          topK: _selectedInferenceModel.topK,
+          modelType: _selectedInferenceModel.modelType,
+        );
+        debugPrint('[GraphRAGNavigator] chatFactory: model + chat recreated ✅');
+        return freshChat;
+      }
+      
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
         extractionChat: extractionChat,
         visionChat: visionChat,
         enableImageCaptioning: enableCaptioning,
+        chatFactory: chatFactory,
+        maxTokens: _selectedInferenceModel.maxTokens,
       );
 
       setState(() {
@@ -659,7 +681,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<T>(
-            initialValue: selected,
+            value: selected,
             dropdownColor: const Color(0xFF1a3a5c),
             style: const TextStyle(color: Colors.white, fontSize: 13),
             isExpanded: true,

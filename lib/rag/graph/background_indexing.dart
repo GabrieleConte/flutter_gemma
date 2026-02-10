@@ -1023,8 +1023,9 @@ class BackgroundIndexingService {
     final relationships = <GraphRelationship>[];
 
     // Load all entities (simplified - in production, use pagination)
-    // Include SELF type for the "You" central node, plus all data types
-    for (final type in ['SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION', 'DOCUMENT', 'PHOTO', 'NOTE', 'TOPIC', 'PROJECT']) {
+    // Include SELF type for the "You" central node, plus all EntityTypes except DATE and HUB
+    final communityEntityTypes = ['SELF', ...EntityTypes.all.where((t) => t != EntityTypes.date && t != EntityTypes.hub)];
+    for (final type in communityEntityTypes) {
       final typeEntities = await repository.getEntitiesByType(type);
       entities.addAll(typeEntities);
       if (typeEntities.isNotEmpty) {
@@ -1119,10 +1120,12 @@ class BackgroundIndexingService {
     ));
 
     // Get all entities and relationships for reference
+    // Use the same broad type list as community detection to avoid empty summaries
     final entities = <GraphEntity>[];
     final relationships = <GraphRelationship>[];
     
-    for (final type in ['PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION']) {
+    final summaryEntityTypes = ['SELF', ...EntityTypes.all.where((t) => t != EntityTypes.date && t != EntityTypes.hub)];
+    for (final type in summaryEntityTypes) {
       entities.addAll(await repository.getEntitiesByType(type));
     }
     

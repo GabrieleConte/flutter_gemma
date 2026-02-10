@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart' as global;
@@ -31,8 +32,27 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
   int? _currentCommunity;
   int? _totalCommunities;
 
+  // Indexing state — when true the LLM is busy and queries are disabled.
+  bool _isIndexing = false;
+  StreamSubscription<IndexingProgress>? _indexingSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Seed current state
+    _isIndexing = _service.isIndexing;
+    // Listen for indexing progress changes
+    _indexingSub = _service.progressStream?.listen((progress) {
+      final running = progress.status == IndexingStatus.running;
+      if (running != _isIndexing) {
+        setState(() => _isIndexing = running);
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _indexingSub?.cancel();
     _queryController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -158,16 +178,50 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
   }
 
   Widget _buildQuerySection() {
+    // Queries are disabled while the LLM is busy with indexing or a query
+    // is already in progress.
+    final bool inputDisabled = _isQuerying || _isIndexing;
+
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: Column(
         children: [
+          // Indexing-in-progress banner
+          if (_isIndexing)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+              ),
+              child: const Row(
+                children: [
+                  SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.orange),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Indexing in progress — chat is unavailable while the LLM is busy.',
+                      style: TextStyle(color: Colors.orange, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // Global Query Toggle
           Row(
             children: [
               Switch(
                 value: _useGlobalQuery,
-                onChanged: (value) => setState(() => _useGlobalQuery = value),
+                onChanged: inputDisabled
+                    ? null
+                    : (value) => setState(() => _useGlobalQuery = value),
                 activeTrackColor: Colors.purple.withValues(alpha: 0.5),
                 activeThumbColor: Colors.purple,
               ),
@@ -245,10 +299,13 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
               Expanded(
                 child: TextField(
                   controller: _queryController,
+                  enabled: !inputDisabled,
                   decoration: InputDecoration(
-                    hintText: _useGlobalQuery
-                        ? 'Ask broad questions like "What are the main themes?"...'
-                        : 'Ask about your contacts or events...',
+                    hintText: _isIndexing
+                        ? 'Chat disabled while indexing...'
+                        : _useGlobalQuery
+                            ? 'Ask broad questions like "What are the main themes?"...'
+                            : 'Ask about your contacts or events...',
                     hintStyle: const TextStyle(color: Colors.white54),
                     filled: true,
                     fillColor: _useGlobalQuery
@@ -262,12 +319,12 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
                         horizontal: 16, vertical: 12),
                   ),
                   style: const TextStyle(color: Colors.white),
-                  onSubmitted: (_) => _executeQuery(),
+                  onSubmitted: inputDisabled ? null : (_) => _executeQuery(),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
-                onPressed: _isQuerying ? null : _executeQuery,
+                onPressed: inputDisabled ? null : _executeQuery,
                 icon: _isQuerying
                     ? const SizedBox(
                         width: 24,

@@ -2,9 +2,33 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart' hide EmbeddingModel;
-import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel, InferenceModel;
+import 'package:flutter_gemma/flutter_gemma_interface.dart' show EmbeddingModel;
 import 'package:flutter_gemma/rag/graph/global_query_engine.dart';
 import 'package:path_provider/path_provider.dart';
+
+/// Simple async mutex to serialize access to the single native LLM session.
+///
+/// The Android/iOS plugin maintains exactly ONE native session; multiple
+/// [InferenceChat] instances (or even the same one called concurrently) will
+/// clobber each other's session state because [clearHistory] closes and
+/// re-creates the native session.  This lock ensures only one LLM operation
+/// (extraction, summarization, user query, …) runs at a time.
+class _AsyncMutex {
+  Completer<void>? _completer;
+
+  Future<void> acquire() async {
+    while (_completer != null) {
+      await _completer!.future;
+    }
+    _completer = Completer<void>();
+  }
+
+  void release() {
+    final c = _completer;
+    _completer = null;
+    c?.complete();
+  }
+}
 
 /// Service for managing GraphRAG operations in the example app
 class GraphRAGService {
@@ -23,11 +47,13 @@ class GraphRAGService {
   InferenceChat? _visionChat;
   EmbeddingModel? _embeddingModel;
   
-  // Model instances for lifecycle management
-  InferenceModel? _extractionModel;
+  /// Factory callback to recreate the main chat when the underlying model/session
+  /// becomes stale ("Model is closed").  Provided by the navigator which knows
+  /// the model parameters.
+  Future<InferenceChat> Function()? _chatFactory;
   
-  // Recreate callback for main chat (used to reload after extraction model is closed)
-  Future<InferenceChat> Function()? _recreateMainChat;
+  /// Mutex that serializes every LLM call through the single native session.
+  final _AsyncMutex _llmLock = _AsyncMutex();
   
   /// Whether the service is initialized
   bool get isInitialized => _isInitialized;
@@ -50,40 +76,38 @@ class GraphRAGService {
   bool get isIndexing => 
       currentProgress?.status == IndexingStatus.running;
 
-  /// Initialize the GraphRAG service with LLM and embedding model
-  /// 
-  /// [chat] - The main chat model for text generation
-  /// [embeddingModel] - The embedding model for semantic search
-  /// [extractionChat] - Optional chat model for entity extraction with tool support
+  /// Initialize the GraphRAG service with LLM and embedding model.
+  ///
+  /// [chat] - The main chat model for text generation (no tools).
+  /// [embeddingModel] - The embedding model for semantic search.
+  /// [extractionChat] - Optional chat model for entity extraction with tool support.
   ///                    If provided and supportsFunctionCalls is true, enables
-  ///                    structured function calling for entity extraction
-  /// [extractionModel] - Optional model instance for extraction (for lifecycle management)
-  /// [visionChat] - Optional vision-capable chat model for image captioning
-  ///                If provided and enableImageCaptioning is true in config,
-  ///                photos will be analyzed using vision LLM
-  /// [recreateMainChat] - Callback to recreate main chat if needed (after memory cleanup)
+  ///                    structured function calling for entity extraction.
+  /// [visionChat] - Optional vision-capable chat for image captioning.
+  /// [chatFactory] - Factory callback to recreate the main chat if the underlying
+  ///                 model/session becomes stale ("Model is closed").  If null,
+  ///                 stale-model errors will propagate as-is.
   Future<void> initialize({
     required InferenceChat chat,
     required EmbeddingModel embeddingModel,
     InferenceChat? extractionChat,
-    InferenceModel? extractionModel,
     InferenceChat? visionChat,
     bool enableImageCaptioning = false,
-    Future<InferenceChat> Function()? recreateMainChat,
+    Future<InferenceChat> Function()? chatFactory,
+    int maxTokens = 4096,
   }) async {
     if (_isInitialized) {
-      debugPrint('[GraphRAGService] Already initialized');
-      return;
+      debugPrint('[GraphRAGService] Already initialized — disposing before reinitialize');
+      await dispose();
     }
     
     try {
       debugPrint('[GraphRAGService] Initializing...');
       _chat = chat;
       _extractionChat = extractionChat;
-      _extractionModel = extractionModel;
       _visionChat = visionChat;
       _embeddingModel = embeddingModel;
-      _recreateMainChat = recreateMainChat;
+      _chatFactory = chatFactory;
       
       // Get database path
       final directory = await getApplicationDocumentsDirectory();
@@ -109,15 +133,23 @@ class GraphRAGService {
         debugPrint('[GraphRAGService] Using main chat for extraction (supports function calls)');
       }
       
-      // Create GraphRAG config with image captioning setting and function calling
+      // Create GraphRAG config – clamp context tokens to the model's limit
+      // so the query engine never builds a prompt larger than maxTokens.
+      // Both queryConfig and extendedConfig carry maxContextTokens because
+      // the query engine reads from queryConfig while other subsystems
+      // read from extendedConfig.
       final config = GraphRAGConfig(
         databasePath: dbPath,
+        queryConfig: GraphRAGQueryConfig(
+          maxContextTokens: maxTokens,
+        ),
         indexingConfig: IndexingConfig(
           enableImageCaptioning: enableImageCaptioning && visionChat != null,
         ),
         extendedConfig: GraphRAGExtendedConfig(
           enableFunctionCalling: extractionCallback != null,
           enablePerformanceLogging: true,
+          maxContextTokens: maxTokens,
         ),
         autoIndex: false,
       );
@@ -150,21 +182,10 @@ class GraphRAGService {
   
   /// Called when extraction phase is complete - deallocate extraction model to free memory
   Future<void> _handleExtractionPhaseComplete() async {
-    debugPrint('[GraphRAGService] Extraction phase complete, deallocating extraction model...');
-    
-    if (_extractionModel != null) {
-      try {
-        await _extractionModel!.close();
-        _extractionModel = null;
-        _extractionChat = null;
-        debugPrint('[GraphRAGService] Extraction model deallocated ✅');
-        
-        // Give the system time to reclaim memory
-        await Future.delayed(const Duration(milliseconds: 500));
-      } catch (e) {
-        debugPrint('[GraphRAGService] Error closing extraction model: $e');
-      }
-    }
+    debugPrint('[GraphRAGService] Extraction phase complete');
+    // Extraction chat can be released; the main chat handles summarization & queries.
+    _extractionChat = null;
+    debugPrint('[GraphRAGService] Extraction chat released ✅');
   }
   
   /// Called before summarization - ensure main LLM is ready
@@ -172,13 +193,32 @@ class GraphRAGService {
     debugPrint('[GraphRAGService] Preparing for summarization...');
     
     // Check if main chat is still working
-    if (_chat == null && _recreateMainChat != null) {
+    if (_chat == null && _chatFactory != null) {
       debugPrint('[GraphRAGService] Main chat not available, recreating...');
       try {
-        _chat = await _recreateMainChat!();
+        _chat = await _chatFactory!();
         debugPrint('[GraphRAGService] Main chat recreated ✅');
       } catch (e) {
         debugPrint('[GraphRAGService] Error recreating main chat: $e');
+        rethrow;
+      }
+    }
+  }
+  
+  /// Attempt to clear the chat history, recreating the model+chat if the
+  /// underlying native model/session has gone stale ("Model is closed").
+  ///
+  /// Throws if recovery is impossible (no chatFactory, or factory itself fails).
+  Future<void> _clearHistoryOrRecreate() async {
+    try {
+      await _chat!.clearHistory();
+    } on StateError catch (e) {
+      if (e.message.contains('Model is closed') && _chatFactory != null) {
+        debugPrint('[GraphRAGService] ⚠️  Chat model is stale — recreating via chatFactory...');
+        _chat = await _chatFactory!();
+        // The factory creates a fresh model+session, so history is already clear.
+        debugPrint('[GraphRAGService] ✅ Chat recreated successfully');
+      } else {
         rethrow;
       }
     }
@@ -213,8 +253,8 @@ class GraphRAGService {
     return responseText;
   }
   
-  /// Generate extraction LLM response with tool support for structured entity extraction
-  /// This method enables native function calling for better extraction accuracy
+  /// Generate extraction LLM response with tool support for structured entity extraction.
+  /// Uses the dedicated [_extractionChat] instance, serialized by [_llmLock].
   Future<String> _generateExtractionResponse(String prompt, {List<Tool>? tools}) async {
     if (_extractionChat == null) {
       throw StateError('Extraction chat model not initialized');
@@ -222,30 +262,35 @@ class GraphRAGService {
     
     debugPrint('[GraphRAGService] Generating extraction response with tools: ${tools?.map((t) => t.name).join(", ") ?? "none"}');
     
-    // Clear history before each extraction to avoid context window overflow
-    await _extractionChat!.clearHistory();
-    
-    // Add prompt and generate response
-    // The tools are already configured on the InferenceChat instance
-    await _extractionChat!.addQuery(Message(text: prompt));
-    final response = await _extractionChat!.generateChatResponse();
-    
-    // Extract text from ModelResponse
-    String responseText = '';
-    if (response is TextResponse) {
-      responseText = response.token;
-    } else if (response is FunctionCallResponse) {
-      // If we get a function call response, convert it to JSON string for parsing
-      responseText = '{"name": "${response.name}", "parameters": ${jsonEncode(response.args)}}';
-      debugPrint('[GraphRAGService] Got function call: ${response.name}');
+    await _llmLock.acquire();
+    try {
+      // Clear history before each extraction to avoid context window overflow
+      await _extractionChat!.clearHistory();
+      
+      // Add prompt and generate response
+      // The tools are already configured on the InferenceChat instance
+      await _extractionChat!.addQuery(Message(text: prompt, isUser: true));
+      final response = await _extractionChat!.generateChatResponse();
+      
+      // Extract text from ModelResponse
+      String responseText = '';
+      if (response is TextResponse) {
+        responseText = response.token;
+      } else if (response is FunctionCallResponse) {
+        // If we get a function call response, convert it to JSON string for parsing
+        responseText = '{"name": "${response.name}", "parameters": ${jsonEncode(response.args)}}';
+        debugPrint('[GraphRAGService] Got function call: ${response.name}');
+      }
+      
+      debugPrint('[GraphRAGService] Extraction response: ${responseText.substring(0, responseText.length.clamp(0, 150))}...');
+      return responseText;
+    } finally {
+      _llmLock.release();
     }
-    
-    debugPrint('[GraphRAGService] Extraction response: ${responseText.substring(0, responseText.length.clamp(0, 150))}...');
-    return responseText;
   }
   
-  /// Generate LLM response using the chat model
-  /// For entity extraction, we clear history before each call to avoid context overflow
+  /// Generate LLM response using the single chat model, serialized by [_llmLock].
+  /// Each call is stateless: history is cleared before the prompt is sent.
   Future<String> _generateLLMResponse(String prompt) async {
     if (_chat == null) {
       throw StateError('Chat model not initialized');
@@ -287,22 +332,26 @@ class GraphRAGService {
     
     debugPrint('[GraphRAGService] Generating LLM response for prompt (${truncatedPrompt.length} chars)');
     
-    // Clear history before each extraction to avoid context window overflow
-    // Entity extraction should be stateless - each prompt is independent
-    await _chat!.clearHistory();
-    
-    // Add prompt and generate response
-    await _chat!.addQuery(Message(text: truncatedPrompt));
-    final response = await _chat!.generateChatResponse();
-    
-    // Extract text from ModelResponse
-    String responseText = '';
-    if (response is TextResponse) {
-      responseText = response.token;
+    await _llmLock.acquire();
+    try {
+      // Clear history before each call — each prompt is independent
+      await _clearHistoryOrRecreate();
+      
+      // Add prompt and generate response
+      await _chat!.addQuery(Message(text: truncatedPrompt, isUser: true));
+      final response = await _chat!.generateChatResponse();
+      
+      // Extract text from ModelResponse
+      String responseText = '';
+      if (response is TextResponse) {
+        responseText = response.token;
+      }
+      
+      debugPrint('[GraphRAGService] LLM response: ${responseText.substring(0, responseText.length.clamp(0, 100))}...');
+      return responseText;
+    } finally {
+      _llmLock.release();
     }
-    
-    debugPrint('[GraphRAGService] LLM response: ${responseText.substring(0, responseText.length.clamp(0, 100))}...');
-    return responseText;
   }
   
   /// Generate embedding using the embedding model
@@ -482,24 +531,29 @@ class GraphRAGService {
     return result;
   }
   
-  /// Execute a streaming global query with progress updates
-  /// 
-  /// This provides real-time feedback during the query:
-  /// - Shows which community is being processed
-  /// - Streams the final answer token by token
+  /// Execute a streaming global query with progress updates.
+  ///
+  /// Serialized through [_llmLock] per-prompt so only one LLM call is
+  /// active at a time.
   Stream<GlobalQueryProgress> globalQueryAutoStreaming(String query) {
     _checkInitialized();
     debugPrint('[GraphRAGService] Streaming global query: "$query"');
     
-    // Create streaming LLM callback if chat supports it
+    // Create streaming LLM callback — acquires mutex for the duration of
+    // each individual prompt→response exchange.
     Stream<String> llmStreamCallback(String prompt) async* {
-      await _chat!.clearHistory();
-      await _chat!.addQuery(Message(text: prompt));
-      
-      await for (final response in _chat!.generateChatResponseAsync()) {
-        if (response is TextResponse) {
-          yield response.token;
+      await _llmLock.acquire();
+      try {
+        await _chat!.clearHistory();
+        await _chat!.addQuery(Message(text: prompt));
+        
+        await for (final response in _chat!.generateChatResponseAsync()) {
+          if (response is TextResponse) {
+            yield response.token;
+          }
         }
+      } finally {
+        _llmLock.release();
       }
     }
     
@@ -755,8 +809,10 @@ class GraphRAGService {
       _graphRag = null;
     }
     _chat = null;
+    _extractionChat = null;
     _visionChat = null;
     _embeddingModel = null;
+    _chatFactory = null;
     _isInitialized = false;
     _error = null;
     debugPrint('[GraphRAGService] Disposed');

@@ -166,11 +166,29 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
       // Step 3: Initialize GraphRAG service
       _showSnackBar('Initializing GraphRAG...');
       
+      // Provide a factory that can recreate the main model+chat from scratch
+      // if the native model/session goes stale ("Model is closed").
+      Future<InferenceChat> chatFactory() async {
+        debugPrint('[GraphRAGScreen] chatFactory: recreating model + chat...');
+        final freshModel = await FlutterGemma.getActiveModel(
+          maxTokens: inferenceModel.maxTokens,
+          preferredBackend: PreferredBackend.cpu,
+        );
+        final freshChat = await freshModel.createChat(
+          temperature: 0.7,
+          randomSeed: 1,
+          topK: inferenceModel.topK,
+          modelType: inferenceModel.modelType,
+        );
+        debugPrint('[GraphRAGScreen] chatFactory: model + chat recreated ✅');
+        return freshChat;
+      }
+      
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
         extractionChat: extractionChat,
-        // No separate extraction model - same model instance
+        chatFactory: chatFactory,
       );
       
       // Subscribe to indexing progress
