@@ -570,7 +570,7 @@ class LinkPredictor {
     final links = <PredictedLink>[];
     
     final photoId = _generateEntityId(
-      photo['id'] ?? photo['name'] ?? '',
+      photo['filename'] ?? photo['name'] ?? photo['id'] ?? '',
       'PHOTO',
     );
     final location = photo['location'] ?? photo['gpsLocation'];

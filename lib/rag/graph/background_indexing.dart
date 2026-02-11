@@ -821,9 +821,11 @@ class BackgroundIndexingService {
       case 'PHOTO':
       case 'PHOTOS':
         // Link "You" -> Photo
-        final id = itemMap['id'] ?? itemMap['name'];
-        if (id != null && id.toString().isNotEmpty) {
-          primaryEntityId = _generateEntityId(id.toString(), 'PHOTO');
+        // Use filename as entity name (matches DirectEntityExtractor which uses
+        // filename ?? name as the photo entity name)
+        final photoName = itemMap['filename'] ?? itemMap['name'] ?? itemMap['id'];
+        if (photoName != null && photoName.toString().isNotEmpty) {
+          primaryEntityId = _generateEntityId(photoName.toString(), 'PHOTO');
         }
         break;
         
@@ -845,6 +847,16 @@ class BackgroundIndexingService {
         if (title != null && title.toString().isNotEmpty) {
           primaryEntityId = _generateEntityId(title.toString(), 'NOTE');
         }
+        break;
+
+      case 'ALARM':
+      case 'ALARMS':
+        // Link "You" -> Alarm
+        final label = itemMap['label']?.toString() ?? itemMap['title']?.toString() ?? 'Alarm';
+        final recurrenceType = itemMap['recurrenceType']?.toString() ?? 'single-occurrence';
+        final isRecurrent = recurrenceType == 'recurrent';
+        final alarmName = isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
+        primaryEntityId = _generateEntityId(alarmName, 'ALARM');
         break;
     }
     
@@ -1350,16 +1362,24 @@ class BackgroundIndexingService {
         break;
       case 'PHOTO':
       case 'PHOTOS':
-        final id = itemMap['id'] ?? itemMap['localIdentifier'];
-        if (id != null) {
-          return _generateEntityId('photo_$id', 'PHOTO');
+        // Use filename as entity name (matches DirectEntityExtractor)
+        final photoName = itemMap['filename'] ?? itemMap['name'] ?? itemMap['id'];
+        if (photoName != null && photoName.toString().isNotEmpty) {
+          return _generateEntityId(photoName.toString(), 'PHOTO');
         }
         break;
       case 'PHONE_CALL':
       case 'PHONE_CALLS':
-        final contactName = itemMap['contactName'] ?? itemMap['phoneNumber'];
+        // Entity extractor names calls "Call with <contact>" or "Call <number>"
+        final contactName = itemMap['contactName'] ?? itemMap['name'];
+        final phoneNumber = itemMap['phoneNumber'] ?? itemMap['number'];
+        final callId = itemMap['id']?.toString() ?? '';
         if (contactName != null && contactName.toString().isNotEmpty) {
-          return _generateEntityId(contactName.toString(), 'PHONE_CALL');
+          return _generateEntityId('Call with $contactName', 'PHONE_CALL');
+        } else if (phoneNumber != null && phoneNumber.toString().isNotEmpty) {
+          return _generateEntityId('Call $phoneNumber', 'PHONE_CALL');
+        } else if (callId.isNotEmpty) {
+          return _generateEntityId('Call $callId', 'PHONE_CALL');
         }
         break;
       case 'NOTE':
@@ -1378,11 +1398,13 @@ class BackgroundIndexingService {
         break;
       case 'ALARM':
       case 'ALARMS':
-        final label = itemMap['label'] ?? itemMap['title'];
-        if (label != null && label.toString().isNotEmpty) {
-          return _generateEntityId(label.toString(), 'ALARM');
-        }
-        break;
+        // Entity extractor names alarms "Alarm: <label>" or "Recurring alarm: <label>"
+        final label = itemMap['label']?.toString() ?? itemMap['title']?.toString() ?? 'Alarm';
+        final recurrenceType = itemMap['recurrenceType']?.toString() ?? 'single-occurrence';
+        final isRecurrent = recurrenceType == 'recurrent';
+        final alarmName = isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
+        return _generateEntityId(alarmName, 'ALARM');
+
     }
     return null;
   }
