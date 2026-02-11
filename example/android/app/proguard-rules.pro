@@ -45,3 +45,6 @@
 # JavaPoet (used by AutoValue)
 -keep class autovalue.shaded.com.squareup.javapoet.** { *; }
 -dontwarn autovalue.shaded.com.squareup.javapoet.**
+
+# PDFBox optional JP2 dependency (not bundled)
+-dontwarn com.gemalto.jp2.JP2Decoder

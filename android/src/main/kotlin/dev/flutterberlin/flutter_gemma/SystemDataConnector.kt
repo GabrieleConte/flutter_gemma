@@ -118,6 +118,21 @@ class SystemDataConnector(
         }
     }
 
+    // Handle activity result (for MANAGE_EXTERNAL_STORAGE settings intent)
+    fun onActivityResult(requestCode: Int, resultCode: Int): Boolean {
+        if (requestCode == PERMISSION_REQUEST_FILES && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val status = if (android.os.Environment.isExternalStorageManager()) {
+                PermissionStatus.GRANTED
+            } else {
+                PermissionStatus.DENIED
+            }
+            Log.d(TAG, "MANAGE_EXTERNAL_STORAGE result: $status")
+            pendingFilesCallback?.invoke(status)
+            pendingFilesCallback = null
+            return true
+        }
+        return false
+    }
     // MARK: - Permission Methods
 
     fun checkPermission(type: PermissionType): PermissionStatus {
@@ -624,16 +639,14 @@ class SystemDataConnector(
     // MARK: - Files Permission
 
     private fun checkFilesPermission(): PermissionStatus {
-        // On Android 13+ (API 33), READ_EXTERNAL_STORAGE no longer grants access to most files
-        // Instead, we use scoped storage which grants access to app-specific directories automatically
-        // For user documents, we'll scan app's external files directory
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // On Android 13+, we use scoped storage - no permission needed for app directories
-            // Grant access automatically since we'll only access app-specific or Downloads directory
-            PermissionStatus.GRANTED
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11-12: Scoped storage with limited MediaStore access
-            PermissionStatus.GRANTED
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+: Need MANAGE_EXTERNAL_STORAGE for full access to
+            // Documents/Downloads folders (scoped storage blocks direct file access)
+            if (android.os.Environment.isExternalStorageManager()) {
+                PermissionStatus.GRANTED
+            } else {
+                PermissionStatus.NOT_DETERMINED
+            }
         } else {
             // Android 10 and below: Need READ_EXTERNAL_STORAGE
             when (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)) {
@@ -652,16 +665,29 @@ class SystemDataConnector(
     }
 
     private fun requestFilesPermission(activity: Activity, callback: (PermissionStatus) -> Unit) {
-        // On Android 13+, we don't need runtime permission for scoped storage
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Log.d(TAG, "Android 13+: Using scoped storage, no permission needed")
-            callback(PermissionStatus.GRANTED)
-            return
-        }
-        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Log.d(TAG, "Android 11-12: Using scoped storage, no permission needed")
-            callback(PermissionStatus.GRANTED)
+            // Android 11+: Need MANAGE_EXTERNAL_STORAGE
+            if (android.os.Environment.isExternalStorageManager()) {
+                Log.d(TAG, "MANAGE_EXTERNAL_STORAGE already granted")
+                callback(PermissionStatus.GRANTED)
+                return
+            }
+            
+            Log.d(TAG, "Requesting MANAGE_EXTERNAL_STORAGE via settings")
+            pendingFilesCallback = callback
+            try {
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:${context.packageName}")
+                )
+                activity.startActivityForResult(intent, PERMISSION_REQUEST_FILES)
+            } catch (e: Exception) {
+                // Fallback to generic all-files settings page
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                )
+                activity.startActivityForResult(intent, PERMISSION_REQUEST_FILES)
+            }
             return
         }
         
@@ -916,11 +942,32 @@ class SystemDataConnector(
         // Always use MediaStore for shared storage (Downloads, Documents)
         fetchDocumentsViaMediaStore(sinceTimestamp, maxCount, extensions, results)
         
+        // Collect IDs we already have to avoid duplicates from direct scanning
+        val existingIds = results.map { it.id }.toHashSet()
+        
+        // Scan the public Documents directory recursively (MediaStore may miss it)
+        val publicDocumentsDir = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOCUMENTS
+        )
+        if (publicDocumentsDir != null && publicDocumentsDir.exists()) {
+            Log.d(TAG, "Scanning public Documents dir: ${publicDocumentsDir.absolutePath}")
+            scanDirectoryForDocuments(publicDocumentsDir, extensions, sinceTimestamp, maxCount, results, existingIds)
+        }
+        
+        // Also scan public Downloads directory
+        val publicDownloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS
+        )
+        if (publicDownloadsDir != null && publicDownloadsDir.exists()) {
+            Log.d(TAG, "Scanning public Downloads dir: ${publicDownloadsDir.absolutePath}")
+            scanDirectoryForDocuments(publicDownloadsDir, extensions, sinceTimestamp, maxCount, results, existingIds)
+        }
+        
         // Also scan app's private external files directory (always accessible)
         val externalFilesDir = context.getExternalFilesDir(null)
         if (externalFilesDir != null && externalFilesDir.exists()) {
             Log.d(TAG, "Also scanning app's external files dir: ${externalFilesDir.absolutePath}")
-            scanDirectoryForDocuments(externalFilesDir, extensions, sinceTimestamp, maxCount, results)
+            scanDirectoryForDocuments(externalFilesDir, extensions, sinceTimestamp, maxCount, results, existingIds)
         }
 
         Log.d(TAG, "fetchDocuments completed, returning ${results.size} documents")
@@ -932,7 +979,8 @@ class SystemDataConnector(
         extensions: List<String>,
         sinceTimestamp: Long?,
         maxCount: Int,
-        results: MutableList<DocumentResult>
+        results: MutableList<DocumentResult>,
+        existingIds: HashSet<String> = hashSetOf()
     ) {
         if (!directory.exists() || !directory.canRead()) {
             Log.d(TAG, "Cannot read directory: ${directory.absolutePath}")
@@ -942,14 +990,19 @@ class SystemDataConnector(
         Log.d(TAG, "Scanning directory: ${directory.absolutePath}")
         
         try {
-            val files = directory.listFiles() ?: return
+            val files = directory.listFiles()
+            if (files == null) {
+                Log.w(TAG, "listFiles() returned null for ${directory.absolutePath} — no permission?")
+                return
+            }
+            Log.d(TAG, "Found ${files.size} entries in ${directory.absolutePath}")
             
             for (file in files) {
                 if (results.size >= maxCount) break
                 
                 if (file.isDirectory) {
                     // Recursively scan subdirectories (limit depth to prevent infinite loops)
-                    scanDirectoryForDocuments(file, extensions, sinceTimestamp, maxCount, results)
+                    scanDirectoryForDocuments(file, extensions, sinceTimestamp, maxCount, results, existingIds)
                 } else if (file.isFile && file.canRead()) {
                     val extension = file.extension.lowercase()
                     if (extensions.any { it.lowercase() == extension }) {
@@ -988,8 +1041,13 @@ class SystemDataConnector(
                             }
                         }
                         
+                        val docId = file.absolutePath.hashCode().toString()
+                        
+                        // Skip if already found via MediaStore or another scan
+                        if (existingIds.contains(docId)) continue
+                        
                         results.add(DocumentResult(
-                            id = file.absolutePath.hashCode().toString(),
+                            id = docId,
                             name = file.name,
                             path = file.absolutePath,
                             documentType = docType,
@@ -999,6 +1057,7 @@ class SystemDataConnector(
                             modifiedDate = lastModified,
                             textPreview = textPreview
                         ))
+                        existingIds.add(docId)
                     }
                 }
             }
@@ -1081,12 +1140,8 @@ class SystemDataConnector(
         Log.d(TAG, "MediaStore query selection: $selectionBuilder")
         Log.d(TAG, "MediaStore query args: $selectionArgsList")
 
-        // Query Downloads collection specifically on Android 10+
-        val contentUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        } else {
-            android.provider.MediaStore.Files.getContentUri("external")
-        }
+        // Query all external files (covers Documents, Downloads, and other shared folders)
+        val contentUri = android.provider.MediaStore.Files.getContentUri("external")
         
         Log.d(TAG, "Querying content URI: $contentUri")
 

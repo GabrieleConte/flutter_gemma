@@ -172,8 +172,13 @@ private class PlatformServiceImpl(
     return systemDataConnector?.onRequestPermissionsResult(requestCode, permissions, grantResults) ?: false
   }
 
-  // Handle activity results (document picker)
+  // Handle activity results (document picker, MANAGE_EXTERNAL_STORAGE settings)
   fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    // Forward to SystemDataConnector for MANAGE_EXTERNAL_STORAGE result
+    if (systemDataConnector?.onActivityResult(requestCode, resultCode) == true) {
+      return true
+    }
+
     if (requestCode == REQUEST_CODE_PICK_DOCUMENTS) {
       Log.d(TAG, "Document picker result: resultCode=$resultCode")
       val callback = pendingDocumentPickerCallback
