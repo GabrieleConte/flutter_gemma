@@ -743,99 +743,6 @@ class GraphRAG {
     debugPrint(
         '[GraphRAG] Document "$name": ${content.length} chars -> ${chunks.length} chunk(s)');
 
-    // Collect all extracted entity IDs across all chunks (for co-occurrence)
-    final allExtractedEntityIds = <String>[];
-
-    // Process each chunk for entity extraction
-    for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-      final chunkContent = chunks[chunkIndex];
-      final chunkSourceId = '${sourceId}_chunk_$chunkIndex';
-
-      final extraction = await _extractor.extractFromText(
-        chunkContent,
-        sourceId: chunkSourceId,
-        sourceType: 'DOCUMENT',
-      );
-
-      // Add extracted entities
-      for (final entity in extraction.entities) {
-        final embedding = await _embeddingCallback(
-          '${entity.name} ${entity.description ?? ""}',
-        );
-
-        final graphEntity = GraphEntity(
-          id: normalizeId(entity.name, entity.type),
-          name: entity.name,
-          type: entity.type,
-          description: entity.description,
-          embedding: embedding,
-          metadata: {'sourceId': chunkSourceId},
-          lastModified: now,
-        );
-
-        try {
-          await _repository.addEntity(graphEntity);
-        } catch (_) {
-          await _repository.updateEntity(
-            graphEntity.id,
-            name: graphEntity.name,
-            type: graphEntity.type,
-            embedding: embedding,
-            description: graphEntity.description,
-            metadata: graphEntity.metadata,
-            lastModified: now,
-          );
-        }
-
-        allExtractedEntityIds.add(graphEntity.id);
-      }
-
-      // Add extracted relationships
-      for (final rel in extraction.relationships) {
-        final graphRelationship = GraphRelationship(
-          id: '${normalizeId(rel.sourceEntity, '')}_${rel.type.toLowerCase()}_${normalizeId(rel.targetEntity, '')}',
-          sourceId: normalizeId(rel.sourceEntity, ''),
-          targetId: normalizeId(rel.targetEntity, ''),
-          type: rel.type,
-          weight: rel.weight,
-          metadata: {'description': rel.description},
-        );
-
-        try {
-          await _repository.addRelationship(graphRelationship);
-        } catch (_) {}
-      }
-    }
-
-    // Create co-occurrence relationships between entities that don't already
-    // share an explicit relationship.
-    final uniqueEntityIds = allExtractedEntityIds.toSet().toList();
-    for (var i = 0; i < uniqueEntityIds.length; i++) {
-      for (var j = i + 1; j < uniqueEntityIds.length; j++) {
-        final existingRels =
-            await _repository.getRelationships(uniqueEntityIds[i]);
-        final alreadyLinked = existingRels.any(
-          (r) =>
-              (r.targetId == uniqueEntityIds[j] ||
-                  r.sourceId == uniqueEntityIds[j]) &&
-              r.type != 'CO_OCCURS_IN',
-        );
-        if (alreadyLinked) continue;
-
-        final coOccurRel = GraphRelationship(
-          id: '${uniqueEntityIds[i]}_co_occurs_${uniqueEntityIds[j]}',
-          sourceId: uniqueEntityIds[i],
-          targetId: uniqueEntityIds[j],
-          type: 'CO_OCCURS_IN',
-          weight: 0.5,
-          metadata: {'sourceDocument': name, 'sourceId': sourceId},
-        );
-        try {
-          await _repository.addRelationship(coOccurRel);
-        } catch (_) {}
-      }
-    }
-
     // --- Create parent DOCUMENT entity ---
     final docEntityId = normalizeId(name, 'DOCUMENT');
     final documentEmbedding = await _embeddingCallback(
@@ -996,24 +903,8 @@ class GraphRAG {
       await _repository.addRelationship(docHubRel);
     } catch (_) {}
 
-    // Link extracted entities to the document via MENTIONED_IN
-    for (final entityId in uniqueEntityIds) {
-      final mentionedInRel = GraphRelationship(
-        id: '${entityId}_mentioned_in_$docEntityId',
-        sourceId: entityId,
-        targetId: docEntityId,
-        type: 'MENTIONED_IN',
-        weight: 0.8,
-        metadata: {'sourceDocument': name},
-      );
-      try {
-        await _repository.addRelationship(mentionedInRel);
-      } catch (_) {}
-    }
-
     debugPrint(
-        '[GraphRAG] Indexed document "$name": ${chunks.length} chunk(s), '
-        '${uniqueEntityIds.length} extracted entities');
+        '[GraphRAG] Indexed document "$name": ${chunks.length} chunk(s)');
   }
 
   // === Document Chunking ===
