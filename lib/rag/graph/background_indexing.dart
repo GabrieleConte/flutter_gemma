@@ -76,7 +76,8 @@ class IndexingProgress {
       totalItems: totalItems ?? this.totalItems,
       extractedEntities: extractedEntities ?? this.extractedEntities,
       uniqueEntitiesStored: uniqueEntitiesStored ?? this.uniqueEntitiesStored,
-      extractedRelationships: extractedRelationships ?? this.extractedRelationships,
+      extractedRelationships:
+          extractedRelationships ?? this.extractedRelationships,
       predictedLinks: predictedLinks ?? this.predictedLinks,
       detectedCommunities: detectedCommunities ?? this.detectedCommunities,
       startTime: startTime ?? this.startTime,
@@ -90,36 +91,36 @@ class IndexingProgress {
 class IndexingConfig {
   /// Batch size for processing items
   final int batchSize;
-  
+
   /// Delay between batches (to avoid blocking)
   final Duration batchDelay;
-  
+
   /// Whether to automatically detect communities
   final bool detectCommunities;
-  
+
   /// Maximum community hierarchy depth
   final int maxCommunityDepth;
-  
+
   /// Whether to generate community summaries
   final bool generateSummaries;
-  
+
   /// Whether to perform incremental indexing
   final bool incrementalIndexing;
-  
+
   /// Interval for periodic re-indexing
   final Duration? reindexInterval;
-  
+
   /// Whether to enable link prediction (template-based + co-mention)
   final bool enableLinkPrediction;
-  
+
   /// Link prediction configuration
   final LinkPredictionConfig? linkPredictionConfig;
-  
+
   /// Whether to enable image captioning using vision LLM
   /// When enabled, photos will be analyzed using the vision model to
   /// generate descriptive captions for richer entity extraction
   final bool enableImageCaptioning;
-  
+
   /// When non-null, only calendar events whose calendar display name is in
   /// this set will be indexed. Matching is case-insensitive.
   /// For example: `{'My calendar'}` to index only the user's primary calendar.
@@ -147,13 +148,13 @@ class BackgroundIndexingService {
   final EntityExtractor extractor;
   final ConnectorManager connectorManager;
   final IndexingConfig config;
-  
+
   /// Callback to notify when extraction phase is complete (can deallocate extraction model)
   final Future<void> Function()? onExtractionPhaseComplete;
-  
+
   /// Callback to prepare main LLM before summarization (can reallocate if needed)
   final Future<void> Function()? onBeforeSummarization;
-  
+
   late final LeidenCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
   late final LinkPredictor? _linkPredictor;
@@ -161,18 +162,36 @@ class BackgroundIndexingService {
   late final DirectEntityExtractor _directExtractor;
   late final Future<List<double>> Function(String text) _embeddingCallback;
   late final Future<String> Function(String prompt) _llmCallback;
-  late final Future<String> Function(String prompt, Uint8List imageBytes)? _visionLlmCallback;
+  late final Future<String> Function(String prompt, Uint8List imageBytes)?
+      _visionLlmCallback;
+  late final Future<void> Function({
+    required String documentId,
+    required String name,
+    required String content,
+    String? mimeType,
+  })? _documentIndexCallback;
   final PlatformService _platform = PlatformService();
-  
+
   /// Data types that should use direct extraction (no LLM)
   static const _structuredDataTypes = {
-    'CONTACT', 'CONTACTS',
-    'CALENDAR', 'CALENDAR_EVENT', 'EVENT',
-    'PHOTO', 'PHOTOS',
-    'PHONE_CALL', 'PHONE_CALLS', 'CALL', 'CALLS', 'CALLLOG',
-    'DOCUMENT', 'DOCUMENTS',
-    'ALARM', 'ALARMS',
-    'NOTE', 'NOTES',
+    'CONTACT',
+    'CONTACTS',
+    'CALENDAR',
+    'CALENDAR_EVENT',
+    'EVENT',
+    'PHOTO',
+    'PHOTOS',
+    'PHONE_CALL',
+    'PHONE_CALLS',
+    'CALL',
+    'CALLS',
+    'CALLLOG',
+    'DOCUMENT',
+    'DOCUMENTS',
+    'ALARM',
+    'ALARMS',
+    'NOTE',
+    'NOTES',
   };
 
   /// Normalize connector data-type strings to canonical forms used in switch
@@ -187,18 +206,18 @@ class BackgroundIndexingService {
     final upper = raw.toUpperCase();
     return _dataTypeAliases[upper] ?? raw;
   }
-  
+
   IndexingProgress _progress = IndexingProgress(
     status: IndexingStatus.idle,
     currentPhase: 'Idle',
   );
-  
+
   final _progressController = StreamController<IndexingProgress>.broadcast();
   Timer? _reindexTimer;
   bool _cancelRequested = false;
   Completer<void>? _currentJob;
   bool _useForegroundService = true;
-  
+
   // Accumulate extractions for co-mention detection
   final List<ExtractionResult> _batchExtractions = [];
 
@@ -208,43 +227,58 @@ class BackgroundIndexingService {
     required this.connectorManager,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
-    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)?
+        visionLlmCallback,
+
     /// Optional structured LLM callback that supports function calling tools
     /// Used for link validation to get structured relationship types
-    Future<String> Function(String prompt, {List<Tool>? tools})? structuredLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})?
+        structuredLlmCallback,
+
+    /// Callback to index a document's full content (read + chunk + embed).
+    /// When provided, documents are processed by reading their content and
+    /// calling this callback instead of the generic metadata-only extraction.
+    Future<void> Function({
+      required String documentId,
+      required String name,
+      required String content,
+      String? mimeType,
+    })? documentIndexCallback,
     this.onExtractionPhaseComplete,
     this.onBeforeSummarization,
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
+    _documentIndexCallback = documentIndexCallback;
     _llmCallback = llmCallback;
     _embeddingCallback = embeddingCallback;
     _visionLlmCallback = visionLlmCallback;
-    
+
     // Initialize direct extractor for structured data (no LLM)
     _directExtractor = DirectEntityExtractor(
       embeddingCallback: embeddingCallback,
     );
-    
+
     _communityDetector = LeidenCommunityDetector(
       config: CommunityDetectionConfig(maxDepth: this.config.maxCommunityDepth),
     );
-    
+
     if (this.config.generateSummaries) {
       _summarizer = CommunitySummarizer(
         llmCallback: llmCallback,
         embeddingCallback: embeddingCallback,
       );
     }
-    
+
     // Initialize link predictor if enabled
     if (this.config.enableLinkPrediction) {
       _linkPredictor = LinkPredictor(
         repository: repository,
         config: this.config.linkPredictionConfig,
       );
-      
+
       // Initialize embedding similarity predictor
-      final linkConfig = this.config.linkPredictionConfig ?? LinkPredictionConfig();
+      final linkConfig =
+          this.config.linkPredictionConfig ?? LinkPredictionConfig();
       if (linkConfig.enableEmbeddingSimilarityLinks) {
         _embeddingSimilarityPredictor = EmbeddingSimilarityLinkPredictor(
           repository: repository,
@@ -254,7 +288,7 @@ class BackgroundIndexingService {
         );
       }
     }
-    
+
     // Setup periodic reindexing if configured
     if (this.config.reindexInterval != null) {
       _reindexTimer = Timer.periodic(
@@ -275,7 +309,8 @@ class BackgroundIndexingService {
 
   /// Start indexing process
   /// Set [useForegroundService] to true to keep indexing alive when app is backgrounded
-  Future<void> startIndexing({bool fullReindex = false, bool useForegroundService = true}) async {
+  Future<void> startIndexing(
+      {bool fullReindex = false, bool useForegroundService = true}) async {
     if (isRunning) {
       throw StateError('Indexing is already running');
     }
@@ -294,7 +329,7 @@ class BackgroundIndexingService {
           // Continue without foreground service
         }
       }
-      
+
       _updateProgress(_progress.copyWith(
         status: IndexingStatus.running,
         currentPhase: 'Starting',
@@ -308,7 +343,7 @@ class BackgroundIndexingService {
         detectedCommunities: 0,
         errorMessage: null,
       ));
-      
+
       // Clear batch extractions for new indexing run
       _batchExtractions.clear();
 
@@ -321,22 +356,24 @@ class BackgroundIndexingService {
       // Phase 1: Fetch data from connectors
       await _fetchDataPhase(fullReindex);
       if (_cancelRequested) return;
-      
+
       // Phase 1.5: Link prediction (after entity extraction)
       if (config.enableLinkPrediction && _linkPredictor != null) {
         await _linkPredictionPhase();
         if (_cancelRequested) return;
       }
-      
+
       // Phase 1.6: Embedding similarity link prediction
-      if (config.enableLinkPrediction && _embeddingSimilarityPredictor != null) {
+      if (config.enableLinkPrediction &&
+          _embeddingSimilarityPredictor != null) {
         await _embeddingSimilarityPhase();
         if (_cancelRequested) return;
       }
-      
+
       // Notify that extraction phase is complete (extraction model can be deallocated)
       if (onExtractionPhaseComplete != null) {
-        print('[BackgroundIndexing] Extraction phases complete, notifying for model cleanup');
+        print(
+            '[BackgroundIndexing] Extraction phases complete, notifying for model cleanup');
         await onExtractionPhaseComplete!();
       }
 
@@ -350,7 +387,8 @@ class BackgroundIndexingService {
       if (config.generateSummaries && _summarizer != null) {
         // Notify before summarization (main LLM may need reallocation)
         if (onBeforeSummarization != null) {
-          print('[BackgroundIndexing] Preparing for summarization, notifying for model readiness');
+          print(
+              '[BackgroundIndexing] Preparing for summarization, notifying for model readiness');
           await onBeforeSummarization!();
         }
         await _generateSummariesPhase();
@@ -362,7 +400,7 @@ class BackgroundIndexingService {
         endTime: DateTime.now(),
       ));
       print('[BackgroundIndexing] Indexing completed successfully');
-      
+
       // Stop foreground service
       if (_useForegroundService) {
         try {
@@ -380,7 +418,7 @@ class BackgroundIndexingService {
         errorMessage: e.toString(),
         endTime: DateTime.now(),
       ));
-      
+
       // Stop foreground service on failure too
       if (_useForegroundService) {
         try {
@@ -424,7 +462,7 @@ class BackgroundIndexingService {
       currentPhase: 'Cancelled',
       endTime: DateTime.now(),
     ));
-    
+
     // Stop foreground service
     if (_useForegroundService) {
       try {
@@ -445,14 +483,15 @@ class BackgroundIndexingService {
     ));
 
     // Check if we should force full fetch:
-    // If doing incremental sync but graph is empty (or only has "You" node), 
+    // If doing incremental sync but graph is empty (or only has "You" node),
     // force a full fetch since there's nothing to increment from
     var effectiveFullReindex = fullReindex;
     if (!fullReindex && config.incrementalIndexing) {
       final stats = await repository.getStats();
       // If only 0 or 1 entity (just "You" node), force full reindex
       if (stats.entityCount <= 1) {
-        print('[BackgroundIndexing] Graph is empty, forcing full fetch instead of incremental');
+        print(
+            '[BackgroundIndexing] Graph is empty, forcing full fetch instead of incremental');
         effectiveFullReindex = true;
         // Reset sync times so all data is fetched
         await connectorManager.resetSyncState();
@@ -483,7 +522,7 @@ class BackgroundIndexingService {
       // Process in batches
       for (var i = 0; i < items.length; i += config.batchSize) {
         if (_cancelRequested) return;
-        
+
         // Wait if paused
         while (_progress.status == IndexingStatus.paused) {
           await Future.delayed(const Duration(milliseconds: 500));
@@ -525,26 +564,73 @@ class BackgroundIndexingService {
           if (existing != null) {
             // Entity already indexed, skip processing
             assert(() {
-              print('[BackgroundIndexing] Skipping already indexed: $primaryEntityId');
+              print(
+                  '[BackgroundIndexing] Skipping already indexed: $primaryEntityId');
               return true;
             }());
             continue;
           }
         }
 
+        // --- Document special path ---
+        // When a documentIndexCallback is provided, documents are processed
+        // by reading their full content and delegating to GraphRAG's
+        // indexDocumentContent (chunking + embedding), exactly like the
+        // "Select files" manual flow.
+        final isDocument = dataType.toUpperCase() == 'DOCUMENT' ||
+            dataType.toUpperCase() == 'DOCUMENTS';
+        if (isDocument && _documentIndexCallback != null && item is Document) {
+          try {
+            final documentsConnector = connectorManager
+                .getConnector('documents') as DocumentsConnector?;
+            if (documentsConnector != null) {
+              final content = await documentsConnector.readContent(item.id);
+              if (content != null && content.isNotEmpty) {
+                assert(() {
+                  print(
+                      '[BackgroundIndexing] Indexing document content: ${item.name} (${content.length} chars)');
+                  return true;
+                }());
+                await _documentIndexCallback!(
+                  documentId: item.id,
+                  name: item.name,
+                  content: content,
+                  mimeType: item.mimeType,
+                );
+              } else {
+                assert(() {
+                  print(
+                      '[BackgroundIndexing] Skipping empty document: ${item.name}');
+                  return true;
+                }());
+              }
+            }
+          } catch (e) {
+            assert(() {
+              print(
+                  '[BackgroundIndexing] Error indexing document ${item.name}: $e');
+              return true;
+            }());
+          }
+          // Document fully handled by the callback – skip generic extraction
+          continue;
+        }
+
         // Choose extraction method based on data type
         // Use direct extraction for structured data (fast, no LLM)
         // Use LLM extraction for free-text data (notes, documents)
         ExtractionResult extraction;
-        final isStructuredData = _structuredDataTypes.contains(dataType.toUpperCase());
-        final isPhotoWithCaptioning = (dataType.toUpperCase() == 'PHOTO' || 
-                                       dataType.toUpperCase() == 'PHOTOS') &&
-                                      config.enableImageCaptioning &&
-                                      _visionLlmCallback != null;
-        
+        final isStructuredData =
+            _structuredDataTypes.contains(dataType.toUpperCase());
+        final isPhotoWithCaptioning = (dataType.toUpperCase() == 'PHOTO' ||
+                dataType.toUpperCase() == 'PHOTOS') &&
+            config.enableImageCaptioning &&
+            _visionLlmCallback != null;
+
         if (isPhotoWithCaptioning) {
           // Vision-enhanced photo extraction with image captioning
-          extraction = await _extractPhotoWithVision(itemMap, item, sourceId, dataType);
+          extraction =
+              await _extractPhotoWithVision(itemMap, item, sourceId, dataType);
         } else if (isStructuredData) {
           // Fast path: direct extraction without LLM
           extraction = await _directExtractor.extractFromStructured(
@@ -553,7 +639,8 @@ class BackgroundIndexingService {
             sourceType: dataType,
           );
           assert(() {
-            print('[BackgroundIndexing] Direct extraction: ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
+            print(
+                '[BackgroundIndexing] Direct extraction: ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
             return true;
           }());
         } else {
@@ -564,7 +651,8 @@ class BackgroundIndexingService {
             sourceType: dataType,
           );
           assert(() {
-            print('[BackgroundIndexing] LLM extraction: ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
+            print(
+                '[BackgroundIndexing] LLM extraction: ${extraction.entities.length} entities, ${extraction.relationships.length} relationships from $dataType item');
             return true;
           }());
         }
@@ -594,7 +682,8 @@ class BackgroundIndexingService {
             await repository.addEntity(graphEntity);
             uniqueStored++;
             assert(() {
-              print('[BackgroundIndexing] Added entity: ${entity.name} (${entity.type})');
+              print(
+                  '[BackgroundIndexing] Added entity: ${entity.name} (${entity.type})');
               return true;
             }());
           } else if (graphEntity.lastModified.isAfter(existing.lastModified)) {
@@ -626,15 +715,21 @@ class BackgroundIndexingService {
         // Add extracted relationships
         for (final rel in extraction.relationships) {
           // Try to find actual entity IDs by matching names
-          String? sourceEntityId = entityNameToId[rel.sourceEntity] 
-              ?? entityNameToId[rel.sourceEntity.toLowerCase()];
-          String? targetEntityId = entityNameToId[rel.targetEntity]
-              ?? entityNameToId[rel.targetEntity.toLowerCase()];
-          
+          String? sourceEntityId = entityNameToId[rel.sourceEntity] ??
+              entityNameToId[rel.sourceEntity.toLowerCase()];
+          String? targetEntityId = entityNameToId[rel.targetEntity] ??
+              entityNameToId[rel.targetEntity.toLowerCase()];
+
           // If we can't find the entities in this extraction, try generating IDs
           // with common type prefixes
           if (sourceEntityId == null) {
-            for (final type in ['PERSON', 'ORGANIZATION', 'LOCATION', 'EVENT', '']) {
+            for (final type in [
+              'PERSON',
+              'ORGANIZATION',
+              'LOCATION',
+              'EVENT',
+              ''
+            ]) {
               final candidateId = _generateEntityId(rel.sourceEntity, type);
               final exists = await repository.getEntity(candidateId);
               if (exists != null) {
@@ -644,7 +739,13 @@ class BackgroundIndexingService {
             }
           }
           if (targetEntityId == null) {
-            for (final type in ['PERSON', 'ORGANIZATION', 'LOCATION', 'EVENT', '']) {
+            for (final type in [
+              'PERSON',
+              'ORGANIZATION',
+              'LOCATION',
+              'EVENT',
+              ''
+            ]) {
               final candidateId = _generateEntityId(rel.targetEntity, type);
               final exists = await repository.getEntity(candidateId);
               if (exists != null) {
@@ -653,11 +754,12 @@ class BackgroundIndexingService {
               }
             }
           }
-          
+
           // Skip if we still can't find valid entity IDs
           if (sourceEntityId == null || targetEntityId == null) {
             assert(() {
-              print('[BackgroundIndexing] Skipping relationship: could not find entity IDs for ${rel.sourceEntity} -> ${rel.targetEntity}');
+              print(
+                  '[BackgroundIndexing] Skipping relationship: could not find entity IDs for ${rel.sourceEntity} -> ${rel.targetEntity}');
               return true;
             }());
             continue;
@@ -677,7 +779,8 @@ class BackgroundIndexingService {
           try {
             await repository.addRelationship(relationship);
             assert(() {
-              print('[BackgroundIndexing] Added relationship: ${rel.sourceEntity} -[${rel.type}]-> ${rel.targetEntity}');
+              print(
+                  '[BackgroundIndexing] Added relationship: ${rel.sourceEntity} -[${rel.type}]-> ${rel.targetEntity}');
               return true;
             }());
           } catch (e) {
@@ -690,20 +793,22 @@ class BackgroundIndexingService {
         }
 
         _updateProgress(_progress.copyWith(
-          extractedEntities: _progress.extractedEntities + extraction.entities.length,
+          extractedEntities:
+              _progress.extractedEntities + extraction.entities.length,
           uniqueEntitiesStored: _progress.uniqueEntitiesStored + uniqueStored,
-          extractedRelationships: _progress.extractedRelationships + extraction.relationships.length,
+          extractedRelationships: _progress.extractedRelationships +
+              extraction.relationships.length,
         ));
-        
+
         // Accumulate extraction for co-mention detection
         if (config.enableLinkPrediction) {
           _batchExtractions.add(extraction);
         }
-        
+
         // Create "You" links for primary entity of this item
         if (config.enableLinkPrediction && _linkPredictor != null) {
           await _createYouLinksForItem(itemMap, dataType, extraction);
-          
+
           // Also run template-based inference for this item
           await _applyTemplateInference(itemMap, dataType);
         }
@@ -729,7 +834,7 @@ class BackgroundIndexingService {
   ) async {
     // First, try to get thumbnail bytes from the photo
     Uint8List? imageBytes;
-    
+
     if (item is Photo && item.id.isNotEmpty) {
       // Try to fetch thumbnail from platform
       try {
@@ -745,7 +850,7 @@ class BackgroundIndexingService {
         }());
       }
     }
-    
+
     // If we couldn't get image bytes, fall back to direct extraction
     if (imageBytes == null || imageBytes.isEmpty) {
       final extraction = await _directExtractor.extractFromStructured(
@@ -754,46 +859,48 @@ class BackgroundIndexingService {
         sourceType: dataType,
       );
       assert(() {
-        print('[BackgroundIndexing] Vision fallback - no image bytes, using direct extraction');
+        print(
+            '[BackgroundIndexing] Vision fallback - no image bytes, using direct extraction');
         return true;
       }());
       return extraction;
     }
-    
+
     // Create vision extractor and extract entities
     final visionExtractor = VisionEntityExtractor(
       visionLlmCallback: _visionLlmCallback!,
       llmCallback: _llmCallback,
       embeddingCallback: _embeddingCallback,
     );
-    
+
     final extraction = await visionExtractor.extractFromPhoto(
       itemMap,
       imageBytes,
       sourceId: sourceId,
       sourceType: dataType,
     );
-    
+
     assert(() {
-      print('[BackgroundIndexing] Vision extraction: ${extraction.entities.length} entities from photo with captioning');
+      print(
+          '[BackgroundIndexing] Vision extraction: ${extraction.entities.length} entities from photo with captioning');
       return true;
     }());
-    
+
     return extraction;
   }
-  
+
   /// Phase 0: Initialize the "You" central node
   Future<void> _initializeYouNodePhase() async {
     _updateProgress(_progress.copyWith(
       currentPhase: 'Creating central node',
     ));
-    
+
     print('[BackgroundIndexing] Creating "You" central node');
     await _linkPredictor!.ensureYouEntityExists(
       embeddingCallback: _embeddingCallback,
     );
   }
-  
+
   /// Create links from "You" to the primary entity of an item
   Future<void> _createYouLinksForItem(
     Map<String, dynamic> itemMap,
@@ -801,10 +908,10 @@ class BackgroundIndexingService {
     ExtractionResult extraction,
   ) async {
     if (_linkPredictor == null) return;
-    
+
     // Determine the primary entity based on data type
     String? primaryEntityId;
-    
+
     switch (dataType.toUpperCase()) {
       case 'CONTACT':
       case 'CONTACTS':
@@ -814,7 +921,7 @@ class BackgroundIndexingService {
           primaryEntityId = _generateEntityId(name.toString(), 'PERSON');
         }
         break;
-        
+
       case 'CALENDAR':
       case 'CALENDAR_EVENT':
       case 'EVENT':
@@ -824,7 +931,7 @@ class BackgroundIndexingService {
           primaryEntityId = _generateEntityId(title.toString(), 'EVENT');
         }
         break;
-        
+
       case 'DOCUMENT':
       case 'DOCUMENTS':
       case 'DRIVE':
@@ -834,18 +941,19 @@ class BackgroundIndexingService {
           primaryEntityId = _generateEntityId(name.toString(), 'DOCUMENT');
         }
         break;
-        
+
       case 'PHOTO':
       case 'PHOTOS':
         // Link "You" -> Photo
         // Use filename as entity name (matches DirectEntityExtractor which uses
         // filename ?? name as the photo entity name)
-        final photoName = itemMap['filename'] ?? itemMap['name'] ?? itemMap['id'];
+        final photoName =
+            itemMap['filename'] ?? itemMap['name'] ?? itemMap['id'];
         if (photoName != null && photoName.toString().isNotEmpty) {
           primaryEntityId = _generateEntityId(photoName.toString(), 'PHOTO');
         }
         break;
-        
+
       case 'PHONE_CALL':
       case 'PHONE_CALLS':
       case 'CALL':
@@ -856,7 +964,7 @@ class BackgroundIndexingService {
           primaryEntityId = _generateEntityId(contactName.toString(), 'PERSON');
         }
         break;
-        
+
       case 'NOTE':
       case 'NOTES':
         // Link "You" -> Note
@@ -869,14 +977,18 @@ class BackgroundIndexingService {
       case 'ALARM':
       case 'ALARMS':
         // Link "You" -> Alarm
-        final label = itemMap['label']?.toString() ?? itemMap['title']?.toString() ?? 'Alarm';
-        final recurrenceType = itemMap['recurrenceType']?.toString() ?? 'single-occurrence';
+        final label = itemMap['label']?.toString() ??
+            itemMap['title']?.toString() ??
+            'Alarm';
+        final recurrenceType =
+            itemMap['recurrenceType']?.toString() ?? 'single-occurrence';
         final isRecurrent = recurrenceType == 'recurrent';
-        final alarmName = isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
+        final alarmName =
+            isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
         primaryEntityId = _generateEntityId(alarmName, 'ALARM');
         break;
     }
-    
+
     // Create the hub link if we have a primary entity
     // This connects: Hub -> Entity, and ensures Hub -> You exists
     if (primaryEntityId != null) {
@@ -885,7 +997,7 @@ class BackgroundIndexingService {
         dataSourceType: dataType,
         embeddingCallback: _embeddingCallback,
       );
-      
+
       if (hubLink != null) {
         try {
           await repository.addRelationship(hubLink.toRelationship());
@@ -906,7 +1018,7 @@ class BackgroundIndexingService {
       }
     }
   }
-  
+
   /// Apply template-based inference for an item
   /// Creates deterministic links based on structured data fields
   Future<void> _applyTemplateInference(
@@ -914,18 +1026,18 @@ class BackgroundIndexingService {
     String dataType,
   ) async {
     if (_linkPredictor == null) return;
-    
+
     final templateLinks = _linkPredictor.inferFromStructured(itemMap, dataType);
-    
+
     if (templateLinks.isEmpty) return;
-    
+
     var stored = 0;
     for (final link in templateLinks) {
       try {
         // Check if both entities exist before creating the relationship
         final source = await repository.getEntity(link.sourceEntityId);
         final target = await repository.getEntity(link.targetEntityId);
-        
+
         if (source != null && target != null) {
           await repository.addRelationship(link.toRelationship());
           stored++;
@@ -934,35 +1046,38 @@ class BackgroundIndexingService {
         // Link might already exist, ignore
       }
     }
-    
+
     if (stored > 0) {
       _updateProgress(_progress.copyWith(
         predictedLinks: _progress.predictedLinks + stored,
       ));
       assert(() {
-        print('[BackgroundIndexing] Applied $stored template-based links for $dataType');
+        print(
+            '[BackgroundIndexing] Applied $stored template-based links for $dataType');
         return true;
       }());
     }
   }
-  
+
   /// Phase 1.5: Link prediction (template-based + co-mention)
   Future<void> _linkPredictionPhase() async {
     if (_linkPredictor == null) return;
-    
+
     _updateProgress(_progress.copyWith(
       currentPhase: 'Predicting links',
     ));
-    
+
     print('[BackgroundIndexing] Starting link prediction phase');
-    print('[BackgroundIndexing] Processing ${_batchExtractions.length} extractions for co-mention detection');
-    
+    print(
+        '[BackgroundIndexing] Processing ${_batchExtractions.length} extractions for co-mention detection');
+
     // 1. Detect co-mentions across all extractions
     final coMentionLinks = await _linkPredictor.detectCoMentions(
       extractions: _batchExtractions,
     );
-    print('[BackgroundIndexing] Detected ${coMentionLinks.length} co-mention links');
-    
+    print(
+        '[BackgroundIndexing] Detected ${coMentionLinks.length} co-mention links');
+
     // 2. Store co-mention links
     var storedCoMentions = 0;
     for (final link in coMentionLinks) {
@@ -970,7 +1085,7 @@ class BackgroundIndexingService {
         // Check if both entities exist
         final source = await repository.getEntity(link.sourceEntityId);
         final target = await repository.getEntity(link.targetEntityId);
-        
+
         if (source != null && target != null) {
           await repository.addRelationship(link.toRelationship());
           storedCoMentions++;
@@ -980,11 +1095,12 @@ class BackgroundIndexingService {
       }
     }
     print('[BackgroundIndexing] Stored $storedCoMentions co-mention links');
-    
+
     // 3. Infer colleague relationships from shared organizations
     final colleagueLinks = await _linkPredictor.inferColleagueRelationships();
-    print('[BackgroundIndexing] Inferred ${colleagueLinks.length} colleague relationships');
-    
+    print(
+        '[BackgroundIndexing] Inferred ${colleagueLinks.length} colleague relationships');
+
     var storedColleagues = 0;
     for (final link in colleagueLinks) {
       try {
@@ -995,39 +1111,41 @@ class BackgroundIndexingService {
       }
     }
     print('[BackgroundIndexing] Stored $storedColleagues colleague links');
-    
+
     _updateProgress(_progress.copyWith(
-      predictedLinks: _progress.predictedLinks + storedCoMentions + storedColleagues,
+      predictedLinks:
+          _progress.predictedLinks + storedCoMentions + storedColleagues,
     ));
-    
+
     print('[BackgroundIndexing] Link prediction phase complete');
   }
-  
+
   /// Phase 1.6: Embedding similarity-based link prediction
   Future<void> _embeddingSimilarityPhase() async {
     if (_embeddingSimilarityPredictor == null) return;
-    
+
     _updateProgress(_progress.copyWith(
       currentPhase: 'Finding similar entities',
     ));
-    
+
     print('[BackgroundIndexing] Starting embedding similarity phase');
-    
+
     // 1. Find candidate pairs based on embedding similarity
     final candidates = await _embeddingSimilarityPredictor.findCandidates();
-    
+
     if (candidates.isEmpty) {
       print('[BackgroundIndexing] No embedding similarity candidates found');
       return;
     }
-    
+
     _updateProgress(_progress.copyWith(
       currentPhase: 'Validating similar pairs',
     ));
-    
+
     // 2. Validate candidates with LLM chain and create links
-    final validatedLinks = await _embeddingSimilarityPredictor.validateAndCreateLinks(candidates);
-    
+    final validatedLinks =
+        await _embeddingSimilarityPredictor.validateAndCreateLinks(candidates);
+
     // 3. Store validated links
     var storedLinks = 0;
     for (final link in validatedLinks) {
@@ -1038,12 +1156,13 @@ class BackgroundIndexingService {
         // Link might already exist
       }
     }
-    
+
     _updateProgress(_progress.copyWith(
       predictedLinks: _progress.predictedLinks + storedLinks,
     ));
-    
-    print('[BackgroundIndexing] Embedding similarity phase complete: $storedLinks links created');
+
+    print(
+        '[BackgroundIndexing] Embedding similarity phase complete: $storedLinks links created');
   }
 
   /// Phase 2: Detect communities
@@ -1060,33 +1179,41 @@ class BackgroundIndexingService {
 
     // Load all entities (simplified - in production, use pagination)
     // Include SELF type for the "You" central node, plus all EntityTypes except DATE and HUB
-    final communityEntityTypes = ['SELF', ...EntityTypes.all.where((t) => t != EntityTypes.date && t != EntityTypes.hub)];
+    final communityEntityTypes = [
+      'SELF',
+      ...EntityTypes.all
+          .where((t) => t != EntityTypes.date && t != EntityTypes.hub)
+    ];
     for (final type in communityEntityTypes) {
       final typeEntities = await repository.getEntitiesByType(type);
       entities.addAll(typeEntities);
       if (typeEntities.isNotEmpty) {
-        print('[BackgroundIndexing] Loaded ${typeEntities.length} $type entities');
+        print(
+            '[BackgroundIndexing] Loaded ${typeEntities.length} $type entities');
       }
     }
-    
-    print('[BackgroundIndexing] Total entities for community detection: ${entities.length}');
+
+    print(
+        '[BackgroundIndexing] Total entities for community detection: ${entities.length}');
 
     // Load relationships for each entity
     for (final entity in entities) {
       final rels = await repository.getRelationships(entity.id);
       relationships.addAll(rels);
     }
-    
-    print('[BackgroundIndexing] Total relationships for community detection: ${relationships.length}');
+
+    print(
+        '[BackgroundIndexing] Total relationships for community detection: ${relationships.length}');
 
     // Run community detection
     final result = await _communityDetector.detectCommunities(
       entities,
       relationships,
     );
-    
-    print('[BackgroundIndexing] Detected ${result.communities.length} communities');
-    
+
+    print(
+        '[BackgroundIndexing] Detected ${result.communities.length} communities');
+
     // Build set of valid entity IDs for validation
     final validEntityIds = entities.map((e) => e.id).toSet();
     print('[BackgroundIndexing] Valid entity IDs: ${validEntityIds.length}');
@@ -1098,27 +1225,30 @@ class BackgroundIndexingService {
       final validCommunityEntityIds = community.entityIds
           .where((id) => validEntityIds.contains(id))
           .toList();
-      
+
       if (validCommunityEntityIds.isEmpty) {
-        print('[BackgroundIndexing] Skipping community ${community.id} - no valid entity IDs');
+        print(
+            '[BackgroundIndexing] Skipping community ${community.id} - no valid entity IDs');
         continue;
       }
-      
+
       if (validCommunityEntityIds.length != community.entityIds.length) {
-        print('[BackgroundIndexing] Community ${community.id} filtered from ${community.entityIds.length} to ${validCommunityEntityIds.length} entity IDs');
+        print(
+            '[BackgroundIndexing] Community ${community.id} filtered from ${community.entityIds.length} to ${validCommunityEntityIds.length} entity IDs');
       }
-      
+
       // Include child community IDs in metadata for hierarchical summarization
       final metadata = <String, dynamic>{
         'modularity': community.modularity,
       };
-      if (community.childCommunityIds != null && community.childCommunityIds!.isNotEmpty) {
+      if (community.childCommunityIds != null &&
+          community.childCommunityIds!.isNotEmpty) {
         metadata['childCommunityIds'] = community.childCommunityIds;
       }
       if (community.parentCommunityId != null) {
         metadata['parentCommunityId'] = community.parentCommunityId;
       }
-      
+
       final graphCommunity = GraphCommunity(
         id: community.id,
         level: community.level,
@@ -1132,10 +1262,11 @@ class BackgroundIndexingService {
         await repository.addCommunity(graphCommunity);
         storedCount++;
       } catch (e) {
-        print('[BackgroundIndexing] Failed to store community ${community.id}: $e');
+        print(
+            '[BackgroundIndexing] Failed to store community ${community.id}: $e');
       }
     }
-    
+
     print('[BackgroundIndexing] Successfully stored $storedCount communities');
 
     _updateProgress(_progress.copyWith(
@@ -1144,7 +1275,7 @@ class BackgroundIndexingService {
   }
 
   /// Phase 3: Generate community summaries (hierarchical approach from GraphRAG paper)
-  /// 
+  ///
   /// Following the paper methodology:
   /// - Lowest level (most granular): summarize from entities and relationships
   /// - Higher levels: summarize from child community summaries
@@ -1159,12 +1290,16 @@ class BackgroundIndexingService {
     // Use the same broad type list as community detection to avoid empty summaries
     final entities = <GraphEntity>[];
     final relationships = <GraphRelationship>[];
-    
-    final summaryEntityTypes = ['SELF', ...EntityTypes.all.where((t) => t != EntityTypes.date && t != EntityTypes.hub)];
+
+    final summaryEntityTypes = [
+      'SELF',
+      ...EntityTypes.all
+          .where((t) => t != EntityTypes.date && t != EntityTypes.hub)
+    ];
     for (final type in summaryEntityTypes) {
       entities.addAll(await repository.getEntitiesByType(type));
     }
-    
+
     for (final entity in entities) {
       relationships.addAll(await repository.getRelationships(entity.id));
     }
@@ -1187,7 +1322,8 @@ class BackgroundIndexingService {
       if (_cancelRequested) return;
 
       final communities = await repository.getCommunitiesByLevel(level);
-      print('[BackgroundIndexing] Generating summaries for level $level (${communities.length} communities)');
+      print(
+          '[BackgroundIndexing] Generating summaries for level $level (${communities.length} communities)');
 
       for (final community in communities) {
         if (_cancelRequested) return;
@@ -1201,7 +1337,7 @@ class BackgroundIndexingService {
         );
 
         CommunitySummary summary;
-        
+
         if (level == maxLevel) {
           // Most granular level: summarize from entities
           summary = await _summarizer.summarize(
@@ -1216,14 +1352,15 @@ class BackgroundIndexingService {
               .map((id) => summaryByCommId[id])
               .whereType<CommunitySummary>()
               .toList();
-          
+
           if (childSummaries.isNotEmpty) {
             // Use hierarchical summarization
             summary = await _summarizer.summarizeHierarchical(
               detectedCommunity,
               childSummaries,
             );
-            print('[BackgroundIndexing] Generated hierarchical summary for ${community.id} from ${childSummaries.length} children');
+            print(
+                '[BackgroundIndexing] Generated hierarchical summary for ${community.id} from ${childSummaries.length} children');
           } else {
             // Fallback to entity-based summary
             summary = await _summarizer.summarize(
@@ -1244,14 +1381,15 @@ class BackgroundIndexingService {
         );
       }
     }
-    
-    print('[BackgroundIndexing] Generated summaries for ${summaryByCommId.length} communities');
+
+    print(
+        '[BackgroundIndexing] Generated summaries for ${summaryByCommId.length} communities');
   }
 
   /// Convert item to map for extraction
   Map<String, dynamic> _itemToMap(dynamic item, String dataType) {
     if (item is Map<String, dynamic>) return item;
-    
+
     if (item is Contact) {
       return {
         'id': item.id,
@@ -1265,7 +1403,7 @@ class BackgroundIndexingService {
         'sourceApp': 'system_contacts',
       };
     }
-    
+
     if (item is CalendarEvent) {
       return {
         'id': item.id,
@@ -1281,7 +1419,7 @@ class BackgroundIndexingService {
         'sourceApp': 'system_calendar',
       };
     }
-    
+
     if (item is Photo) {
       return {
         'id': item.id,
@@ -1297,14 +1435,17 @@ class BackgroundIndexingService {
         'sourceApp': 'system_photos',
       };
     }
-    
+
     if (item is PhoneCall) {
       // Compute start/end times from timestamp + duration
       final startDt = item.timestamp;
       final endDt = startDt.add(item.duration);
-      final date = '${startDt.year}-${startDt.month.toString().padLeft(2, '0')}-${startDt.day.toString().padLeft(2, '0')}';
-      final startTime = '${startDt.hour.toString().padLeft(2, '0')}:${startDt.minute.toString().padLeft(2, '0')}';
-      final endTime = '${endDt.hour.toString().padLeft(2, '0')}:${endDt.minute.toString().padLeft(2, '0')}';
+      final date =
+          '${startDt.year}-${startDt.month.toString().padLeft(2, '0')}-${startDt.day.toString().padLeft(2, '0')}';
+      final startTime =
+          '${startDt.hour.toString().padLeft(2, '0')}:${startDt.minute.toString().padLeft(2, '0')}';
+      final endTime =
+          '${endDt.hour.toString().padLeft(2, '0')}:${endDt.minute.toString().padLeft(2, '0')}';
 
       return {
         'id': item.id,
@@ -1320,7 +1461,7 @@ class BackgroundIndexingService {
         'sourceApp': 'system_calls',
       };
     }
-    
+
     if (item is Document) {
       return {
         'id': item.id,
@@ -1335,14 +1476,15 @@ class BackgroundIndexingService {
         'sourceApp': 'system_documents',
       };
     }
-    
+
     return {'_raw': item.toString()};
   }
 
   /// Get item ID
   String _getItemId(dynamic item, String dataType) {
     if (item is Map<String, dynamic>) {
-      return item['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+      return item['id']?.toString() ??
+          DateTime.now().millisecondsSinceEpoch.toString();
     }
     if (item is Contact) return item.id;
     if (item is CalendarEvent) return item.id;
@@ -1380,7 +1522,8 @@ class BackgroundIndexingService {
       case 'PHOTO':
       case 'PHOTOS':
         // Use filename as entity name (matches DirectEntityExtractor)
-        final photoName = itemMap['filename'] ?? itemMap['name'] ?? itemMap['id'];
+        final photoName =
+            itemMap['filename'] ?? itemMap['name'] ?? itemMap['id'];
         if (photoName != null && photoName.toString().isNotEmpty) {
           return _generateEntityId(photoName.toString(), 'PHOTO');
         }
@@ -1416,12 +1559,15 @@ class BackgroundIndexingService {
       case 'ALARM':
       case 'ALARMS':
         // Entity extractor names alarms "Alarm: <label>" or "Recurring alarm: <label>"
-        final label = itemMap['label']?.toString() ?? itemMap['title']?.toString() ?? 'Alarm';
-        final recurrenceType = itemMap['recurrenceType']?.toString() ?? 'single-occurrence';
+        final label = itemMap['label']?.toString() ??
+            itemMap['title']?.toString() ??
+            'Alarm';
+        final recurrenceType =
+            itemMap['recurrenceType']?.toString() ?? 'single-occurrence';
         final isRecurrent = recurrenceType == 'recurrent';
-        final alarmName = isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
+        final alarmName =
+            isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
         return _generateEntityId(alarmName, 'ALARM');
-
     }
     return null;
   }
@@ -1430,15 +1576,17 @@ class BackgroundIndexingService {
   void _updateProgress(IndexingProgress progress) {
     _progress = progress;
     _progressController.add(progress);
-    
+
     // Update notification progress if foreground service is running
     if (_useForegroundService && progress.status == IndexingStatus.running) {
-      _platform.updateIndexingProgress(
-        progress: progress.progress,
-        phase: progress.currentPhase,
-        entities: progress.extractedEntities,
-        relationships: progress.extractedRelationships,
-      ).catchError((_) {}); // Ignore errors
+      _platform
+          .updateIndexingProgress(
+            progress: progress.progress,
+            phase: progress.currentPhase,
+            entities: progress.extractedEntities,
+            relationships: progress.extractedRelationships,
+          )
+          .catchError((_) {}); // Ignore errors
     }
   }
 
@@ -1474,11 +1622,11 @@ extension IndexingServiceMonitoring on BackgroundIndexingService {
     if (!isRunning || progress.elapsed == null || progress.progress <= 0) {
       return null;
     }
-    
+
     final elapsed = progress.elapsed!;
     final rate = progress.progress / elapsed.inMilliseconds;
     final remaining = (1 - progress.progress) / rate;
-    
+
     return Duration(milliseconds: remaining.toInt());
   }
 }

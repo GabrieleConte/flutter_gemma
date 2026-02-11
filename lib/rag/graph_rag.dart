@@ -279,6 +279,18 @@ class GraphRAG {
       embeddingCallback: _embeddingCallback,
       visionLlmCallback: _visionLlmCallback,
       structuredLlmCallback: _extractionLlmCallback,
+      documentIndexCallback: ({
+        required String documentId,
+        required String name,
+        required String content,
+        String? mimeType,
+      }) =>
+          indexDocumentContent(
+        documentId: documentId,
+        name: name,
+        content: content,
+        mimeType: mimeType,
+      ),
       onExtractionPhaseComplete: _onExtractionPhaseComplete,
       onBeforeSummarization: _onBeforeSummarization,
       config: _config.indexingConfig,
