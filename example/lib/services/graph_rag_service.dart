@@ -52,6 +52,11 @@ class GraphRAGService {
   /// the model parameters.
   Future<InferenceChat> Function()? _chatFactory;
   
+  /// Factory callback to recreate the extraction chat on demand.
+  /// Used when the extraction chat was released after the indexing pipeline
+  /// completed but the user then adds a note, document, or alarm.
+  Future<InferenceChat> Function()? _extractionChatFactory;
+  
   /// Mutex that serializes every LLM call through the single native session.
   final _AsyncMutex _llmLock = _AsyncMutex();
   
@@ -87,6 +92,8 @@ class GraphRAGService {
   /// [chatFactory] - Factory callback to recreate the main chat if the underlying
   ///                 model/session becomes stale ("Model is closed").  If null,
   ///                 stale-model errors will propagate as-is.
+  /// [extractionChatFactory] - Factory callback to recreate the extraction chat
+  ///                          on demand after it was released post-indexing.
   Future<void> initialize({
     required InferenceChat chat,
     required EmbeddingModel embeddingModel,
@@ -94,6 +101,7 @@ class GraphRAGService {
     InferenceChat? visionChat,
     bool enableImageCaptioning = false,
     Future<InferenceChat> Function()? chatFactory,
+    Future<InferenceChat> Function()? extractionChatFactory,
     int maxTokens = 4096,
   }) async {
     if (_isInitialized) {
@@ -108,6 +116,7 @@ class GraphRAGService {
       _visionChat = visionChat;
       _embeddingModel = embeddingModel;
       _chatFactory = chatFactory;
+      _extractionChatFactory = extractionChatFactory;
       
       // Get database path
       final directory = await getApplicationDocumentsDirectory();
@@ -258,7 +267,13 @@ class GraphRAGService {
   /// Uses the dedicated [_extractionChat] instance, serialized by [_llmLock].
   Future<String> _generateExtractionResponse(String prompt, {List<Tool>? tools}) async {
     if (_extractionChat == null) {
-      throw StateError('Extraction chat model not initialized');
+      if (_extractionChatFactory != null) {
+        debugPrint('[GraphRAGService] Extraction chat not available, recreating via factory...');
+        _extractionChat = await _extractionChatFactory!();
+        debugPrint('[GraphRAGService] Extraction chat recreated via factory ✅');
+      } else {
+        throw StateError('Extraction chat model not initialized and no factory available');
+      }
     }
     
     debugPrint('[GraphRAGService] Generating extraction response with tools: ${tools?.map((t) => t.name).join(", ") ?? "none"}');
@@ -814,6 +829,7 @@ class GraphRAGService {
     _visionChat = null;
     _embeddingModel = null;
     _chatFactory = null;
+    _extractionChatFactory = null;
     _isInitialized = false;
     _error = null;
     debugPrint('[GraphRAGService] Disposed');

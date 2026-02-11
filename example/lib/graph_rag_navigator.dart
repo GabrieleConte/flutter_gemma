@@ -270,6 +270,26 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         return freshChat;
       }
       
+      // Factory to recreate the extraction chat on demand (e.g. after indexing
+      // pipeline released it, but user then adds a note/document/alarm).
+      Future<InferenceChat> extractionChatFactory() async {
+        debugPrint('[GraphRAGNavigator] extractionChatFactory: recreating extraction chat...');
+        final freshModel = await FlutterGemma.getActiveModel(
+          maxTokens: _selectedInferenceModel.maxTokens,
+          preferredBackend: PreferredBackend.cpu,
+        );
+        final freshChat = await freshModel.createChat(
+          temperature: 0.0,
+          randomSeed: 1,
+          topK: _selectedInferenceModel.topK,
+          supportsFunctionCalls: true,
+          tools: extractionTools,
+          modelType: _selectedInferenceModel.modelType,
+        );
+        debugPrint('[GraphRAGNavigator] extractionChatFactory: extraction chat recreated ✅');
+        return freshChat;
+      }
+      
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
@@ -277,6 +297,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         visionChat: visionChat,
         enableImageCaptioning: enableCaptioning,
         chatFactory: chatFactory,
+        extractionChatFactory: extractionChatFactory,
         maxTokens: _selectedInferenceModel.maxTokens,
       );
 

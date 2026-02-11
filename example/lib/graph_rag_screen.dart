@@ -184,11 +184,32 @@ class _GraphRAGScreenState extends State<GraphRAGScreen> {
         return freshChat;
       }
       
+      // Factory to recreate the extraction chat on demand (e.g. after indexing
+      // pipeline released it, but user then adds a note/document/alarm).
+      Future<InferenceChat> extractionChatFactory() async {
+        debugPrint('[GraphRAGScreen] extractionChatFactory: recreating extraction chat...');
+        final freshModel = await FlutterGemma.getActiveModel(
+          maxTokens: inferenceModel.maxTokens,
+          preferredBackend: PreferredBackend.cpu,
+        );
+        final freshChat = await freshModel.createChat(
+          temperature: 0.0,
+          randomSeed: 1,
+          topK: inferenceModel.topK,
+          supportsFunctionCalls: true,
+          tools: extractionTools,
+          modelType: inferenceModel.modelType,
+        );
+        debugPrint('[GraphRAGScreen] extractionChatFactory: extraction chat recreated ✅');
+        return freshChat;
+      }
+      
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
         extractionChat: extractionChat,
         chatFactory: chatFactory,
+        extractionChatFactory: extractionChatFactory,
       );
       
       // Subscribe to indexing progress
