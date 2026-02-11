@@ -58,6 +58,16 @@
             android:name="dev.flutterberlin.flutter_gemma.IndexingForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Receiver for adb-driven DB sync (works in release builds) -->
+        <receiver
+            android:name=".DbSyncReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.flutterberlin.flutter_gemma_example.DB_EXPORT" />
+                <action android:name="dev.flutterberlin.flutter_gemma_example.DB_IMPORT" />
+            </intent-filter>
+        </receiver>
         
         <uses-native-library
             android:name="libOpenCL.so"
