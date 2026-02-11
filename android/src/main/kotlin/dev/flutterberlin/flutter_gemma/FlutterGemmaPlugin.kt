@@ -321,8 +321,12 @@ private class PlatformServiceImpl(
         }
 
         callback(Result.success(Unit))
-      } catch (e: Exception) {
-        callback(Result.failure(e))
+      } catch (e: Throwable) {
+        // Catch Throwable (not just Exception) because JNI calls can throw
+        // Error types (NoClassDefFoundError, UnsatisfiedLinkError) that R8
+        // minification in release builds can trigger.
+        Log.e(TAG, "createModel failed: ${e.javaClass.name}: ${e.message}", e)
+        callback(Result.failure(if (e is Exception) e else RuntimeException("Native engine error: ${e.message}", e)))
       }
     }
   }
@@ -369,8 +373,9 @@ private class PlatformServiceImpl(
           session = currentEngine.createSession(config)
         }
         callback(Result.success(Unit))
-      } catch (e: Exception) {
-        callback(Result.failure(e))
+      } catch (e: Throwable) {
+        Log.e(TAG, "createSession failed: ${e.javaClass.name}: ${e.message}", e)
+        callback(Result.failure(if (e is Exception) e else RuntimeException("Native session error: ${e.message}", e)))
       }
     }
   }
@@ -522,8 +527,9 @@ private class PlatformServiceImpl(
         embeddingModel = EmbeddingModel(context, modelPath, tokenizerPath, useGPU)
         embeddingModel!!.initialize()
         callback(Result.success(Unit))
-      } catch (e: Exception) {
-        callback(Result.failure(e))
+      } catch (e: Throwable) {
+        Log.e(TAG, "createEmbeddingModel failed: ${e.javaClass.name}: ${e.message}", e)
+        callback(Result.failure(if (e is Exception) e else RuntimeException("Native embedding error: ${e.message}", e)))
       }
     }
   }

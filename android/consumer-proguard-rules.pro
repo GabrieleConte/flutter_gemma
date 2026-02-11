@@ -3,6 +3,13 @@
 -keep class com.google.mediapipe.proto.** { *; }
 -keepclassmembers class com.google.mediapipe.tasks.genai.llminference.LlmInference { *; }
 
+# LiteRT-LM Engine and all Google AI Edge libraries (uses JNI internally — R8 must not strip/obfuscate)
+-keep class com.google.ai.edge.** { *; }
+-dontwarn com.google.ai.edge.**
+
+# Flutter Gemma plugin engine classes (EngineFactory uses runtime type dispatch)
+-keep class dev.flutterberlin.flutter_gemma.** { *; }
+
 # Protocol Buffers
 -keep class com.google.protobuf.** { *; }
 -dontwarn com.google.protobuf.**

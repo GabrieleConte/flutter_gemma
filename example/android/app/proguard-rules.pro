@@ -14,6 +14,13 @@
 -keep class com.google.mediapipe.** { *; }
 -dontwarn com.google.mediapipe.**
 
+# LiteRT-LM Engine and all Google AI Edge libraries (uses JNI internally — R8 must not strip/obfuscate)
+-keep class com.google.ai.edge.** { *; }
+-dontwarn com.google.ai.edge.**
+
+# Flutter Gemma plugin engine classes
+-keep class dev.flutterberlin.flutter_gemma.** { *; }
+
 # MediaPipe specific proto classes that might be missing in tasks-genai
 -dontwarn com.google.mediapipe.proto.CalculatorProfileProto*
 -dontwarn com.google.mediapipe.proto.GraphTemplateProto*

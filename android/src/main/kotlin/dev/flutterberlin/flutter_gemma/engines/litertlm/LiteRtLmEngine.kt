@@ -83,8 +83,11 @@ class LiteRtLmEngine(
             isInitialized = true
 
             Log.i(TAG, "LiteRT-LM engine initialized successfully")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize LiteRT-LM engine", e)
+        } catch (e: Throwable) {
+            // Catch Throwable: JNI native code can throw Error types
+            // (NoClassDefFoundError, UnsatisfiedLinkError) especially in
+            // release builds with R8 minification enabled.
+            Log.e(TAG, "Failed to initialize LiteRT-LM engine: ${e.javaClass.name}", e)
             throw RuntimeException("Failed to initialize LiteRT-LM: ${e.message}", e)
         }
     }

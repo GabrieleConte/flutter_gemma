@@ -76,10 +76,10 @@ class LiteRtLmSession(
         return try {
             val response = conversation.sendMessage(message)
             response.toString()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error generating response", e)
-            errorFlow.tryEmit(e)
-            throw e
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error generating response: ${e.javaClass.name}", e)
+            errorFlow.tryEmit(if (e is Exception) e else RuntimeException(e))
+            throw if (e is Exception) e else RuntimeException(e)
         }
     }
 
@@ -105,9 +105,9 @@ class LiteRtLmSession(
                     resultFlow.tryEmit("" to true)
                 }
             })
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start async generation", e)
-            errorFlow.tryEmit(e)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to start async generation: ${e.javaClass.name}", e)
+            errorFlow.tryEmit(if (e is Exception) e else RuntimeException(e))
             resultFlow.tryEmit("" to true)
         }
     }

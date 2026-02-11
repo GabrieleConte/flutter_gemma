@@ -184,18 +184,22 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
       }
         */
       const gpuAvailable = false; // Force CPU for now since vision encoder is not fully stable yet
+      debugPrint('[GraphRAGNavigator] Creating native model (CPU backend)...');
       final model = await FlutterGemma.getActiveModel(
           maxTokens: _selectedInferenceModel.maxTokens,
           preferredBackend: PreferredBackend.cpu,
       );
+      debugPrint('[GraphRAGNavigator] Native model created successfully');
 
       // Create main chat for text generation (no tools)
+      debugPrint('[GraphRAGNavigator] Creating main chat...');
       final chat = await model.createChat(
         temperature: _selectedInferenceModel.temperature,
         randomSeed: 1,
         topK: _selectedInferenceModel.topK,
         modelType: _selectedInferenceModel.modelType,
       );
+      debugPrint('[GraphRAGNavigator] Main chat created');
       
       // Create extraction chat from same model with tool support
       setState(() => _statusMessage = 'Creating extraction chat with tools...');
@@ -308,7 +312,8 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
 
       final modeLabel = enableCaptioning ? 'with image captioning' : 'text-only (no GPU)';
       _showSnackBar('GraphRAG ready $modeLabel! 🎉');
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('[GraphRAGNavigator] Initialization failed: $e\n$stackTrace');
       setState(() {
         _isInitializing = false;
         _initError = e.toString();
