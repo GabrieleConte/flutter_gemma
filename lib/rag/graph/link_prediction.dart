@@ -13,7 +13,8 @@ class LinkValidationTools {
   /// Tool for validating and categorizing a relationship between two entities
   static const validateRelationship = Tool(
     name: 'validate_relationship',
-    description: 'Validate whether two entities have a relationship and categorize it. '
+    description:
+        'Validate whether two entities have a relationship and categorize it. '
         'Call this with the relationship type, validity, and confidence score.',
     parameters: {
       'type': 'object',
@@ -38,7 +39,8 @@ class LinkValidationTools {
         },
         'is_valid': {
           'type': 'boolean',
-          'description': 'Whether a meaningful relationship exists between the entities'
+          'description':
+              'Whether a meaningful relationship exists between the entities'
         },
         'confidence': {
           'type': 'number',
@@ -66,9 +68,15 @@ class DataSourceTypes {
   static const String phoneCall = 'PHONE_CALL';
   static const String note = 'NOTE';
   static const String alarm = 'ALARM';
-  
+
   static const List<String> all = [
-    contact, calendar, document, photo, phoneCall, note, alarm,
+    contact,
+    calendar,
+    document,
+    photo,
+    phoneCall,
+    note,
+    alarm,
   ];
 }
 
@@ -78,7 +86,7 @@ class DataHubEntity {
   static String idFor(String dataSourceType) {
     return 'hub_${dataSourceType.toLowerCase()}';
   }
-  
+
   /// Get the display name for a hub entity
   static String nameFor(String dataSourceType) {
     switch (dataSourceType.toUpperCase()) {
@@ -111,14 +119,15 @@ class DataHubEntity {
         return 'My Data';
     }
   }
-  
+
   /// Create the GraphEntity for a data hub
-  static GraphEntity create(String dataSourceType, {List<double>? embedding, int? count}) {
+  static GraphEntity create(String dataSourceType,
+      {List<double>? embedding, int? count}) {
     final id = idFor(dataSourceType);
-    final name = count != null 
+    final name = count != null
         ? '${nameFor(dataSourceType)} ($count)'
         : nameFor(dataSourceType);
-    
+
     return GraphEntity(
       id: id,
       name: name,
@@ -138,13 +147,13 @@ class DataHubEntity {
 class YouEntity {
   /// The fixed ID for the "You" entity
   static const String id = 'you_central_node';
-  
+
   /// The display name
   static const String name = 'You';
-  
+
   /// The entity type
   static const String type = 'SELF';
-  
+
   /// Create the GraphEntity for "You"
   static GraphEntity create({List<double>? embedding}) {
     return GraphEntity(
@@ -152,7 +161,8 @@ class YouEntity {
       name: name,
       type: type,
       embedding: embedding,
-      description: 'The central node representing you - connects all your personal data',
+      description:
+          'The central node representing you - connects all your personal data',
       metadata: {
         'isGlobalNode': true,
         'dataFamilies': DataSourceTypes.all,
@@ -166,31 +176,31 @@ class YouEntity {
 class YouRelationshipTypes {
   /// You -> Hub: You have this data category
   static const String hasData = 'HAS_DATA';
-  
+
   /// You -> Contact: You know this person
   static const String knows = 'KNOWS';
-  
+
   /// You -> Calendar Event: You have/attended this event
   static const String hasEvent = 'HAS_EVENT';
-  
+
   /// You -> Document: You own/created this document
   static const String ownsDocument = 'OWNS_DOCUMENT';
-  
+
   /// You -> Photo: You have/took this photo
   static const String hasPhoto = 'HAS_PHOTO';
-  
+
   /// You -> Phone Call: You made/received this call
   static const String madeCall = 'MADE_CALL';
-  
+
   /// You -> Note: You wrote this note
   static const String wroteNote = 'WROTE_NOTE';
-  
+
   /// You -> Alarm: You set this alarm
   static const String setAlarm = 'SET_ALARM';
-  
+
   /// Generic relationship for data ownership
   static const String owns = 'OWNS';
-  
+
   /// Get the appropriate relationship type for a data source
   static String forDataSource(String dataSourceType) {
     switch (dataSourceType.toUpperCase()) {
@@ -229,36 +239,36 @@ class YouRelationshipTypes {
 class LinkPredictionConfig {
   /// Time window for temporal proximity (co-occurrence)
   final Duration temporalWindow;
-  
+
   /// Minimum co-occurrence count to create a link
   final int minCoOccurrenceCount;
-  
+
   /// Weight for co-occurrence based links
   final double coOccurrenceWeight;
-  
+
   /// Weight for template-based links (deterministic)
   final double templateWeight;
-  
+
   /// Enable temporal proximity linking
   final bool enableTemporalLinks;
-  
+
   /// Enable co-mention pattern detection
   final bool enableCoMentionLinks;
-  
+
   /// Enable template-based inference
   final bool enableTemplateLinks;
-  
+
   /// Enable embedding similarity-based link prediction
   final bool enableEmbeddingSimilarityLinks;
-  
+
   /// Minimum cosine similarity threshold for embedding-based linking (0.0-1.0)
   final double embeddingSimilarityThreshold;
-  
+
   /// Minimum cosine similarity threshold for same-type entity pairs (0.0-1.0)
   /// Lower threshold to discover more relationships between entities of the same type
   /// (e.g., PERSON-PERSON family members, LOCATION-LOCATION nearby places)
   final double sameTypeSimilarityThreshold;
-  
+
   /// Maximum number of candidate pairs to evaluate with LLM
   final int maxEmbeddingCandidates;
 
@@ -315,7 +325,7 @@ class PredictedLink {
 class LinkPredictor {
   final GraphRepository repository;
   final LinkPredictionConfig config;
-  
+
   /// Track created hub entities to avoid duplicates
   final Set<String> _createdHubs = {};
 
@@ -340,7 +350,7 @@ class LinkPredictor {
       print('[LinkPredictor] Created "You" central entity');
     }
   }
-  
+
   /// Ensure a hub entity exists for a data source type
   /// Returns the hub entity ID
   Future<String> ensureHubEntityExists({
@@ -348,12 +358,12 @@ class LinkPredictor {
     Future<List<double>> Function(String text)? embeddingCallback,
   }) async {
     final hubId = DataHubEntity.idFor(dataSourceType);
-    
+
     // Check if already created this session
     if (_createdHubs.contains(hubId)) {
       return hubId;
     }
-    
+
     final existing = await repository.getEntity(hubId);
     if (existing == null) {
       List<double>? embedding;
@@ -362,8 +372,9 @@ class LinkPredictor {
           DataHubEntity.nameFor(dataSourceType),
         );
       }
-      await repository.addEntity(DataHubEntity.create(dataSourceType, embedding: embedding));
-      
+      await repository.addEntity(
+          DataHubEntity.create(dataSourceType, embedding: embedding));
+
       // Link hub to "You"
       await repository.addRelationship(GraphRelationship(
         id: '${YouEntity.id}_${YouRelationshipTypes.hasData}_$hubId',
@@ -372,10 +383,11 @@ class LinkPredictor {
         type: YouRelationshipTypes.hasData,
         weight: 1.0,
       ));
-      
-      print('[LinkPredictor] Created hub entity: ${DataHubEntity.nameFor(dataSourceType)}');
+
+      print(
+          '[LinkPredictor] Created hub entity: ${DataHubEntity.nameFor(dataSourceType)}');
     }
-    
+
     _createdHubs.add(hubId);
     return hubId;
   }
@@ -390,15 +402,15 @@ class LinkPredictor {
     // Verify the entity exists
     final entity = await repository.getEntity(entityId);
     if (entity == null) return null;
-    
+
     // Ensure hub exists (this also links hub to You)
     final hubId = await ensureHubEntityExists(
       dataSourceType: dataSourceType,
       embeddingCallback: embeddingCallback,
     );
-    
+
     final relationshipType = YouRelationshipTypes.forDataSource(dataSourceType);
-    
+
     return PredictedLink(
       sourceEntityId: hubId,
       targetEntityId: entityId,
@@ -422,9 +434,9 @@ class LinkPredictor {
     // Verify the entity exists
     final entity = await repository.getEntity(entityId);
     if (entity == null) return null;
-    
+
     final relationshipType = YouRelationshipTypes.forDataSource(dataSourceType);
-    
+
     return PredictedLink(
       sourceEntityId: YouEntity.id,
       targetEntityId: entityId,
@@ -441,13 +453,13 @@ class LinkPredictor {
   /// Run template-based inference for a contact
   List<PredictedLink> inferFromContact(Map<String, dynamic> contact) {
     final links = <PredictedLink>[];
-    
+
     final personId = _generateEntityId(
       contact['fullName'] ?? contact['name'] ?? '',
       'PERSON',
     );
     final orgName = contact['organization'] ?? contact['organizationName'];
-    
+
     // If person works at an organization
     if (orgName != null && orgName.toString().isNotEmpty) {
       final orgId = _generateEntityId(orgName.toString(), 'ORGANIZATION');
@@ -460,21 +472,21 @@ class LinkPredictor {
         evidence: {'organizationName': orgName},
       ));
     }
-    
+
     return links;
   }
 
   /// Run template-based inference for a calendar event
   List<PredictedLink> inferFromCalendarEvent(Map<String, dynamic> event) {
     final links = <PredictedLink>[];
-    
+
     final eventId = _generateEntityId(
       event['title'] ?? event['summary'] ?? '',
       'EVENT',
     );
     final location = event['location'];
     final attendees = event['attendees'] as List<dynamic>?;
-    
+
     // Event at location
     if (location != null && location.toString().isNotEmpty) {
       final locationId = _generateEntityId(location.toString(), 'LOCATION');
@@ -487,7 +499,7 @@ class LinkPredictor {
         evidence: {'location': location},
       ));
     }
-    
+
     // Attendees of event
     if (attendees != null) {
       for (final attendee in attendees) {
@@ -505,7 +517,7 @@ class LinkPredictor {
         }
       }
     }
-    
+
     // Event → DATE link for transitive connections
     final startDate = event['startDate'] ?? event['start'];
     if (startDate != null) {
@@ -522,26 +534,27 @@ class LinkPredictor {
         ));
       }
     }
-    
+
     return links;
   }
 
   /// Run template-based inference for a phone call
   List<PredictedLink> inferFromPhoneCall(Map<String, dynamic> call) {
     final links = <PredictedLink>[];
-    
-    final callId = call['id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
+
+    final callId =
+        call['id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
     final contactName = call['contactName'] ?? call['name'];
     final phoneNumber = call['phoneNumber'] ?? call['number'];
     final callType = call['callType'] ?? call['callDirection'] ?? call['type'];
     final callDirection = callType?.toString().toLowerCase() ?? 'unknown';
 
     // Build call entity name matching DirectEntityExtractor convention
-    final callLabel = contactName != null 
+    final callLabel = contactName != null
         ? 'Call with $contactName'
         : 'Call ${phoneNumber ?? callId}';
     final callEntityId = _generateEntityId(callLabel, 'PHONE_CALL');
-    
+
     // Link call to contact/person
     if (contactName != null && contactName.toString().isNotEmpty) {
       final personId = _generateEntityId(contactName.toString(), 'PERSON');
@@ -561,22 +574,23 @@ class LinkPredictor {
         },
       ));
     }
-    
+
     return links;
   }
 
   /// Run template-based inference for a photo
   List<PredictedLink> inferFromPhoto(Map<String, dynamic> photo) {
     final links = <PredictedLink>[];
-    
+
     final photoId = _generateEntityId(
       photo['filename'] ?? photo['name'] ?? photo['id'] ?? '',
       'PHOTO',
     );
     final location = photo['location'] ?? photo['gpsLocation'];
     final people = photo['people'] ?? photo['faces'] as List<dynamic>?;
-    final dateTaken = photo['creationDate'] ?? photo['dateTaken'] ?? photo['timestamp'];
-    
+    final dateTaken =
+        photo['creationDate'] ?? photo['dateTaken'] ?? photo['timestamp'];
+
     // Photo at location
     if (location != null && location.toString().isNotEmpty) {
       final locationId = _generateEntityId(location.toString(), 'LOCATION');
@@ -589,7 +603,7 @@ class LinkPredictor {
         evidence: {'location': location},
       ));
     }
-    
+
     // People in photo
     if (people != null) {
       for (final person in people) {
@@ -607,7 +621,7 @@ class LinkPredictor {
         }
       }
     }
-    
+
     // Link photo to date if available
     if (dateTaken != null) {
       final dateStr = _formatDateForEntity(dateTaken);
@@ -623,22 +637,24 @@ class LinkPredictor {
         ));
       }
     }
-    
+
     return links;
   }
 
   /// Run template-based inference for a document
   List<PredictedLink> inferFromDocument(Map<String, dynamic> document) {
     final links = <PredictedLink>[];
-    
+
     final docId = _generateEntityId(
       document['id'] ?? document['name'] ?? document['title'] ?? '',
       'DOCUMENT',
     );
-    final owner = document['owner'] ?? document['author'] ?? document['createdBy'];
-    final sharedWith = document['sharedWith'] ?? document['collaborators'] as List<dynamic>?;
+    final owner =
+        document['owner'] ?? document['author'] ?? document['createdBy'];
+    final sharedWith =
+        document['sharedWith'] ?? document['collaborators'] as List<dynamic>?;
     final folder = document['folder'] ?? document['parent'];
-    
+
     // Document created by owner
     if (owner != null && owner.toString().isNotEmpty) {
       final ownerId = _generateEntityId(owner.toString(), 'PERSON');
@@ -651,7 +667,7 @@ class LinkPredictor {
         evidence: {'owner': owner},
       ));
     }
-    
+
     // Document shared with people
     if (sharedWith != null) {
       for (final person in sharedWith) {
@@ -669,7 +685,7 @@ class LinkPredictor {
         }
       }
     }
-    
+
     // Document in folder/project
     if (folder != null && folder.toString().isNotEmpty) {
       final folderId = _generateEntityId(folder.toString(), 'PROJECT');
@@ -682,14 +698,14 @@ class LinkPredictor {
         evidence: {'folder': folder},
       ));
     }
-    
+
     return links;
   }
 
   /// Run template-based inference for a note
   List<PredictedLink> inferFromNote(Map<String, dynamic> note) {
     final links = <PredictedLink>[];
-    
+
     final noteId = _generateEntityId(
       note['id'] ?? note['title'] ?? '',
       'NOTE',
@@ -697,7 +713,7 @@ class LinkPredictor {
     final folder = note['folder'] ?? note['notebook'];
     final tags = note['tags'] as List<dynamic>?;
     final dateCreated = note['dateCreated'];
-    
+
     // Note in folder/notebook
     if (folder != null && folder.toString().isNotEmpty) {
       final folderId = _generateEntityId(folder.toString(), 'PROJECT');
@@ -710,7 +726,7 @@ class LinkPredictor {
         evidence: {'folder': folder},
       ));
     }
-    
+
     // Note with tags/topics
     if (tags != null) {
       for (final tag in tags) {
@@ -744,7 +760,7 @@ class LinkPredictor {
         ));
       }
     }
-    
+
     return links;
   }
 
@@ -755,9 +771,7 @@ class LinkPredictor {
     final label = alarm['label'] ?? '';
     final recurrenceType = alarm['recurrenceType'] ?? 'single-occurrence';
     final isRecurrent = recurrenceType == 'recurrent';
-    final alarmName = isRecurrent
-        ? 'Recurring alarm: $label'
-        : 'Alarm: $label';
+    final alarmName = isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
     final alarmId = _generateEntityId(alarmName, 'ALARM');
     final date = alarm['date'];
 
@@ -786,7 +800,7 @@ class LinkPredictor {
     String dataSourceType,
   ) {
     if (!config.enableTemplateLinks) return [];
-    
+
     switch (dataSourceType.toUpperCase()) {
       case 'CONTACT':
       case 'CONTACTS':
@@ -820,7 +834,7 @@ class LinkPredictor {
   }
 
   /// Detect co-mentions across data sources
-  /// 
+  ///
   /// Looks for entities that appear together in multiple items
   /// and creates MENTIONED_WITH relationships
   Future<List<PredictedLink>> detectCoMentions({
@@ -828,44 +842,46 @@ class LinkPredictor {
     int minOccurrences = 2,
   }) async {
     if (!config.enableCoMentionLinks) return [];
-    
+
     // Build co-occurrence matrix
     // Key: "entityA_entityB" (sorted), Value: list of source IDs where they co-occur
     final coOccurrences = <String, List<String>>{};
-    
+
     for (final extraction in extractions) {
       final entityIds = extraction.entities.map((e) {
         return _generateEntityId(e.name, e.type);
       }).toList();
-      
+
       // For each pair of entities in this extraction
       for (var i = 0; i < entityIds.length; i++) {
         for (var j = i + 1; j < entityIds.length; j++) {
           // Create sorted key to avoid duplicates
           final pair = [entityIds[i], entityIds[j]]..sort();
           final key = '${pair[0]}_${pair[1]}';
-          
+
           coOccurrences.putIfAbsent(key, () => []);
           coOccurrences[key]!.add(extraction.sourceId);
         }
       }
     }
-    
+
     // Create links for pairs that co-occur frequently
     final links = <PredictedLink>[];
-    final threshold = minOccurrences > 0 ? minOccurrences : config.minCoOccurrenceCount;
-    
+    final threshold =
+        minOccurrences > 0 ? minOccurrences : config.minCoOccurrenceCount;
+
     for (final entry in coOccurrences.entries) {
       if (entry.value.length >= threshold) {
         final parts = entry.key.split('_');
         if (parts.length >= 2) {
           final entityA = parts[0];
           final entityB = parts.sublist(1).join('_');
-          
+
           // Calculate confidence based on co-occurrence count
-          final confidence = (entry.value.length / extractions.length)
-              .clamp(0.0, 1.0) * config.coOccurrenceWeight;
-          
+          final confidence =
+              (entry.value.length / extractions.length).clamp(0.0, 1.0) *
+                  config.coOccurrenceWeight;
+
           links.add(PredictedLink(
             sourceEntityId: entityA,
             targetEntityId: entityB,
@@ -880,21 +896,21 @@ class LinkPredictor {
         }
       }
     }
-    
+
     return links;
   }
 
   /// Detect temporal proximity between events/items
-  /// 
+  ///
   /// Items that occur close in time may be related
   Future<List<PredictedLink>> detectTemporalProximity({
     required List<Map<String, dynamic>> timedItems,
     required String dataSourceType,
   }) async {
     if (!config.enableTemporalLinks) return [];
-    
+
     final links = <PredictedLink>[];
-    
+
     // Sort items by timestamp
     final sortedItems = List<Map<String, dynamic>>.from(timedItems);
     sortedItems.sort((a, b) {
@@ -903,30 +919,32 @@ class LinkPredictor {
       if (aTime == null || bTime == null) return 0;
       return aTime.compareTo(bTime);
     });
-    
+
     // Find items within temporal window
     for (var i = 0; i < sortedItems.length; i++) {
       final itemA = sortedItems[i];
       final timeA = _extractTimestamp(itemA);
       if (timeA == null) continue;
-      
+
       for (var j = i + 1; j < sortedItems.length; j++) {
         final itemB = sortedItems[j];
         final timeB = _extractTimestamp(itemB);
         if (timeB == null) continue;
-        
+
         final difference = timeB.difference(timeA);
-        if (difference > config.temporalWindow) break; // Items are sorted, no need to check further
-        
+        if (difference > config.temporalWindow)
+          break; // Items are sorted, no need to check further
+
         // Create temporal proximity link
         final idA = _getItemId(itemA, dataSourceType);
         final idB = _getItemId(itemB, dataSourceType);
-        
+
         // Calculate confidence based on time proximity
         final maxMillis = config.temporalWindow.inMilliseconds;
         final actualMillis = difference.inMilliseconds;
-        final confidence = (1 - actualMillis / maxMillis) * config.coOccurrenceWeight;
-        
+        final confidence =
+            (1 - actualMillis / maxMillis) * config.coOccurrenceWeight;
+
         links.add(PredictedLink(
           sourceEntityId: idA,
           targetEntityId: idB,
@@ -941,18 +959,18 @@ class LinkPredictor {
         ));
       }
     }
-    
+
     return links;
   }
 
   /// Infer colleague relationships from shared organization
   Future<List<PredictedLink>> inferColleagueRelationships() async {
     final links = <PredictedLink>[];
-    
+
     // Get all people and their organizations
     final people = await repository.getEntitiesByType('PERSON');
     final personToOrg = <String, List<String>>{};
-    
+
     for (final person in people) {
       final relationships = await repository.getRelationships(person.id);
       for (final rel in relationships) {
@@ -962,7 +980,7 @@ class LinkPredictor {
         }
       }
     }
-    
+
     // Find people who share organizations
     final orgToPeople = <String, List<String>>{};
     for (final entry in personToOrg.entries) {
@@ -971,7 +989,7 @@ class LinkPredictor {
         orgToPeople[orgId]!.add(entry.key);
       }
     }
-    
+
     // Create colleague relationships
     for (final entry in orgToPeople.entries) {
       final colleagues = entry.value;
@@ -990,20 +1008,20 @@ class LinkPredictor {
         }
       }
     }
-    
+
     return links;
   }
 
   /// Store predicted links in the repository
   Future<int> storePredictedLinks(List<PredictedLink> links) async {
     var stored = 0;
-    
+
     for (final link in links) {
       try {
         // Check if both entities exist
         final source = await repository.getEntity(link.sourceEntityId);
         final target = await repository.getEntity(link.targetEntityId);
-        
+
         if (source != null && target != null) {
           await repository.addRelationship(link.toRelationship());
           stored++;
@@ -1016,12 +1034,12 @@ class LinkPredictor {
         }());
       }
     }
-    
+
     return stored;
   }
 
   // Helper methods
-  
+
   String _generateEntityId(String name, String type) {
     final normalized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
     final typePrefix = type.isNotEmpty ? '${type.toLowerCase()}_' : '';
@@ -1029,7 +1047,13 @@ class LinkPredictor {
   }
 
   DateTime? _extractTimestamp(Map<String, dynamic> item) {
-    final possibleFields = ['timestamp', 'date', 'startDate', 'createdAt', 'dateTaken'];
+    final possibleFields = [
+      'timestamp',
+      'date',
+      'startDate',
+      'createdAt',
+      'dateTaken'
+    ];
     for (final field in possibleFields) {
       final value = item[field];
       if (value is DateTime) return value;
@@ -1044,7 +1068,8 @@ class LinkPredictor {
   }
 
   String _getItemId(Map<String, dynamic> item, String dataSourceType) {
-    final id = item['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+    final id = item['id']?.toString() ??
+        DateTime.now().millisecondsSinceEpoch.toString();
     final name = item['name'] ?? item['title'] ?? id;
     return _generateEntityId(name.toString(), dataSourceType);
   }
@@ -1060,7 +1085,7 @@ class LinkPredictor {
         dt = DateTime.parse(date);
       } catch (_) {}
     }
-    
+
     if (dt != null) {
       return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
     }
@@ -1078,29 +1103,29 @@ extension LinkPredictorBatch on LinkPredictor {
     bool includeYouLinks = true,
   }) async {
     final allLinks = <PredictedLink>[];
-    
+
     // 1. Ensure "You" entity exists
     if (includeYouLinks) {
       await ensureYouEntityExists();
     }
-    
+
     // 2. Template-based inference for each item
     for (final item in items) {
       final templateLinks = inferFromStructured(item, dataSourceType);
       allLinks.addAll(templateLinks);
     }
-    
+
     // 3. Detect co-mentions from extractions
     if (extractions.isNotEmpty) {
       final coMentionLinks = await detectCoMentions(extractions: extractions);
       allLinks.addAll(coMentionLinks);
     }
-    
+
     // 4. Detect temporal proximity
     final timedItems = items.where((item) {
       return _extractTimestamp(item) != null;
     }).toList();
-    
+
     if (timedItems.isNotEmpty) {
       final temporalLinks = await detectTemporalProximity(
         timedItems: timedItems,
@@ -1108,12 +1133,18 @@ extension LinkPredictorBatch on LinkPredictor {
       );
       allLinks.addAll(temporalLinks);
     }
-    
+
     return allLinks;
   }
 
   DateTime? _extractTimestamp(Map<String, dynamic> item) {
-    final possibleFields = ['timestamp', 'date', 'startDate', 'createdAt', 'dateTaken'];
+    final possibleFields = [
+      'timestamp',
+      'date',
+      'startDate',
+      'createdAt',
+      'dateTaken'
+    ];
     for (final field in possibleFields) {
       final value = item[field];
       if (value is DateTime) return value;
@@ -1157,7 +1188,7 @@ class LinkValidationResult {
 }
 
 /// Embedding similarity-based link predictor with LLM validation chain
-/// 
+///
 /// This predictor:
 /// 1. Finds entity pairs with high embedding cosine similarity (>= threshold)
 /// 2. Clusters candidates by similarity
@@ -1168,8 +1199,10 @@ class LinkValidationResult {
 class EmbeddingSimilarityLinkPredictor {
   final GraphRepository repository;
   final Future<String> Function(String prompt) llmCallback;
+
   /// Optional structured LLM callback that supports function calling tools
-  final Future<String> Function(String prompt, {List<Tool>? tools})? structuredLlmCallback;
+  final Future<String> Function(String prompt, {List<Tool>? tools})?
+      structuredLlmCallback;
   final LinkPredictionConfig config;
 
   EmbeddingSimilarityLinkPredictor({
@@ -1184,31 +1217,37 @@ class EmbeddingSimilarityLinkPredictor {
     List<GraphEntity>? entities,
   }) async {
     if (!config.enableEmbeddingSimilarityLinks) {
-      print('[EmbeddingSimilarityLinkPredictor] Embedding similarity links disabled');
+      print(
+          '[EmbeddingSimilarityLinkPredictor] Embedding similarity links disabled');
       return [];
     }
 
     // Get all entities with embeddings
     final allEntities = entities ?? await _getAllEntitiesWithEmbeddings();
-    print('[EmbeddingSimilarityLinkPredictor] Total entities fetched: ${allEntities.length}');
-    
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Total entities fetched: ${allEntities.length}');
+
     // Filter to only entities that have embeddings
     final entitiesWithEmbeddings = allEntities
         .where((e) => e.embedding != null && e.embedding!.isNotEmpty)
         .toList();
-    
-    print('[EmbeddingSimilarityLinkPredictor] Entities with embeddings: ${entitiesWithEmbeddings.length}');
-    
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Entities with embeddings: ${entitiesWithEmbeddings.length}');
+
     if (entitiesWithEmbeddings.length < 2) {
-      print('[EmbeddingSimilarityLinkPredictor] Not enough entities with embeddings (need at least 2)');
+      print(
+          '[EmbeddingSimilarityLinkPredictor] Not enough entities with embeddings (need at least 2)');
       return [];
     }
-    
-    print('[EmbeddingSimilarityLinkPredictor] Comparing ${entitiesWithEmbeddings.length} entities with embeddings');
-    print('[EmbeddingSimilarityLinkPredictor] Thresholds: same-type=${config.sameTypeSimilarityThreshold}, different-type=${config.embeddingSimilarityThreshold}');
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Comparing ${entitiesWithEmbeddings.length} entities with embeddings');
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Thresholds: same-type=${config.sameTypeSimilarityThreshold}, different-type=${config.embeddingSimilarityThreshold}');
 
     final candidates = <EmbeddingCandidate>[];
-    
+
     // Calculate pairwise similarities
     var totalComparisons = 0;
     var skippedYouNode = 0;
@@ -1216,46 +1255,49 @@ class EmbeddingSimilarityLinkPredictor {
     var skippedGenericTypes = 0;
     var maxSimilarity = 0.0;
     String? maxPairA, maxPairB;
-    
+
     // Skip same-type pairs for these types - they have generic embeddings that make them all appear similar
     final skipSameTypeForTypes = {'EVENT', 'DATE', 'CALENDAR'};
-    
+
     for (var i = 0; i < entitiesWithEmbeddings.length; i++) {
       for (var j = i + 1; j < entitiesWithEmbeddings.length; j++) {
         final entityA = entitiesWithEmbeddings[i];
         final entityB = entitiesWithEmbeddings[j];
         totalComparisons++;
-        
+
         // Skip if one is the "You" node
-        if (entityA.id == 'you_central_node' || entityB.id == 'you_central_node') {
+        if (entityA.id == 'you_central_node' ||
+            entityB.id == 'you_central_node') {
           skippedYouNode++;
           continue;
         }
-        
+
         // Skip same-type pairs for EVENT/DATE/CALENDAR - they all look similar but aren't meaningful
-        if (entityA.type == entityB.type && 
+        if (entityA.type == entityB.type &&
             skipSameTypeForTypes.contains(entityA.type.toUpperCase())) {
           skippedGenericTypes++;
           continue;
         }
-        
-        final similarity = MathUtils.cosineSimilarity(entityA.embedding!, entityB.embedding!);
-        
+
+        final similarity =
+            MathUtils.cosineSimilarity(entityA.embedding!, entityB.embedding!);
+
         // Track max similarity for debugging
         if (similarity > maxSimilarity) {
           maxSimilarity = similarity;
           maxPairA = entityA.name;
           maxPairB = entityB.name;
         }
-        
+
         // Use lower threshold for same-type entity pairs
         // This helps discover relationships like family members (PERSON-PERSON)
         final threshold = (entityA.type == entityB.type)
             ? config.sameTypeSimilarityThreshold
             : config.embeddingSimilarityThreshold;
-        
+
         if (similarity >= threshold) {
-          print('[EmbeddingSimilarityLinkPredictor] Candidate: ${entityA.name} <-> ${entityB.name} (similarity: ${similarity.toStringAsFixed(3)}, threshold: $threshold)');
+          print(
+              '[EmbeddingSimilarityLinkPredictor] Candidate: ${entityA.name} <-> ${entityB.name} (similarity: ${similarity.toStringAsFixed(3)}, threshold: $threshold)');
           candidates.add(EmbeddingCandidate(
             entityA: entityA,
             entityB: entityB,
@@ -1266,46 +1308,55 @@ class EmbeddingSimilarityLinkPredictor {
         }
       }
     }
-    
-    print('[EmbeddingSimilarityLinkPredictor] Stats: $totalComparisons comparisons, $skippedYouNode skipped (You node), $skippedGenericTypes skipped (EVENT/DATE), $belowThreshold below threshold');
-    print('[EmbeddingSimilarityLinkPredictor] Max similarity found: ${maxSimilarity.toStringAsFixed(3)} between "$maxPairA" and "$maxPairB"');
-    
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Stats: $totalComparisons comparisons, $skippedYouNode skipped (You node), $skippedGenericTypes skipped (EVENT/DATE), $belowThreshold below threshold');
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Max similarity found: ${maxSimilarity.toStringAsFixed(3)} between "$maxPairA" and "$maxPairB"');
+
     // Sort by similarity descending and limit
     candidates.sort((a, b) => b.similarity.compareTo(a.similarity));
-    
-    final limitedCandidates = candidates.take(config.maxEmbeddingCandidates).toList();
-    
-    print('[EmbeddingSimilarityLinkPredictor] Found ${candidates.length} candidates above threshold, using top ${limitedCandidates.length}');
-    
+
+    final limitedCandidates =
+        candidates.take(config.maxEmbeddingCandidates).toList();
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Found ${candidates.length} candidates above threshold, using top ${limitedCandidates.length}');
+
     return limitedCandidates;
   }
 
   /// Validate candidate pairs using 3-step LLM chain and create links
-  /// 
+  ///
   /// On error/timeout, skips the link and continues (as per user requirement)
   Future<List<PredictedLink>> validateAndCreateLinks(
     List<EmbeddingCandidate> candidates,
   ) async {
     final validLinks = <PredictedLink>[];
-    
-    print('[EmbeddingSimilarityLinkPredictor] Starting validation for ${candidates.length} candidates');
-    
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Starting validation for ${candidates.length} candidates');
+
     // Separate same-type and cross-type candidates
-    final sameTypeCandidates = candidates.where((c) => c.entityA.type == c.entityB.type).toList();
-    final crossTypeCandidates = candidates.where((c) => c.entityA.type != c.entityB.type).toList();
-    
-    print('[EmbeddingSimilarityLinkPredictor] Same-type candidates: ${sameTypeCandidates.length}, Cross-type: ${crossTypeCandidates.length}');
-    
+    final sameTypeCandidates =
+        candidates.where((c) => c.entityA.type == c.entityB.type).toList();
+    final crossTypeCandidates =
+        candidates.where((c) => c.entityA.type != c.entityB.type).toList();
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Same-type candidates: ${sameTypeCandidates.length}, Cross-type: ${crossTypeCandidates.length}');
+
     // Process same-type candidates WITHOUT LLM (use embedding similarity as evidence)
     // This prevents LLM memory exhaustion when there are many same-type pairs
     // Note: EVENT/DATE/CALENDAR pairs are already filtered out during candidate collection
     // EXCEPTION: PERSON-PERSON pairs with very high similarity go through LLM validation
-    
+
     final personPersonCandidates = <EmbeddingCandidate>[];
     final otherSameTypeCandidates = <EmbeddingCandidate>[];
-    
+
     for (final candidate in sameTypeCandidates) {
-      if (candidate.entityA.type == 'PERSON' && candidate.entityB.type == 'PERSON') {
+      if (candidate.entityA.type == 'PERSON' &&
+          candidate.entityB.type == 'PERSON') {
         // Validate PERSON-PERSON with good similarity (>= 0.70)
         // Lowered from 0.80 to catch family relationships like Dad-Mom, Brother-Dad etc.
         if (candidate.similarity >= 0.70) {
@@ -1316,22 +1367,27 @@ class EmbeddingSimilarityLinkPredictor {
         otherSameTypeCandidates.add(candidate);
       }
     }
-    
-    print('[EmbeddingSimilarityLinkPredictor] PERSON-PERSON for LLM validation: ${personPersonCandidates.length}');
-    
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] PERSON-PERSON for LLM validation: ${personPersonCandidates.length}');
+
     // Process non-PERSON same-type pairs without LLM
     for (final candidate in otherSameTypeCandidates) {
       // Check if relationship already exists
-      final existingRels = await repository.getRelationships(candidate.entityA.id);
+      final existingRels =
+          await repository.getRelationships(candidate.entityA.id);
       final alreadyLinked = existingRels.any(
-        (r) => r.targetId == candidate.entityB.id || r.sourceId == candidate.entityB.id,
+        (r) =>
+            r.targetId == candidate.entityB.id ||
+            r.sourceId == candidate.entityB.id,
       );
-      
+
       if (alreadyLinked) continue;
-      
+
       // Auto-approve same-type pairs above 0.70 similarity
       if (candidate.similarity >= 0.70) {
-        print('[EmbeddingSimilarityLinkPredictor] ✓ Same-type approved: ${candidate.entityA.name} <-> ${candidate.entityB.name} (${(candidate.similarity * 100).toStringAsFixed(1)}%)');
+        print(
+            '[EmbeddingSimilarityLinkPredictor] ✓ Same-type approved: ${candidate.entityA.name} <-> ${candidate.entityB.name} (${(candidate.similarity * 100).toStringAsFixed(1)}%)');
         validLinks.add(PredictedLink(
           sourceEntityId: candidate.entityA.id,
           targetEntityId: candidate.entityB.id,
@@ -1340,41 +1396,48 @@ class EmbeddingSimilarityLinkPredictor {
           predictionMethod: 'embedding_similarity_same_type',
           evidence: {
             'embeddingSimilarity': candidate.similarity,
-            'explanation': 'High embedding similarity (${(candidate.similarity * 100).toStringAsFixed(1)}%) between same-type entities',
+            'explanation':
+                'High embedding similarity (${(candidate.similarity * 100).toStringAsFixed(1)}%) between same-type entities',
             'entityAType': candidate.entityA.type,
             'entityBType': candidate.entityB.type,
           },
         ));
       }
     }
-    
+
     // Process PERSON-PERSON candidates with LLM validation (limited to top 15)
     final personLlmCandidates = personPersonCandidates.take(15).toList();
-    print('[EmbeddingSimilarityLinkPredictor] Processing ${personLlmCandidates.length} PERSON-PERSON candidates with LLM');
-    
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Processing ${personLlmCandidates.length} PERSON-PERSON candidates with LLM');
+
     for (var idx = 0; idx < personLlmCandidates.length; idx++) {
       final candidate = personLlmCandidates[idx];
       try {
-        print('[EmbeddingSimilarityLinkPredictor] Validating PERSON-PERSON ${idx + 1}/${personLlmCandidates.length}: ${candidate.entityA.name} <-> ${candidate.entityB.name}');
-        
+        print(
+            '[EmbeddingSimilarityLinkPredictor] Validating PERSON-PERSON ${idx + 1}/${personLlmCandidates.length}: ${candidate.entityA.name} <-> ${candidate.entityB.name}');
+
         // Check if relationship already exists
-        final existingRels = await repository.getRelationships(candidate.entityA.id);
+        final existingRels =
+            await repository.getRelationships(candidate.entityA.id);
         final alreadyLinked = existingRels.any(
-          (r) => r.targetId == candidate.entityB.id || r.sourceId == candidate.entityB.id,
+          (r) =>
+              r.targetId == candidate.entityB.id ||
+              r.sourceId == candidate.entityB.id,
         );
-        
+
         if (alreadyLinked) {
           print('[EmbeddingSimilarityLinkPredictor] Skipping - already linked');
           continue;
         }
-        
+
         // Run specialized PERSON-PERSON validation (structured if available)
-        final result = structuredLlmCallback != null 
+        final result = structuredLlmCallback != null
             ? await _runStructuredPersonValidation(candidate)
             : await _runPersonPersonValidation(candidate);
-        
+
         if (result.isValid && result.relationshipType != null) {
-          print('[EmbeddingSimilarityLinkPredictor] ✓ Valid PERSON: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
+          print(
+              '[EmbeddingSimilarityLinkPredictor] ✓ Valid PERSON: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
           validLinks.add(PredictedLink(
             sourceEntityId: candidate.entityA.id,
             targetEntityId: candidate.entityB.id,
@@ -1389,44 +1452,52 @@ class EmbeddingSimilarityLinkPredictor {
             },
           ));
         } else {
-          print('[EmbeddingSimilarityLinkPredictor] ✗ Rejected PERSON-PERSON: ${result.explanation ?? "no clear relationship"}');
+          print(
+              '[EmbeddingSimilarityLinkPredictor] ✗ Rejected PERSON-PERSON: ${result.explanation ?? "no clear relationship"}');
         }
-        
+
         // Small delay between LLM calls
         await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
-        print('[EmbeddingSimilarityLinkPredictor] Error validating PERSON-PERSON ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
+        print(
+            '[EmbeddingSimilarityLinkPredictor] Error validating PERSON-PERSON ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
         continue;
       }
     }
-    
+
     // Process cross-type candidates with LLM validation (limited to top 20)
     final llmCandidates = crossTypeCandidates.take(20).toList();
-    print('[EmbeddingSimilarityLinkPredictor] Processing ${llmCandidates.length} cross-type candidates with LLM');
-    
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Processing ${llmCandidates.length} cross-type candidates with LLM');
+
     for (var idx = 0; idx < llmCandidates.length; idx++) {
       final candidate = llmCandidates[idx];
       try {
-        print('[EmbeddingSimilarityLinkPredictor] Validating ${idx + 1}/${llmCandidates.length}: ${candidate.entityA.name} <-> ${candidate.entityB.name}');
-        
+        print(
+            '[EmbeddingSimilarityLinkPredictor] Validating ${idx + 1}/${llmCandidates.length}: ${candidate.entityA.name} <-> ${candidate.entityB.name}');
+
         // Check if relationship already exists
-        final existingRels = await repository.getRelationships(candidate.entityA.id);
+        final existingRels =
+            await repository.getRelationships(candidate.entityA.id);
         final alreadyLinked = existingRels.any(
-          (r) => r.targetId == candidate.entityB.id || r.sourceId == candidate.entityB.id,
+          (r) =>
+              r.targetId == candidate.entityB.id ||
+              r.sourceId == candidate.entityB.id,
         );
-        
+
         if (alreadyLinked) {
           print('[EmbeddingSimilarityLinkPredictor] Skipping - already linked');
           continue;
         }
-        
+
         // Run validation chain (structured if available, otherwise 3-step chain)
         final result = structuredLlmCallback != null
             ? await _runStructuredValidation(candidate)
             : await _runValidationChain(candidate);
-        
+
         if (result.isValid && result.relationshipType != null) {
-          print('[EmbeddingSimilarityLinkPredictor] ✓ Valid: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
+          print(
+              '[EmbeddingSimilarityLinkPredictor] ✓ Valid: ${candidate.entityA.name} -[${result.relationshipType}]-> ${candidate.entityB.name} (confidence: ${result.confidence.toStringAsFixed(2)})');
           validLinks.add(PredictedLink(
             sourceEntityId: candidate.entityA.id,
             targetEntityId: candidate.entityB.id,
@@ -1441,32 +1512,38 @@ class EmbeddingSimilarityLinkPredictor {
             },
           ));
         } else {
-          print('[EmbeddingSimilarityLinkPredictor] ✗ Invalid: LLM rejected the link');
+          print(
+              '[EmbeddingSimilarityLinkPredictor] ✗ Invalid: LLM rejected the link');
         }
-        
+
         // Small delay between LLM calls to prevent memory pressure
         await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         // Skip on error and continue with next candidate
-        print('[EmbeddingSimilarityLinkPredictor] Error validating candidate ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
+        print(
+            '[EmbeddingSimilarityLinkPredictor] Error validating candidate ${candidate.entityA.name} - ${candidate.entityB.name}: $e');
         continue;
       }
     }
-    
-    print('[EmbeddingSimilarityLinkPredictor] Validated ${validLinks.length} links from ${candidates.length} candidates');
-    
+
+    print(
+        '[EmbeddingSimilarityLinkPredictor] Validated ${validLinks.length} links from ${candidates.length} candidates');
+
     return validLinks;
   }
 
   /// Run the 3-step LLM validation chain
-  Future<LinkValidationResult> _runValidationChain(EmbeddingCandidate candidate) async {
+  Future<LinkValidationResult> _runValidationChain(
+      EmbeddingCandidate candidate) async {
     final entityA = candidate.entityA;
     final entityB = candidate.entityB;
-    
-    print('[LLM Chain] Step 1: Categorizing relationship for ${entityA.name} <-> ${entityB.name}');
-    
+
+    print(
+        '[LLM Chain] Step 1: Categorizing relationship for ${entityA.name} <-> ${entityB.name}');
+
     // Step 1: Categorize relationship type
-    final categorizePrompt = '''Given two entities from a personal knowledge graph, suggest what type of relationship might exist between them.
+    final categorizePrompt =
+        '''Given two entities from a personal knowledge graph, suggest what type of relationship might exist between them.
 
 Entity A:
 - Name: ${entityA.name}
@@ -1489,7 +1566,8 @@ Respond with ONLY the relationship type in uppercase (e.g., "RELATED_TO"):''';
     try {
       final step1Response = await llmCallback(categorizePrompt);
       print('[LLM Chain] Step 1 raw response: "$step1Response"');
-      relationshipType = step1Response.trim().toUpperCase().replaceAll(' ', '_');
+      relationshipType =
+          step1Response.trim().toUpperCase().replaceAll(' ', '_');
       // Clean up the response - extract just the relationship type
       if (relationshipType.contains('\n')) {
         relationshipType = relationshipType.split('\n').first.trim();
@@ -1506,11 +1584,12 @@ Respond with ONLY the relationship type in uppercase (e.g., "RELATED_TO"):''';
     }
 
     print('[LLM Chain] Step 2: Validating plausibility of $relationshipType');
-    
+
     // Step 2: Validate plausibility
-    // Note: The prompt is designed to be lenient - these entities already have high 
+    // Note: The prompt is designed to be lenient - these entities already have high
     // embedding similarity so we're just checking for obvious false positives.
-    final validatePrompt = '''These two entities have ${(candidate.similarity * 100).toStringAsFixed(0)}% semantic similarity, suggesting they are related.
+    final validatePrompt =
+        '''These two entities have ${(candidate.similarity * 100).toStringAsFixed(0)}% semantic similarity, suggesting they are related.
 
 Entity A: ${entityA.name} (${entityA.type})
 Entity B: ${entityB.name} (${entityB.type})
@@ -1543,9 +1622,10 @@ Answer with "YES" or "NO":''';
     }
 
     print('[LLM Chain] Step 3: Assigning confidence score');
-    
+
     // Step 3: Assign confidence score
-    final confidencePrompt = '''Rate your confidence that "${entityA.name}" and "${entityB.name}" have a "$relationshipType" relationship.
+    final confidencePrompt =
+        '''Rate your confidence that "${entityA.name}" and "${entityB.name}" have a "$relationshipType" relationship.
 
 Consider:
 - How likely is this relationship given their types (${entityA.type} and ${entityB.type})?
@@ -1567,7 +1647,8 @@ Respond with ONLY a decimal number (e.g., "0.75"):''';
       } else {
         confidence = 0.5; // Default confidence
       }
-      explanation = 'LLM validated with ${(confidence * 100).toStringAsFixed(0)}% confidence';
+      explanation =
+          'LLM validated with ${(confidence * 100).toStringAsFixed(0)}% confidence';
       print('[LLM Chain] Step 3 result: confidence=$confidence');
     } catch (e) {
       print('[LLM Chain] Step 3 error: $e');
@@ -1581,35 +1662,38 @@ Respond with ONLY a decimal number (e.g., "0.75"):''';
       return LinkValidationResult(isValid: false);
     }
 
-    print('[LLM Chain] ✓ Link validated: $relationshipType with final confidence ${(confidence * candidate.similarity).toStringAsFixed(2)}');
-    
+    print(
+        '[LLM Chain] ✓ Link validated: $relationshipType with final confidence ${(confidence * candidate.similarity).toStringAsFixed(2)}');
+
     return LinkValidationResult(
       isValid: true,
       relationshipType: relationshipType,
-      confidence: confidence * candidate.similarity, // Weight by embedding similarity
+      confidence:
+          confidence * candidate.similarity, // Weight by embedding similarity
       explanation: explanation,
     );
   }
 
   /// Specialized validation for PERSON-PERSON relationships
   /// More strict than general validation - prefers not creating wrong relationships
-  Future<LinkValidationResult> _runPersonPersonValidation(EmbeddingCandidate candidate) async {
+  Future<LinkValidationResult> _runPersonPersonValidation(
+      EmbeddingCandidate candidate) async {
     final personA = candidate.entityA;
     final personB = candidate.entityB;
-    
+
     print('[PERSON-PERSON] Validating: ${personA.name} <-> ${personB.name}');
-    
+
     // Truncate descriptions to avoid token overflow
     String truncateDesc(String? desc, int maxLen) {
       if (desc == null || desc.isEmpty) return '';
       final clean = desc.length > maxLen ? desc.substring(0, maxLen) : desc;
       return ' ($clean)';
     }
-    
+
     // Very short prompt to stay under token limit
     final descA = truncateDesc(personA.description, 30);
     final descB = truncateDesc(personB.description, 30);
-    
+
     final prompt = '''Are these people related?
 A: ${personA.name}$descA
 B: ${personB.name}$descB
@@ -1619,9 +1703,10 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
     try {
       final response = await llmCallback(prompt);
       print('[PERSON-PERSON] LLM response: "$response"');
-      
-      final cleanResponse = response.trim().toUpperCase().split('\n').first.trim();
-      
+
+      final cleanResponse =
+          response.trim().toUpperCase().split('\n').first.trim();
+
       if (cleanResponse.contains('FAMILY')) {
         return LinkValidationResult(
           isValid: true,
@@ -1660,7 +1745,7 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
   }
 
   /// Parse Python variable assignment style responses from LLM
-  /// 
+  ///
   /// Handles output like:
   /// ```
   /// relationship_type = "FAMILY_MEMBER"
@@ -1670,17 +1755,17 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
   /// ```
   Map<String, dynamic>? _parsePythonVariableAssignments(String content) {
     final result = <String, dynamic>{};
-    
+
     // Match: varname = "string" or varname = 'string' or varname = True/False/None/number
     final varAssignRegex = RegExp(
       r'''^(\w+)\s*=\s*("[^"]*"|'[^']*'|True|False|None|[\d.]+)\s*$''',
       multiLine: true,
     );
-    
+
     for (final match in varAssignRegex.allMatches(content)) {
       final varName = match.group(1)!;
       var value = match.group(2)!;
-      
+
       // Parse the value
       dynamic parsedValue;
       if (value == 'True') {
@@ -1694,34 +1779,38 @@ Answer: FAMILY, COLLEAGUE, FRIEND, or NONE''';
       } else {
         parsedValue = double.tryParse(value) ?? value;
       }
-      
+
       result[varName] = parsedValue;
     }
-    
+
     // Only return if we found expected validation keys
-    if (result.containsKey('is_valid') || result.containsKey('relationship_type')) {
+    if (result.containsKey('is_valid') ||
+        result.containsKey('relationship_type')) {
       print('[Structured Validation] Parsed Python variables: $result');
       return result;
     }
-    
+
     return null;
   }
 
   /// Run structured validation using function calling tools
-  /// 
+  ///
   /// This replaces the 3-step LLM chain with a single structured call
-  Future<LinkValidationResult> _runStructuredValidation(EmbeddingCandidate candidate) async {
+  Future<LinkValidationResult> _runStructuredValidation(
+      EmbeddingCandidate candidate) async {
     if (structuredLlmCallback == null) {
       // Fallback to 3-step chain if no structured callback
       return _runValidationChain(candidate);
     }
-    
+
     final entityA = candidate.entityA;
     final entityB = candidate.entityB;
-    
-    print('[Structured Validation] Validating ${entityA.name} <-> ${entityB.name}');
-    
-    final prompt = '''Do these entities have a verifiable relationship? Call validate_relationship with your answer.
+
+    print(
+        '[Structured Validation] Validating ${entityA.name} <-> ${entityB.name}');
+
+    final prompt =
+        '''Do these entities have a verifiable relationship? Call validate_relationship with your answer.
 
 Entity A: ${entityA.name} (${entityA.type})${entityA.description != null ? ' - ${entityA.description}' : ''}
 Entity B: ${entityB.name} (${entityB.type})${entityB.description != null ? ' - ${entityB.description}' : ''}
@@ -1739,9 +1828,9 @@ Call validate_relationship now.''';
         prompt,
         tools: LinkValidationTools.all,
       );
-      
+
       print('[Structured Validation] Response: $response');
-      
+
       // Parse the function call response
       final parsed = FunctionCallParser.parse(response);
       if (parsed != null && parsed.name == 'validate_relationship') {
@@ -1750,13 +1839,15 @@ Call validate_relationship now.''';
         final isValid = args['is_valid'] as bool? ?? false;
         final confidence = (args['confidence'] as num?)?.toDouble() ?? 0.0;
         final explanation = args['explanation'] as String?;
-        
+
         if (relationshipType != null) {
           // Proper structured response with expected parameters
-          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-          
-          print('[Structured Validation] Parsed: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
-          
+          final adjustedConfidence =
+              (confidence * 0.6) + (candidate.similarity * 0.4);
+
+          print(
+              '[Structured Validation] Parsed: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
+
           if (relationshipType == 'NONE' || !isValid) {
             return LinkValidationResult(
               isValid: false,
@@ -1765,7 +1856,7 @@ Call validate_relationship now.''';
               explanation: explanation ?? 'No relationship identified',
             );
           }
-          
+
           return LinkValidationResult(
             isValid: true,
             relationshipType: relationshipType,
@@ -1773,41 +1864,48 @@ Call validate_relationship now.''';
             explanation: explanation,
           );
         }
-        
+
         // LLM called validate_relationship but used wrong parameter names.
         // Try to extract a relationship keyword from the arg values or the
         // raw response text (e.g. the LLM echoed entity names + a keyword).
         print('[Structured Validation] Correct function but wrong args: $args');
-        final keywordFromArgs = extractRelationshipKeyword(args.values.join(' '));
-        final keywordFromResponse = keywordFromArgs ?? extractRelationshipKeyword(response);
+        final keywordFromArgs =
+            extractRelationshipKeyword(args.values.join(' '));
+        final keywordFromResponse =
+            keywordFromArgs ?? extractRelationshipKeyword(response);
         if (keywordFromResponse != null) {
           return _bareKeywordToResult(keywordFromResponse, candidate);
         }
-        
+
         // The model invoked validate_relationship without NONE and without
         // a recognisable relationship keyword — treat as RELATED_TO since
         // it at least acknowledged a relationship exists.
-        print('[Structured Validation] Inferring RELATED_TO from function call without recognisable type');
+        print(
+            '[Structured Validation] Inferring RELATED_TO from function call without recognisable type');
         return LinkValidationResult(
           isValid: true,
           relationshipType: 'RELATED_TO',
           confidence: (candidate.similarity * 0.7).clamp(0.0, 1.0),
-          explanation: 'LLM called validate_relationship but used non-standard parameters',
+          explanation:
+              'LLM called validate_relationship but used non-standard parameters',
         );
       }
-      
+
       // If standard parsing failed, try Python variable assignment style
       final pythonVars = _parsePythonVariableAssignments(response);
       if (pythonVars != null) {
         final relationshipType = pythonVars['relationship_type'] as String?;
         final isValid = pythonVars['is_valid'] as bool? ?? false;
-        final confidence = (pythonVars['confidence'] as num?)?.toDouble() ?? 0.0;
+        final confidence =
+            (pythonVars['confidence'] as num?)?.toDouble() ?? 0.0;
         final explanation = pythonVars['explanation'] as String?;
-        
-        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-        
-        print('[Structured Validation] From Python vars: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
-        
+
+        final adjustedConfidence =
+            (confidence * 0.6) + (candidate.similarity * 0.4);
+
+        print(
+            '[Structured Validation] From Python vars: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
+
         if (relationshipType == 'NONE' || !isValid) {
           return LinkValidationResult(
             isValid: false,
@@ -1816,7 +1914,7 @@ Call validate_relationship now.''';
             explanation: explanation ?? 'No relationship identified',
           );
         }
-        
+
         return LinkValidationResult(
           isValid: true,
           relationshipType: relationshipType,
@@ -1824,19 +1922,22 @@ Call validate_relationship now.''';
           explanation: explanation,
         );
       }
-      
+
       // If parsing failed, try to extract from JSON directly
       try {
         final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(response);
         if (jsonMatch != null) {
-          final jsonData = json.decode(jsonMatch.group(0)!) as Map<String, dynamic>;
+          final jsonData =
+              json.decode(jsonMatch.group(0)!) as Map<String, dynamic>;
           final relationshipType = jsonData['relationship_type'] as String?;
           final isValid = jsonData['is_valid'] as bool? ?? false;
-          final confidence = (jsonData['confidence'] as num?)?.toDouble() ?? 0.0;
+          final confidence =
+              (jsonData['confidence'] as num?)?.toDouble() ?? 0.0;
           final explanation = jsonData['explanation'] as String?;
-          
-          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-          
+
+          final adjustedConfidence =
+              (confidence * 0.6) + (candidate.similarity * 0.4);
+
           if (relationshipType == 'NONE' || !isValid) {
             return LinkValidationResult(
               isValid: false,
@@ -1845,7 +1946,7 @@ Call validate_relationship now.''';
               explanation: explanation ?? 'No relationship identified',
             );
           }
-          
+
           return LinkValidationResult(
             isValid: true,
             relationshipType: relationshipType,
@@ -1856,7 +1957,7 @@ Call validate_relationship now.''';
       } catch (_) {
         // JSON parsing failed, fall through to graceful failure
       }
-      
+
       // Try bare keyword / arrow-style fallback
       final bareResult = _parseBareRelationshipType(response, candidate);
       if (bareResult != null) {
@@ -1865,7 +1966,8 @@ Call validate_relationship now.''';
 
       // Structured parsing failed - return invalid result instead of falling back to main LLM
       // (main LLM may be closed due to memory pressure from multiple models)
-      print('[Structured Validation] Failed to parse structured response, skipping link');
+      print(
+          '[Structured Validation] Failed to parse structured response, skipping link');
       return LinkValidationResult(
         isValid: false,
         explanation: 'Structured validation could not parse response',
@@ -1880,17 +1982,19 @@ Call validate_relationship now.''';
   }
 
   /// Run structured validation for PERSON-PERSON pairs
-  Future<LinkValidationResult> _runStructuredPersonValidation(EmbeddingCandidate candidate) async {
+  Future<LinkValidationResult> _runStructuredPersonValidation(
+      EmbeddingCandidate candidate) async {
     if (structuredLlmCallback == null) {
       return _runPersonPersonValidation(candidate);
     }
-    
+
     final entityA = candidate.entityA;
     final entityB = candidate.entityB;
-    
+
     print('[Structured PERSON] Validating ${entityA.name} <-> ${entityB.name}');
-    
-    final prompt = '''Are these two people related? Call validate_relationship with your answer.
+
+    final prompt =
+        '''Are these two people related? Call validate_relationship with your answer.
 
 Person A: ${entityA.name}${entityA.description != null ? ' (${entityA.description})' : ''}
 Person B: ${entityB.name}${entityB.description != null ? ' (${entityB.description})' : ''}
@@ -1914,9 +2018,9 @@ Call validate_relationship now.''';
         prompt,
         tools: LinkValidationTools.all,
       );
-      
+
       print('[Structured PERSON] Response: $response');
-      
+
       final parsed = FunctionCallParser.parse(response);
       if (parsed != null && parsed.name == 'validate_relationship') {
         final args = parsed.args;
@@ -1924,17 +2028,18 @@ Call validate_relationship now.''';
         final isValid = args['is_valid'] as bool? ?? false;
         final confidence = (args['confidence'] as num?)?.toDouble() ?? 0.0;
         final explanation = args['explanation'] as String?;
-        
+
         if (relationshipType != null) {
-          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-          
+          final adjustedConfidence =
+              (confidence * 0.6) + (candidate.similarity * 0.4);
+
           if (relationshipType == 'NONE' || !isValid) {
             return LinkValidationResult(
               isValid: false,
               explanation: explanation ?? 'No clear relationship identified',
             );
           }
-          
+
           return LinkValidationResult(
             isValid: true,
             relationshipType: relationshipType,
@@ -1942,37 +2047,41 @@ Call validate_relationship now.''';
             explanation: explanation,
           );
         }
-        
+
         // LLM called validate_relationship but used wrong parameter names
         // (e.g. entity_a, entity_b instead of relationship_type, is_valid).
         // Try to recover a relationship keyword from the arg values or response.
         print('[Structured PERSON] Correct function but wrong args: $args');
-        final keywordFromArgs = extractRelationshipKeyword(args.values.join(' '));
+        final keywordFromArgs =
+            extractRelationshipKeyword(args.values.join(' '));
         final keyword = keywordFromArgs ?? extractRelationshipKeyword(response);
         if (keyword != null) {
           return _bareKeywordToResult(keyword, candidate);
         }
       }
-      
+
       // If standard parsing failed, try Python variable assignment style
       final pythonVars = _parsePythonVariableAssignments(response);
       if (pythonVars != null) {
         final relationshipType = pythonVars['relationship_type'] as String?;
         final isValid = pythonVars['is_valid'] as bool? ?? false;
-        final confidence = (pythonVars['confidence'] as num?)?.toDouble() ?? 0.0;
+        final confidence =
+            (pythonVars['confidence'] as num?)?.toDouble() ?? 0.0;
         final explanation = pythonVars['explanation'] as String?;
-        
-        final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-        
-        print('[Structured PERSON] From Python vars: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
-        
+
+        final adjustedConfidence =
+            (confidence * 0.6) + (candidate.similarity * 0.4);
+
+        print(
+            '[Structured PERSON] From Python vars: type=$relationshipType, valid=$isValid, confidence=$adjustedConfidence');
+
         if (relationshipType == 'NONE' || !isValid) {
           return LinkValidationResult(
             isValid: false,
             explanation: explanation ?? 'No clear relationship identified',
           );
         }
-        
+
         return LinkValidationResult(
           isValid: true,
           relationshipType: relationshipType,
@@ -1980,26 +2089,29 @@ Call validate_relationship now.''';
           explanation: explanation,
         );
       }
-      
+
       // Try JSON extraction
       try {
         final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(response);
         if (jsonMatch != null) {
-          final jsonData = json.decode(jsonMatch.group(0)!) as Map<String, dynamic>;
+          final jsonData =
+              json.decode(jsonMatch.group(0)!) as Map<String, dynamic>;
           final relationshipType = jsonData['relationship_type'] as String?;
           final isValid = jsonData['is_valid'] as bool? ?? false;
-          final confidence = (jsonData['confidence'] as num?)?.toDouble() ?? 0.0;
+          final confidence =
+              (jsonData['confidence'] as num?)?.toDouble() ?? 0.0;
           final explanation = jsonData['explanation'] as String?;
-          
-          final adjustedConfidence = (confidence * 0.6) + (candidate.similarity * 0.4);
-          
+
+          final adjustedConfidence =
+              (confidence * 0.6) + (candidate.similarity * 0.4);
+
           if (relationshipType == 'NONE' || !isValid) {
             return LinkValidationResult(
               isValid: false,
               explanation: explanation ?? 'No clear relationship identified',
             );
           }
-          
+
           return LinkValidationResult(
             isValid: true,
             relationshipType: relationshipType,
@@ -2008,7 +2120,7 @@ Call validate_relationship now.''';
           );
         }
       } catch (_) {}
-      
+
       // Try bare keyword / arrow-style fallback
       final bareResult = _parseBareRelationshipType(response, candidate);
       if (bareResult != null) {
@@ -2033,9 +2145,18 @@ Call validate_relationship now.''';
   /// Known relationship types from LinkValidationTools enum
   @visibleForTesting
   static const knownRelationshipTypes = {
-    'FAMILY_MEMBER', 'COLLEAGUE', 'FRIEND', 'WORKS_AT', 'KNOWS',
-    'RELATED_TO', 'ASSOCIATED_WITH', 'SIMILAR_TO', 'LOCATED_IN',
-    'PART_OF', 'MENTIONED_WITH', 'NONE',
+    'FAMILY_MEMBER',
+    'COLLEAGUE',
+    'FRIEND',
+    'WORKS_AT',
+    'KNOWS',
+    'RELATED_TO',
+    'ASSOCIATED_WITH',
+    'SIMILAR_TO',
+    'LOCATED_IN',
+    'PART_OF',
+    'MENTIONED_WITH',
+    'NONE',
   };
 
   /// Extract a relationship type keyword from an LLM response string.
@@ -2078,14 +2199,16 @@ Call validate_relationship now.''';
   }
 
   /// Parse a bare relationship type keyword from the LLM response.
-  LinkValidationResult? _parseBareRelationshipType(String response, EmbeddingCandidate candidate) {
+  LinkValidationResult? _parseBareRelationshipType(
+      String response, EmbeddingCandidate candidate) {
     final keyword = extractRelationshipKeyword(response);
     if (keyword == null) return null;
     return _bareKeywordToResult(keyword, candidate);
   }
 
   /// Convert a bare relationship type keyword into a [LinkValidationResult].
-  LinkValidationResult _bareKeywordToResult(String keyword, EmbeddingCandidate candidate) {
+  LinkValidationResult _bareKeywordToResult(
+      String keyword, EmbeddingCandidate candidate) {
     // Use embedding similarity as the sole confidence signal, slightly discounted
     final confidence = (candidate.similarity * 0.85).clamp(0.0, 1.0);
 
@@ -2099,7 +2222,8 @@ Call validate_relationship now.''';
       );
     }
 
-    print('[Structured Fallback] Bare keyword $keyword => accepted (confidence=$confidence)');
+    print(
+        '[Structured Fallback] Bare keyword $keyword => accepted (confidence=$confidence)');
     return LinkValidationResult(
       isValid: true,
       relationshipType: keyword,
@@ -2111,19 +2235,34 @@ Call validate_relationship now.''';
   /// Get all entities with embeddings from repository
   Future<List<GraphEntity>> _getAllEntitiesWithEmbeddings() async {
     final allEntities = <GraphEntity>[];
-    
+
     final types = [
-      'SELF', 'PERSON', 'ORGANIZATION', 'EVENT', 'LOCATION',
-      'PHOTO', 'PHONE_CALL', 'DOCUMENT', 'NOTE', 'NOTE_CHUNK',
-      'PROJECT', 'TOPIC', 'DATE',
+      'SELF',
+      'PERSON',
+      'ORGANIZATION',
+      'EVENT',
+      'LOCATION',
+      'PHOTO',
+      'PHONE_CALL',
+      'DOCUMENT',
+      'NOTE',
+      'NOTE_CHUNK',
+      'DOCUMENT_CHUNK',
+      'PROJECT',
+      'TOPIC',
+      'DATE',
+      'PROJECT',
+      'TOPIC',
+      'DATE',
     ];
-    
+
     for (final type in types) {
       // Use the method that actually fetches embeddings from the database
-      final typeEntities = await repository.getEntitiesWithEmbeddingsByType(type);
+      final typeEntities =
+          await repository.getEntitiesWithEmbeddingsByType(type);
       allEntities.addAll(typeEntities);
     }
-    
+
     return allEntities;
   }
 }

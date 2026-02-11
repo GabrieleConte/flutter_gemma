@@ -20,22 +20,22 @@ import 'graph_rag_config.dart';
 class GraphRAGConfig {
   /// Path to the graph database file
   final String databasePath;
-  
+
   /// Configuration for GraphRAG queries
   final GraphRAGQueryConfig queryConfig;
-  
+
   /// Configuration for entity extraction
   final EntityExtractionConfig extractionConfig;
-  
+
   /// Configuration for community detection
   final CommunityDetectionConfig communityConfig;
-  
+
   /// Configuration for background indexing
   final IndexingConfig indexingConfig;
-  
+
   /// Extended configuration for LiteRT-LM integration
   final GraphRAGExtendedConfig extendedConfig;
-  
+
   /// Whether to auto-start indexing on initialization
   final bool autoIndex;
 
@@ -55,7 +55,7 @@ class GraphRAGConfig {
 }
 
 /// Main facade for GraphRAG functionality
-/// 
+///
 /// This class provides a unified interface for:
 /// - Managing data connectors (system APIs, Google Suite)
 /// - Building and querying the knowledge graph
@@ -67,36 +67,38 @@ class GraphRAG {
   final PlatformService _platform;
   final Future<String> Function(String prompt) _llmCallback;
   final Future<List<double>> Function(String text) _embeddingCallback;
-  final Future<String> Function(String prompt, Uint8List imageBytes)? _visionLlmCallback;
-  
+  final Future<String> Function(String prompt, Uint8List imageBytes)?
+      _visionLlmCallback;
+
   /// Optional callback for entity extraction with tool support
   /// If provided, enables structured function calling for extraction
-  final Future<String> Function(String prompt, {List<Tool>? tools})? _extractionLlmCallback;
-  
+  final Future<String> Function(String prompt, {List<Tool>? tools})?
+      _extractionLlmCallback;
+
   /// Callback to notify when extraction phase is complete (can deallocate extraction model)
   final Future<void> Function()? _onExtractionPhaseComplete;
-  
+
   /// Callback to prepare main LLM before summarization (can reallocate if needed)
   final Future<void> Function()? _onBeforeSummarization;
-  
+
   late final NativeGraphRepository _repository;
   late final ConnectorManager _connectorManager;
   late final EntityExtractor _extractor;
   late final GraphRAGQueryEngine _queryEngine;
   late final BackgroundIndexingService _indexingService;
-  
+
   /// Cache manager for model caching (5-10x faster reloads)
   late final ModelCacheManager _cacheManager;
-  
+
   /// Device capability detector for backend selection
   late final DeviceCapabilityDetector _deviceDetector;
-  
+
   /// Backend fallback manager
   late final BackendFallbackManager _fallbackManager;
-  
+
   /// Currently active backend
   PreferredBackend? _activeBackend;
-  
+
   bool _initialized = false;
 
   GraphRAG({
@@ -104,8 +106,10 @@ class GraphRAG {
     required PlatformService platform,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
-    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
-    Future<String> Function(String prompt, {List<Tool>? tools})? extractionLlmCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)?
+        visionLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})?
+        extractionLlmCallback,
     Future<void> Function()? onExtractionPhaseComplete,
     Future<void> Function()? onBeforeSummarization,
     DeviceCapabilityDetector? deviceDetector,
@@ -120,16 +124,16 @@ class GraphRAG {
         _onBeforeSummarization = onBeforeSummarization {
     // Initialize capability detector (can be mocked for testing)
     _deviceDetector = deviceDetector ?? DeviceCapabilityDetector();
-    
+
     // Initialize cache manager
-    _cacheManager = cacheManager ?? 
-        (config.extendedConfig.enableCacheDir 
+    _cacheManager = cacheManager ??
+        (config.extendedConfig.enableCacheDir
             ? LiteRTModelCacheManager(
                 customCacheDirectory: config.extendedConfig.cacheDirectoryPath,
                 enableLogging: config.extendedConfig.enablePerformanceLogging,
               )
             : MockModelCacheManager());
-    
+
     // Initialize fallback manager
     _fallbackManager = BackendFallbackManager(
       detector: _deviceDetector,
@@ -139,13 +143,13 @@ class GraphRAG {
 
   /// Whether GraphRAG is initialized
   bool get isInitialized => _initialized;
-  
+
   /// Currently active backend after initialization
   PreferredBackend? get activeBackend => _activeBackend;
-  
+
   /// Cache manager for model caching
   ModelCacheManager get cacheManager => _cacheManager;
-  
+
   /// Device capability detector
   DeviceCapabilityDetector get deviceDetector => _deviceDetector;
 
@@ -230,7 +234,8 @@ class GraphRAG {
         enableLogging: extendedConfig.enablePerformanceLogging,
       );
       if (extendedConfig.enablePerformanceLogging) {
-        debugPrint('[GraphRAG] Using AdaptiveEntityExtractor with tool support');
+        debugPrint(
+            '[GraphRAG] Using AdaptiveEntityExtractor with tool support');
       }
     } else if (extendedConfig.enableFunctionCalling) {
       // Function calling enabled but no extraction callback - use LLM with fallback
@@ -242,7 +247,8 @@ class GraphRAG {
         enableLogging: extendedConfig.enablePerformanceLogging,
       );
       if (extendedConfig.enablePerformanceLogging) {
-        debugPrint('[GraphRAG] Using AdaptiveEntityExtractor without tool support (no extractionLlmCallback)');
+        debugPrint(
+            '[GraphRAG] Using AdaptiveEntityExtractor without tool support (no extractionLlmCallback)');
       }
     } else {
       // Use standard LLM extractor
@@ -285,12 +291,12 @@ class GraphRAG {
       await startIndexing();
     }
   }
-  
+
   /// Initialize with backend selection and fallback
-  /// 
+  ///
   /// This method attempts to initialize with the preferred backend,
   /// falling back to less capable backends on error.
-  /// 
+  ///
   /// Returns the [BackendInitResult] with the successfully initialized
   /// backend and any fallback attempts.
   Future<BackendInitResult> initializeWithBackendFallback({
@@ -298,7 +304,7 @@ class GraphRAG {
   }) async {
     // First do standard initialization
     await initialize();
-    
+
     // If no backend callback provided, just detect optimal backend
     if (backendInitCallback == null) {
       final optimal = await _deviceDetector.detectOptimalBackend(
@@ -311,21 +317,21 @@ class GraphRAG {
         attemptedBackends: [_activeBackend!],
       );
     }
-    
+
     // Use fallback manager for backend initialization
     final result = await _fallbackManager.initializeWithFallback(
       preferredBackend: _config.extendedConfig.preferredBackend,
       initCallback: backendInitCallback,
       enableNPU: _config.extendedConfig.enableNPUDetection,
     );
-    
+
     if (result.success) {
       _activeBackend = result.backend;
     }
-    
+
     return result;
   }
-  
+
   /// Get optimal context size for current backend
   int getOptimalContextSize({String? modelId}) {
     final backend = _activeBackend ?? PreferredBackend.gpu;
@@ -335,9 +341,9 @@ class GraphRAG {
       requestedSize: _config.extendedConfig.maxContextTokens,
     );
   }
-  
+
   /// Check if the current backend supports global queries
-  /// 
+  ///
   /// Global queries require more context for map-reduce operations.
   /// NPU backend has reduced context and may not support complex global queries.
   bool supportsGlobalQueries() {
@@ -359,7 +365,7 @@ class GraphRAG {
   /// Register a Google Suite connector
   void registerGoogleConnector(GoogleSuiteConfig config) {
     _checkInitialized();
-    
+
     _connectorManager.registerConnector(
       GoogleContactsConnector(config),
     );
@@ -375,15 +381,15 @@ class GraphRAG {
   }
 
   /// Check permissions for all connectors
-  Future<Map<String, Map<DataPermissionType, DataPermissionStatus>>> 
+  Future<Map<String, Map<DataPermissionType, DataPermissionStatus>>>
       checkPermissions() async {
     _checkInitialized();
     return await _connectorManager.checkAllPermissions();
   }
 
   /// Request permissions for a specific data type
-  Future<Map<DataPermissionType, DataPermissionStatus>> 
-      requestPermissions(String dataType) async {
+  Future<Map<DataPermissionType, DataPermissionStatus>> requestPermissions(
+      String dataType) async {
     _checkInitialized();
     return await _connectorManager.requestPermissions(dataType);
   }
@@ -444,7 +450,7 @@ class GraphRAG {
       maxHops: maxHops,
     );
   }
-  
+
   /// Execute a local query with answer generation
   /// Returns retrieval results plus a generated answer based on top entities
   Future<GraphRAGQueryResult> queryWithAnswer(
@@ -461,7 +467,7 @@ class GraphRAG {
       maxHops: maxHops,
     );
   }
-  
+
   /// Stream a local query answer
   /// Yields tokens as they are generated
   Stream<String> queryWithAnswerStreaming(
@@ -481,7 +487,6 @@ class GraphRAG {
     );
   }
 
-
   /// Search entities by similarity
   Future<List<ScoredEntity>> searchEntities(
     String query, {
@@ -489,7 +494,7 @@ class GraphRAG {
     String? entityType,
   }) async {
     _checkInitialized();
-    
+
     final embedding = await _embeddingCallback(query);
     return await _repository.searchEntitiesBySimilarity(
       embedding,
@@ -505,7 +510,7 @@ class GraphRAG {
     int? level,
   }) async {
     _checkInitialized();
-    
+
     final embedding = await _embeddingCallback(query);
     return await _repository.searchCommunitiesBySimilarity(
       embedding,
@@ -515,13 +520,13 @@ class GraphRAG {
   }
 
   /// Execute a global query using the GraphRAG paper's map-reduce approach
-  /// 
+  ///
   /// This is the recommended method for "sensemaking" queries that require
   /// understanding across the entire dataset, such as:
   /// - "What are the main themes in my contacts?"
   /// - "How are my events connected?"
   /// - "Who are the most important people in my network?"
-  /// 
+  ///
   /// The method works by:
   /// 1. MAP: Each community summary generates a partial answer with helpfulness score
   /// 2. REDUCE: Top-scored answers are combined into a final comprehensive answer
@@ -533,7 +538,7 @@ class GraphRAG {
     String responseType = 'multiple paragraphs',
   }) async {
     _checkInitialized();
-    
+
     final engine = GlobalQueryEngine(
       repository: _repository,
       llmCallback: _llmCallback,
@@ -545,12 +550,12 @@ class GraphRAG {
         responseType: responseType,
       ),
     );
-    
+
     return await engine.query(query);
   }
-  
+
   /// Execute a global query with automatic community level selection
-  /// 
+  ///
   /// This automatically selects the appropriate community level based on
   /// the query type:
   /// - Broad/overview questions → root communities (level 0)
@@ -563,7 +568,7 @@ class GraphRAG {
     String responseType = 'multiple paragraphs',
   }) async {
     _checkInitialized();
-    
+
     final engine = GlobalQueryEngine(
       repository: _repository,
       llmCallback: _llmCallback,
@@ -574,12 +579,12 @@ class GraphRAG {
         responseType: responseType,
       ),
     );
-    
+
     return await engine.queryWithAutoLevel(query);
   }
 
   /// Execute a streaming global query with automatic level selection
-  /// 
+  ///
   /// This yields progress events during execution, providing real-time
   /// feedback including:
   /// - Community processing progress
@@ -592,7 +597,7 @@ class GraphRAG {
     Stream<String> Function(String prompt)? llmStreamCallback,
   }) {
     _checkInitialized();
-    
+
     final engine = StreamingGlobalQueryEngine(
       repository: _repository,
       llmCallback: _llmCallback,
@@ -604,14 +609,14 @@ class GraphRAG {
         responseType: responseType,
       ),
     );
-    
+
     return engine.queryWithAutoLevelStreaming(query);
   }
 
   /// Get context string for RAG augmentation
   Future<String> getContext(String query) async {
     _checkInitialized();
-    
+
     final result = await _queryEngine.query(query);
     return result.contextString;
   }
@@ -708,7 +713,7 @@ class GraphRAG {
   }
 
   // === Document Content Indexing ===
-  
+
   /// Index a single document by extracting entities and relationships
   /// This is the recommended method for indexing user-selected documents
   Future<void> indexDocumentContent({
@@ -718,131 +723,142 @@ class GraphRAG {
     String? mimeType,
   }) async {
     _checkInitialized();
-    
+
     if (content.isEmpty) {
       return;
     }
-    
-    // Create source ID based on document
-    final sourceId = 'document_$documentId';
-    
-    // Extract entities from document content
-    final extraction = await _extractor.extractFromText(
-      content,
-      sourceId: sourceId,
-      sourceType: 'DOCUMENT',
-    );
-    
-    // Generate entity ID for document
+
     String normalizeId(String name, String type) {
-      final normalized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+      final normalized =
+          name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
       final typePrefix = type.isNotEmpty ? '${type.toLowerCase()}_' : '';
       return '$typePrefix$normalized';
     }
-    
+
     final now = DateTime.now();
-    
-    // Add extracted entities to graph
-    for (final entity in extraction.entities) {
-      final embedding = await _embeddingCallback(
-        '${entity.name} ${entity.description ?? ""}',
+    final sourceId = 'document_$documentId';
+
+    // Split content into 1024-char chunks with 100-char overlap
+    final chunks = _splitIntoDocumentChunks(content);
+    debugPrint(
+        '[GraphRAG] Document "$name": ${content.length} chars -> ${chunks.length} chunk(s)');
+
+    // Collect all extracted entity IDs across all chunks (for co-occurrence)
+    final allExtractedEntityIds = <String>[];
+
+    // Process each chunk for entity extraction
+    for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      final chunkContent = chunks[chunkIndex];
+      final chunkSourceId = '${sourceId}_chunk_$chunkIndex';
+
+      final extraction = await _extractor.extractFromText(
+        chunkContent,
+        sourceId: chunkSourceId,
+        sourceType: 'DOCUMENT',
       );
-      
-      final graphEntity = GraphEntity(
-        id: normalizeId(entity.name, entity.type),
-        name: entity.name,
-        type: entity.type,
-        description: entity.description,
-        embedding: embedding,
-        metadata: {'sourceId': sourceId},
-        lastModified: now,
-      );
-      
-      // Try to add, if it fails (duplicate), update instead
-      try {
-        await _repository.addEntity(graphEntity);
-      } catch (_) {
-        await _repository.updateEntity(
-          graphEntity.id,
-          name: graphEntity.name,
-          type: graphEntity.type,
+
+      // Add extracted entities
+      for (final entity in extraction.entities) {
+        final embedding = await _embeddingCallback(
+          '${entity.name} ${entity.description ?? ""}',
+        );
+
+        final graphEntity = GraphEntity(
+          id: normalizeId(entity.name, entity.type),
+          name: entity.name,
+          type: entity.type,
+          description: entity.description,
           embedding: embedding,
-          description: graphEntity.description,
-          metadata: graphEntity.metadata,
+          metadata: {'sourceId': chunkSourceId},
           lastModified: now,
         );
+
+        try {
+          await _repository.addEntity(graphEntity);
+        } catch (_) {
+          await _repository.updateEntity(
+            graphEntity.id,
+            name: graphEntity.name,
+            type: graphEntity.type,
+            embedding: embedding,
+            description: graphEntity.description,
+            metadata: graphEntity.metadata,
+            lastModified: now,
+          );
+        }
+
+        allExtractedEntityIds.add(graphEntity.id);
+      }
+
+      // Add extracted relationships
+      for (final rel in extraction.relationships) {
+        final graphRelationship = GraphRelationship(
+          id: '${normalizeId(rel.sourceEntity, '')}_${rel.type.toLowerCase()}_${normalizeId(rel.targetEntity, '')}',
+          sourceId: normalizeId(rel.sourceEntity, ''),
+          targetId: normalizeId(rel.targetEntity, ''),
+          type: rel.type,
+          weight: rel.weight,
+          metadata: {'description': rel.description},
+        );
+
+        try {
+          await _repository.addRelationship(graphRelationship);
+        } catch (_) {}
       }
     }
-    
-    // Add relationships
-    for (final rel in extraction.relationships) {
-      final graphRelationship = GraphRelationship(
-        id: '${normalizeId(rel.sourceEntity, '')}_${rel.type.toLowerCase()}_${normalizeId(rel.targetEntity, '')}',
-        sourceId: normalizeId(rel.sourceEntity, ''),
-        targetId: normalizeId(rel.targetEntity, ''),
-        type: rel.type,
-        weight: rel.weight,
-        metadata: {'description': rel.description},
-      );
-      
-      // Try to add relationship, ignore if it already exists
-      try {
-        await _repository.addRelationship(graphRelationship);
-      } catch (_) {
-        // Relationship already exists, that's fine
-      }
-    }
-    
-    // Create co-occurrence relationships between entities from the same document
-    // — but only when they don't already share an explicit relationship.
-    final extractedEntityIds = extraction.entities
-        .map((e) => normalizeId(e.name, e.type))
-        .toList();
-    
-    for (var i = 0; i < extractedEntityIds.length; i++) {
-      for (var j = i + 1; j < extractedEntityIds.length; j++) {
-        final existingRels = await _repository.getRelationships(extractedEntityIds[i]);
+
+    // Create co-occurrence relationships between entities that don't already
+    // share an explicit relationship.
+    final uniqueEntityIds = allExtractedEntityIds.toSet().toList();
+    for (var i = 0; i < uniqueEntityIds.length; i++) {
+      for (var j = i + 1; j < uniqueEntityIds.length; j++) {
+        final existingRels =
+            await _repository.getRelationships(uniqueEntityIds[i]);
         final alreadyLinked = existingRels.any(
-          (r) => (r.targetId == extractedEntityIds[j] || r.sourceId == extractedEntityIds[j])
-                 && r.type != 'CO_OCCURS_IN',
+          (r) =>
+              (r.targetId == uniqueEntityIds[j] ||
+                  r.sourceId == uniqueEntityIds[j]) &&
+              r.type != 'CO_OCCURS_IN',
         );
         if (alreadyLinked) continue;
 
         final coOccurRel = GraphRelationship(
-          id: '${extractedEntityIds[i]}_co_occurs_${extractedEntityIds[j]}',
-          sourceId: extractedEntityIds[i],
-          targetId: extractedEntityIds[j],
+          id: '${uniqueEntityIds[i]}_co_occurs_${uniqueEntityIds[j]}',
+          sourceId: uniqueEntityIds[i],
+          targetId: uniqueEntityIds[j],
           type: 'CO_OCCURS_IN',
-          weight: 0.5, // Lower weight than explicit relationships
+          weight: 0.5,
           metadata: {'sourceDocument': name, 'sourceId': sourceId},
         );
         try {
           await _repository.addRelationship(coOccurRel);
-        } catch (_) {
-          // Relationship already exists
-        }
+        } catch (_) {}
       }
     }
-    
-    // Create document entity and link to "You"
+
+    // --- Create parent DOCUMENT entity ---
+    final docEntityId = normalizeId(name, 'DOCUMENT');
     final documentEmbedding = await _embeddingCallback(
       '$name ${content.length > 200 ? content.substring(0, 200) : content}',
     );
-    
+
     final documentEntity = GraphEntity(
-      id: normalizeId(name, 'DOCUMENT'),
+      id: docEntityId,
       name: name,
       type: 'DOCUMENT',
-      description: content.length > 500 ? '${content.substring(0, 500)}...' : content,
+      description:
+          content.length > 500 ? '${content.substring(0, 500)}...' : content,
       embedding: documentEmbedding,
       metadata: {
         'sourceId': sourceId,
         'mimeType': mimeType ?? 'text/plain',
         'documentId': documentId,
+        'chunkCount': chunks.length,
+        'totalLength': content.length,
       },
       lastModified: now,
     );
-    
+
     try {
       await _repository.addEntity(documentEntity);
     } catch (_) {
@@ -856,32 +872,199 @@ class GraphRAG {
         lastModified: now,
       );
     }
-    
-    // Link document to "You" (the user's SELF entity)
-    // Use YouEntity.id for consistency with the rest of the codebase
-    const youId = YouEntity.id; // 'you_central_node'
+
+    // --- Create chunk entities and link them ---
+    if (chunks.length > 1) {
+      String? previousChunkId;
+
+      for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        final chunkContent = chunks[chunkIndex];
+        final chunkId = '${docEntityId}_chunk_$chunkIndex';
+
+        final chunkEmbedding = await _embeddingCallback(
+          chunkContent.length > 200
+              ? chunkContent.substring(0, 200)
+              : chunkContent,
+        );
+
+        final chunkEntity = GraphEntity(
+          id: chunkId,
+          name: '$name (part ${chunkIndex + 1}/${chunks.length})',
+          type: 'DOCUMENT_CHUNK',
+          description: chunkContent.length > 500
+              ? '${chunkContent.substring(0, 500)}...'
+              : chunkContent,
+          embedding: chunkEmbedding,
+          metadata: {
+            'sourceId': sourceId,
+            'chunkIndex': chunkIndex,
+            'totalChunks': chunks.length,
+            'parentDocumentId': docEntityId,
+          },
+          lastModified: now,
+        );
+
+        try {
+          await _repository.addEntity(chunkEntity);
+        } catch (_) {
+          await _repository.updateEntity(
+            chunkEntity.id,
+            name: chunkEntity.name,
+            type: chunkEntity.type,
+            embedding: chunkEmbedding,
+            description: chunkEntity.description,
+            metadata: chunkEntity.metadata,
+            lastModified: now,
+          );
+        }
+
+        // PART_OF: chunk -> parent document
+        final partOfRel = GraphRelationship(
+          id: '${chunkId}_part_of_$docEntityId',
+          sourceId: chunkId,
+          targetId: docEntityId,
+          type: 'PART_OF',
+          weight: 1.0,
+          metadata: {'chunkIndex': chunkIndex},
+        );
+        try {
+          await _repository.addRelationship(partOfRel);
+        } catch (_) {}
+
+        // NEXT_CHUNK: previousChunk -> currentChunk
+        if (previousChunkId != null) {
+          final nextChunkRel = GraphRelationship(
+            id: '${previousChunkId}_next_chunk_$chunkId',
+            sourceId: previousChunkId,
+            targetId: chunkId,
+            type: 'NEXT_CHUNK',
+            weight: 1.0,
+            metadata: {},
+          );
+          try {
+            await _repository.addRelationship(nextChunkRel);
+          } catch (_) {}
+        }
+
+        previousChunkId = chunkId;
+      }
+    }
+
+    // --- Link to You node via hub pattern ---
+    const youId = YouEntity.id;
     final youEntity = await _repository.getEntity(youId);
     if (youEntity == null) {
-      // Create "You" entity using the YouEntity helper for consistency
       final youEmbedding = await _embeddingCallback('You - personal user self');
       final you = YouEntity.create(embedding: youEmbedding);
       await _repository.addEntity(you);
     }
-    
-    // Create relationship: You -> HAS_DOCUMENT -> Document
-    final documentRel = GraphRelationship(
-      id: '${youId}_has_document_${documentEntity.id}',
-      sourceId: youId,
-      targetId: documentEntity.id,
+
+    // Ensure hub entity exists: You -> HAS_DATA -> My Documents
+    final hubId = DataHubEntity.idFor(DataSourceTypes.document);
+    final existingHub = await _repository.getEntity(hubId);
+    if (existingHub == null) {
+      final hubEmbedding = await _embeddingCallback(
+        DataHubEntity.nameFor(DataSourceTypes.document),
+      );
+      await _repository.addEntity(
+        DataHubEntity.create(DataSourceTypes.document, embedding: hubEmbedding),
+      );
+
+      final hubRel = GraphRelationship(
+        id: '${youId}_${YouRelationshipTypes.hasData}_$hubId',
+        sourceId: youId,
+        targetId: hubId,
+        type: YouRelationshipTypes.hasData,
+        weight: 1.0,
+        metadata: {},
+      );
+      try {
+        await _repository.addRelationship(hubRel);
+      } catch (_) {}
+    }
+
+    // Link document to hub: My Documents Hub -> OWNS_DOCUMENT -> Document
+    final docHubRel = GraphRelationship(
+      id: '${hubId}_${YouRelationshipTypes.ownsDocument}_$docEntityId',
+      sourceId: hubId,
+      targetId: docEntityId,
       type: YouRelationshipTypes.ownsDocument,
       weight: 1.0,
       metadata: {},
     );
     try {
-      await _repository.addRelationship(documentRel);
-    } catch (_) {
-      // Relationship already exists
+      await _repository.addRelationship(docHubRel);
+    } catch (_) {}
+
+    // Link extracted entities to the document via MENTIONED_IN
+    for (final entityId in uniqueEntityIds) {
+      final mentionedInRel = GraphRelationship(
+        id: '${entityId}_mentioned_in_$docEntityId',
+        sourceId: entityId,
+        targetId: docEntityId,
+        type: 'MENTIONED_IN',
+        weight: 0.8,
+        metadata: {'sourceDocument': name},
+      );
+      try {
+        await _repository.addRelationship(mentionedInRel);
+      } catch (_) {}
     }
+
+    debugPrint(
+        '[GraphRAG] Indexed document "$name": ${chunks.length} chunk(s), '
+        '${uniqueEntityIds.length} extracted entities');
+  }
+
+  // === Document Chunking ===
+
+  /// Split text into chunks of [chunkSize] characters with [overlap] character
+  /// overlap between consecutive chunks.
+  ///
+  /// Each chunk starts [overlap] characters before the previous chunk's end,
+  /// so boundary content appears in both adjacent chunks.
+  /// Tries to split on paragraph or sentence boundaries when possible.
+  static List<String> _splitIntoDocumentChunks(
+    String text, {
+    int chunkSize = 1024,
+    int overlap = 100,
+  }) {
+    if (text.length <= chunkSize) {
+      return [text];
+    }
+
+    final chunks = <String>[];
+    var start = 0;
+
+    while (start < text.length) {
+      var end = (start + chunkSize).clamp(0, text.length);
+
+      if (end < text.length) {
+        // Try to break at a paragraph boundary within the last 20% of the chunk
+        final searchStart = start + (chunkSize * 0.8).toInt();
+        final searchRegion = text.substring(searchStart, end);
+        final paragraphBreak = searchRegion.lastIndexOf('\n\n');
+
+        if (paragraphBreak != -1) {
+          end = searchStart + paragraphBreak + 2; // include the \n\n
+        } else {
+          // Try to break at a sentence boundary
+          final sentenceBreak = searchRegion.lastIndexOf(RegExp(r'[.!?]\s'));
+          if (sentenceBreak != -1) {
+            end = searchStart + sentenceBreak + 2; // include punct + space
+          }
+          // Otherwise hard-split at chunkSize
+        }
+      }
+
+      chunks.add(text.substring(start, end).trim());
+
+      // Advance by (end - start - overlap), ensuring we always move forward
+      final step = end - start - overlap;
+      start += step > 0 ? step : (end - start);
+    }
+
+    return chunks.where((c) => c.isNotEmpty).toList();
   }
 
   // === Note Content Indexing ===
@@ -1089,10 +1272,13 @@ class GraphRAG {
     for (var i = 0; i < uniqueEntityIds.length; i++) {
       for (var j = i + 1; j < uniqueEntityIds.length; j++) {
         // Check if an explicit relationship already exists between these two
-        final existingRels = await _repository.getRelationships(uniqueEntityIds[i]);
+        final existingRels =
+            await _repository.getRelationships(uniqueEntityIds[i]);
         final alreadyLinked = existingRels.any(
-          (r) => (r.targetId == uniqueEntityIds[j] || r.sourceId == uniqueEntityIds[j])
-                 && r.type != 'CO_OCCURS_IN',
+          (r) =>
+              (r.targetId == uniqueEntityIds[j] ||
+                  r.sourceId == uniqueEntityIds[j]) &&
+              r.type != 'CO_OCCURS_IN',
         );
         if (alreadyLinked) continue;
 
@@ -1120,9 +1306,8 @@ class GraphRAG {
       id: noteEntityId,
       name: title,
       type: 'NOTE',
-      description: content.length > 500
-          ? '${content.substring(0, 500)}...'
-          : content,
+      description:
+          content.length > 500 ? '${content.substring(0, 500)}...' : content,
       embedding: noteEmbedding,
       metadata: {
         'sourceId': sourceId,
@@ -1130,7 +1315,8 @@ class GraphRAG {
         'chunkCount': chunks.length,
         'totalLength': content.length,
         if (dateCreated != null) 'dateCreated': dateCreated.toIso8601String(),
-        if (dateModified != null) 'dateModified': dateModified.toIso8601String(),
+        if (dateModified != null)
+          'dateModified': dateModified.toIso8601String(),
         if (sourceApp != null) 'sourceApp': sourceApp,
       },
       lastModified: now,
@@ -1231,8 +1417,7 @@ class GraphRAG {
     const youId = YouEntity.id;
     final youEntity = await _repository.getEntity(youId);
     if (youEntity == null) {
-      final youEmbedding =
-          await _embeddingCallback('You - personal user self');
+      final youEmbedding = await _embeddingCallback('You - personal user self');
       final you = YouEntity.create(embedding: youEmbedding);
       await _repository.addEntity(you);
     }
@@ -1392,8 +1577,7 @@ class GraphRAG {
     const youId = YouEntity.id;
     final youEntity = await _repository.getEntity(youId);
     if (youEntity == null) {
-      final youEmbedding =
-          await _embeddingCallback('You - personal user self');
+      final youEmbedding = await _embeddingCallback('You - personal user self');
       final you = YouEntity.create(embedding: youEmbedding);
       await _repository.addEntity(you);
     }
@@ -1443,23 +1627,23 @@ class GraphRAG {
   /// Run community detection on current graph
   Future<CommunityDetectionResult> detectCommunities() async {
     _checkInitialized();
-    
+
     // Get all entities and relationships
     final entities = <GraphEntity>[];
     final relationships = <GraphRelationship>[];
-    
+
     for (final type in EntityTypes.all) {
       entities.addAll(await _repository.getEntitiesByType(type));
     }
-    
+
     for (final entity in entities) {
       relationships.addAll(await _repository.getRelationships(entity.id));
     }
-    
+
     final detector = LeidenCommunityDetector(
       config: _config.communityConfig,
     );
-    
+
     return await detector.detectCommunities(entities, relationships);
   }
 
@@ -1486,8 +1670,10 @@ class GraphRAGFactory {
     required PlatformService platform,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
-    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
-    Future<String> Function(String prompt, {List<Tool>? tools})? extractionLlmCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)?
+        visionLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})?
+        extractionLlmCallback,
     Future<void> Function()? onExtractionPhaseComplete,
     Future<void> Function()? onBeforeSummarization,
     bool autoIndex = false,
@@ -1513,8 +1699,10 @@ class GraphRAGFactory {
     required PlatformService platform,
     required Future<String> Function(String prompt) llmCallback,
     required Future<List<double>> Function(String text) embeddingCallback,
-    Future<String> Function(String prompt, Uint8List imageBytes)? visionLlmCallback,
-    Future<String> Function(String prompt, {List<Tool>? tools})? extractionLlmCallback,
+    Future<String> Function(String prompt, Uint8List imageBytes)?
+        visionLlmCallback,
+    Future<String> Function(String prompt, {List<Tool>? tools})?
+        extractionLlmCallback,
     Future<void> Function()? onExtractionPhaseComplete,
     Future<void> Function()? onBeforeSummarization,
   }) {
@@ -1570,8 +1758,10 @@ extension GraphRAGQueryExtension on GraphRAG {
 /// Extension for RAG integration
 extension GraphRAGIntegration on GraphRAG {
   /// Get augmented prompt with graph context
-  Future<String> augmentPrompt(String userQuery, {
-    String promptTemplate = '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
+  Future<String> augmentPrompt(
+    String userQuery, {
+    String promptTemplate =
+        '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
 
 The context includes entities (people, events, photos, notes, calls, locations, documents) and the relationships connecting them (shown as "→ relationship → target").
 
@@ -1590,7 +1780,7 @@ User question: {query}
 Answer:''',
   }) async {
     final context = await getContext(userQuery);
-    
+
     return promptTemplate
         .replaceAll('{context}', context)
         .replaceAll('{query}', userQuery);

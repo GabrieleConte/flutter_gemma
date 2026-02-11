@@ -535,6 +535,8 @@ class GraphRAGQueryEngine {
         _formatNoteChunk(buf, e);
       case EntityTypes.document:
         _formatDocument(buf, e);
+      case EntityTypes.documentChunk:
+        _formatDocumentChunk(buf, e);
       default:
         // Generic formatting for ORGANIZATION, LOCATION, SKILL, TOPIC, etc.
         _formatGeneric(buf, e);
@@ -626,7 +628,8 @@ class GraphRAGQueryEngine {
     if (meta != null) {
       final direction = meta['callDirection']?.toString();
       if (direction != null) buf.write(' [$direction]');
-      final dateStr = _formatDateTimeValue(meta['timestamp'] ?? meta['startTime']);
+      final dateStr =
+          _formatDateTimeValue(meta['timestamp'] ?? meta['startTime']);
       if (dateStr != null) buf.write(' — $dateStr');
       final duration = meta['duration']?.toString();
       if (duration != null && duration.isNotEmpty) {
@@ -713,6 +716,18 @@ class GraphRAGQueryEngine {
       buf.write(' — $preview');
     }
     buf.writeln();
+  }
+
+  /// Format DOCUMENT_CHUNK entity: title (part X/Y) + content preview.
+  void _formatDocumentChunk(StringBuffer buf, GraphEntity e) {
+    buf.write('${e.name} (${_entityTypeLabel(e.type)})');
+    buf.writeln();
+    if (e.description != null && e.description!.isNotEmpty) {
+      final preview = e.description!.length > 200
+          ? '${e.description!.substring(0, 200)}…'
+          : e.description!;
+      buf.writeln('  $preview');
+    }
   }
 
   /// Generic formatting for entity types without specialized formatting.
@@ -829,9 +844,18 @@ class GraphRAGQueryEngine {
 
   /// Month abbreviation lookup for DD-Mon-YYYY parsing.
   static const _monthAbbreviations = {
-    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
-    'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
-    'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+    'jan': 1,
+    'feb': 2,
+    'mar': 3,
+    'apr': 4,
+    'may': 5,
+    'jun': 6,
+    'jul': 7,
+    'aug': 8,
+    'sep': 9,
+    'oct': 10,
+    'nov': 11,
+    'dec': 12,
   };
 
   /// Parse a date in DD-Mon-YYYY format (e.g. "14-Jun-2025").
@@ -859,8 +883,8 @@ class GraphRAGQueryEngine {
   /// Convert a camelCase metadata key to a human-readable label.
   static String _humanizeKey(String key) {
     // Insert space before uppercase letters and lowercase the result
-    final spaced =
-        key.replaceAllMapped(RegExp(r'[A-Z]'), (m) => ' ${m[0]!.toLowerCase()}');
+    final spaced = key.replaceAllMapped(
+        RegExp(r'[A-Z]'), (m) => ' ${m[0]!.toLowerCase()}');
     // Capitalize first letter
     return spaced[0].toUpperCase() + spaced.substring(1);
   }
@@ -875,11 +899,15 @@ class GraphRAGQueryEngine {
     final minutes = seconds ~/ 60;
     final remainingSeconds = seconds % 60;
     if (minutes < 60) {
-      return remainingSeconds > 0 ? '${minutes}m ${remainingSeconds}s' : '${minutes}m';
+      return remainingSeconds > 0
+          ? '${minutes}m ${remainingSeconds}s'
+          : '${minutes}m';
     }
     final hours = minutes ~/ 60;
     final remainingMinutes = minutes % 60;
-    return remainingMinutes > 0 ? '${hours}h ${remainingMinutes}m' : '${hours}h';
+    return remainingMinutes > 0
+        ? '${hours}h ${remainingMinutes}m'
+        : '${hours}h';
   }
 
   /// Apply token budget with priority-based trimming and relationship-aware
@@ -931,12 +959,12 @@ class GraphRAGQueryEngine {
       if (targetEntity.type == EntityTypes.date) continue;
 
       outgoingRels.putIfAbsent(rel.sourceId, () => []).add(
-        _ResolvedRelationship(
-          type: rel.type,
-          targetName: targetEntity.name,
-          targetType: targetEntity.type,
-        ),
-      );
+            _ResolvedRelationship(
+              type: rel.type,
+              targetName: targetEntity.name,
+              targetType: targetEntity.type,
+            ),
+          );
     }
 
     // --- Phase 1: Fit entities using full budget ---
@@ -946,8 +974,7 @@ class GraphRAGQueryEngine {
     // Add seeds (skip DATE entities from context — they are structural)
     for (final seed in seeds) {
       if (_contextExcludedTypes.contains(seed.entity.type)) continue;
-      final text = _formatEntity(seed,
-          outgoing: outgoingRels[seed.entity.id]);
+      final text = _formatEntity(seed, outgoing: outgoingRels[seed.entity.id]);
       final tokens = _estimateTokens(text);
       if (runningTokens + tokens <= tokenBudget) {
         allEntities.add(seed);
@@ -959,8 +986,7 @@ class GraphRAGQueryEngine {
     // Add hops (already sorted desc by score, skip DATE entities)
     for (final hop in hops) {
       if (_contextExcludedTypes.contains(hop.entity.type)) continue;
-      final text = _formatEntity(hop,
-          outgoing: outgoingRels[hop.entity.id]);
+      final text = _formatEntity(hop, outgoing: outgoingRels[hop.entity.id]);
       final tokens = _estimateTokens(text);
       if (runningTokens + tokens <= tokenBudget) {
         allEntities.add(hop);
@@ -997,8 +1023,8 @@ class GraphRAGQueryEngine {
     if (allEntities.isNotEmpty) {
       buf.write(entityHeader);
       for (final scored in allEntities) {
-        buf.write(_formatEntity(scored,
-            outgoing: outgoingRels[scored.entity.id]));
+        buf.write(
+            _formatEntity(scored, outgoing: outgoingRels[scored.entity.id]));
       }
     }
     if (survivingCommunities.isNotEmpty) {
@@ -1027,7 +1053,8 @@ class GraphRAGQueryEngine {
   // ---------------------------------------------------------------------------
 
   /// System prompt for the personal assistant answering from graph context.
-  static const _systemPrompt = '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
+  static const _systemPrompt =
+      '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
 
 The context includes entities (people, events, photos, notes, calls, locations, documents) and the relationships connecting them (shown as "→ relationship → target").
 

@@ -851,6 +851,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return Colors.cyan;
       case 'NOTE_CHUNK':
         return Colors.cyan.shade700;
+      case 'DOCUMENT_CHUNK':
+        return Colors.deepOrange.shade700;
       case 'PROJECT':
         return Colors.indigo;
       case 'TOPIC':

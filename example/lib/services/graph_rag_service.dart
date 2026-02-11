@@ -642,6 +642,7 @@ class GraphRAGService {
       'DOCUMENT',       // Documents
       'NOTE',           // Notes
       'NOTE_CHUNK',     // Note chunks (parts of long notes)
+      'DOCUMENT_CHUNK', // Document chunks (parts of long documents)
       'PROJECT',        // Projects, folders
       'TOPIC',          // Topics, tags
       'DATE',           // Dates

@@ -47,6 +47,8 @@ class GraphNode {
         return Colors.cyan;
       case 'NOTE_CHUNK':
         return Colors.cyan.shade700;
+      case 'DOCUMENT_CHUNK':
+        return Colors.deepOrange.shade700;
       case 'PROJECT':
         return Colors.deepPurple;
       case 'TOPIC':
@@ -88,6 +90,8 @@ class GraphNode {
         return Icons.note;
       case 'NOTE_CHUNK':
         return Icons.note;
+      case 'DOCUMENT_CHUNK':
+        return Icons.article;
       case 'PROJECT':
         return Icons.folder;
       case 'TOPIC':
@@ -393,7 +397,7 @@ class _GraphVisualizerState extends State<GraphVisualizer>
     // near the primary entities they're connected to via data-layer edges.
     const transitiveTypes = {
       'DATE', 'LOCATION', 'ORGANIZATION', 'EMAIL', 'PHONE',
-      'TOPIC', 'PROJECT', 'NOTE_CHUNK',
+      'TOPIC', 'PROJECT', 'NOTE_CHUNK', 'DOCUMENT_CHUNK',
     };
     final nonHubEntities = visibleEntities
         .where(

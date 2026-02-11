@@ -43,15 +43,15 @@ class ExtractedEntity {
 
   factory ExtractedEntity.fromJson(Map<String, dynamic> json) {
     // Handle various key names that LLMs might produce
-    final name = json['name'] as String? 
-        ?? json['entity'] as String?
-        ?? json['entity_name'] as String?
-        ?? json['label'] as String?
-        ?? '';
-    final type = json['type'] as String? 
-        ?? json['entity_type'] as String?
-        ?? json['category'] as String?
-        ?? 'UNKNOWN';
+    final name = json['name'] as String? ??
+        json['entity'] as String? ??
+        json['entity_name'] as String? ??
+        json['label'] as String? ??
+        '';
+    final type = json['type'] as String? ??
+        json['entity_type'] as String? ??
+        json['category'] as String? ??
+        'UNKNOWN';
     return ExtractedEntity(
       name: name,
       type: type.toUpperCase(),
@@ -62,12 +62,12 @@ class ExtractedEntity {
   }
 
   Map<String, dynamic> toJson() => {
-    'name': name,
-    'type': type,
-    'description': description,
-    'attributes': attributes,
-    'confidence': confidence,
-  };
+        'name': name,
+        'type': type,
+        'description': description,
+        'attributes': attributes,
+        'confidence': confidence,
+      };
 }
 
 /// Relationship extracted between entities using LLM
@@ -90,23 +90,23 @@ class ExtractedRelationship {
 
   factory ExtractedRelationship.fromJson(Map<String, dynamic> json) {
     // Handle various key names that LLMs might produce
-    final source = json['source'] as String? 
-        ?? json['sourceEntity'] as String? 
-        ?? json['entity1'] as String?
-        ?? json['from'] as String?
-        ?? json['subject'] as String?
-        ?? '';
-    final target = json['target'] as String? 
-        ?? json['targetEntity'] as String? 
-        ?? json['entity2'] as String?
-        ?? json['to'] as String?
-        ?? json['object'] as String?
-        ?? '';
-    final type = json['type'] as String? 
-        ?? json['relationship'] as String? 
-        ?? json['relation'] as String?
-        ?? json['relationship_type'] as String?
-        ?? 'RELATED_TO';
+    final source = json['source'] as String? ??
+        json['sourceEntity'] as String? ??
+        json['entity1'] as String? ??
+        json['from'] as String? ??
+        json['subject'] as String? ??
+        '';
+    final target = json['target'] as String? ??
+        json['targetEntity'] as String? ??
+        json['entity2'] as String? ??
+        json['to'] as String? ??
+        json['object'] as String? ??
+        '';
+    final type = json['type'] as String? ??
+        json['relationship'] as String? ??
+        json['relation'] as String? ??
+        json['relationship_type'] as String? ??
+        'RELATED_TO';
     return ExtractedRelationship(
       sourceEntity: source,
       targetEntity: target,
@@ -118,13 +118,13 @@ class ExtractedRelationship {
   }
 
   Map<String, dynamic> toJson() => {
-    'source': sourceEntity,
-    'target': targetEntity,
-    'type': type,
-    'description': description,
-    'weight': weight,
-    'confidence': confidence,
-  };
+        'source': sourceEntity,
+        'target': targetEntity,
+        'type': type,
+        'description': description,
+        'weight': weight,
+        'confidence': confidence,
+      };
 }
 
 /// Entity types supported by the extractor
@@ -142,15 +142,31 @@ class EntityTypes {
   static const String topic = 'TOPIC';
   static const String note = 'NOTE';
   static const String noteChunk = 'NOTE_CHUNK';
+  static const String documentChunk = 'DOCUMENT_CHUNK';
   static const String phoneCall = 'PHONE_CALL';
   static const String alarm = 'ALARM';
   static const String photo = 'PHOTO';
   static const String hub = 'HUB';
 
   static const List<String> all = [
-    person, organization, location, event, date,
-    project, document, email, phone, skill, topic,
-    note, noteChunk, phoneCall, alarm, photo, hub
+    person,
+    organization,
+    location,
+    event,
+    date,
+    project,
+    document,
+    email,
+    phone,
+    skill,
+    topic,
+    note,
+    noteChunk,
+    documentChunk,
+    phoneCall,
+    alarm,
+    photo,
+    hub
   ];
 }
 
@@ -188,19 +204,19 @@ class RelationshipTypes {
 class EntityExtractionConfig {
   /// Minimum confidence score to accept an entity
   final double minEntityConfidence;
-  
+
   /// Minimum confidence score to accept a relationship
   final double minRelationshipConfidence;
-  
+
   /// Entity types to extract
   final List<String> entityTypes;
-  
+
   /// Maximum entities per extraction
   final int maxEntities;
-  
+
   /// Maximum relationships per extraction
   final int maxRelationships;
-  
+
   /// Enable coreference resolution (merge references to same entity)
   final bool resolveCoreferences;
 
@@ -237,13 +253,13 @@ abstract class EntityExtractor {
 /// Prompt templates for entity extraction
 class ExtractionPrompts {
   static String entityExtractionPrompt(
-    String text, 
+    String text,
     List<String> entityTypes,
   ) {
-    final typesStr = entityTypes.isEmpty 
+    final typesStr = entityTypes.isEmpty
         ? EntityTypes.all.join(', ')
         : entityTypes.join(', ');
-    
+
     return '''Extract named entities and their relationships from the following text.
 
 Entity Types to extract: $typesStr
@@ -392,11 +408,11 @@ Unified Summary:''';
     final contextInfo = StringBuffer();
     if (filename != null) contextInfo.writeln('Filename: $filename');
     if (locationName != null) contextInfo.writeln('Location: $locationName');
-    if (creationDate != null) contextInfo.writeln('Date taken: ${creationDate.toIso8601String()}');
-    
-    final context = contextInfo.isNotEmpty 
-        ? '\n\nContext information:\n$contextInfo' 
-        : '';
+    if (creationDate != null)
+      contextInfo.writeln('Date taken: ${creationDate.toIso8601String()}');
+
+    final context =
+        contextInfo.isNotEmpty ? '\n\nContext information:\n$contextInfo' : '';
 
     return '''Describe this image in detail. Include:
 1. Main subjects (people, objects, animals)
@@ -464,10 +480,10 @@ JSON:''';
 class LLMEntityExtractor implements EntityExtractor {
   /// Callback to send text to LLM and get response
   final Future<String> Function(String prompt) llmCallback;
-  
+
   /// Callback to generate embeddings
   final Future<List<double>> Function(String text) embeddingCallback;
-  
+
   /// Configuration
   final EntityExtractionConfig config;
 
@@ -496,7 +512,7 @@ class LLMEntityExtractor implements EntityExtractor {
     // Gemma models typically have 1024 token limit, reserve ~300 for prompt template
     // Rough estimate: 4 chars per token, so ~2500 chars for text
     const maxTextLength = 2500;
-    final truncatedText = text.length > maxTextLength 
+    final truncatedText = text.length > maxTextLength
         ? '${text.substring(0, maxTextLength)}...[truncated]'
         : text;
 
@@ -504,10 +520,10 @@ class LLMEntityExtractor implements EntityExtractor {
       truncatedText,
       config.entityTypes,
     );
-    
+
     final response = await llmCallback(prompt);
     final parsed = _parseExtractionResponse(response);
-    
+
     return ExtractionResult(
       entities: parsed.entities
           .where((e) => e.confidence >= config.minEntityConfidence)
@@ -529,7 +545,7 @@ class LLMEntityExtractor implements EntityExtractor {
     required String sourceType,
   }) async {
     String prompt;
-    
+
     switch (sourceType.toLowerCase()) {
       case 'contact':
       case 'contacts':
@@ -547,10 +563,10 @@ class LLMEntityExtractor implements EntityExtractor {
           config.entityTypes,
         );
     }
-    
+
     final response = await llmCallback(prompt);
     final parsed = _parseExtractionResponse(response);
-    
+
     return ExtractionResult(
       entities: parsed.entities
           .where((e) => e.confidence >= config.minEntityConfidence)
@@ -575,24 +591,26 @@ class LLMEntityExtractor implements EntityExtractor {
     try {
       // Try to extract JSON from response
       final jsonStr = _extractJson(response);
-      
+
       // Debug: Log extracted JSON
       assert(() {
-        print('[EntityExtractor] Extracted JSON: ${jsonStr.length > 500 ? "${jsonStr.substring(0, 500)}..." : jsonStr}');
+        print(
+            '[EntityExtractor] Extracted JSON: ${jsonStr.length > 500 ? "${jsonStr.substring(0, 500)}..." : jsonStr}');
         return true;
       }());
-      
+
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-      
+
       final entitiesJson = json['entities'] as List<dynamic>? ?? [];
       final relationshipsJson = json['relationships'] as List<dynamic>? ?? [];
-      
+
       // Debug: Log parsed counts
       assert(() {
-        print('[EntityExtractor] Found ${entitiesJson.length} entity entries, ${relationshipsJson.length} relationship entries');
+        print(
+            '[EntityExtractor] Found ${entitiesJson.length} entity entries, ${relationshipsJson.length} relationship entries');
         return true;
       }());
-      
+
       final entities = entitiesJson
           .map((e) {
             try {
@@ -608,14 +626,15 @@ class LLMEntityExtractor implements EntityExtractor {
           .whereType<ExtractedEntity>()
           .where((e) => e.name.isNotEmpty)
           .toList();
-      
+
       final relationships = relationshipsJson
           .map((r) {
             try {
               return ExtractedRelationship.fromJson(r as Map<String, dynamic>);
             } catch (err) {
               assert(() {
-                print('[EntityExtractor] Error parsing relationship: $r -> $err');
+                print(
+                    '[EntityExtractor] Error parsing relationship: $r -> $err');
                 return true;
               }());
               return null;
@@ -624,22 +643,26 @@ class LLMEntityExtractor implements EntityExtractor {
           .whereType<ExtractedRelationship>()
           .where((r) => r.sourceEntity.isNotEmpty && r.targetEntity.isNotEmpty)
           .toList();
-      
+
       // Debug: Log final counts
       assert(() {
-        print('[EntityExtractor] Parsed ${entities.length} entities, ${relationships.length} relationships');
+        print(
+            '[EntityExtractor] Parsed ${entities.length} entities, ${relationships.length} relationships');
         if (entities.isNotEmpty) {
-          print('[EntityExtractor] First entity: ${entities.first.name} (${entities.first.type})');
+          print(
+              '[EntityExtractor] First entity: ${entities.first.name} (${entities.first.type})');
         }
         return true;
       }());
-      
-      return _ParsedExtraction(entities: entities, relationships: relationships);
+
+      return _ParsedExtraction(
+          entities: entities, relationships: relationships);
     } catch (e) {
       // If parsing fails, try a more lenient approach
       assert(() {
         print('[EntityExtractor] JSON parsing failed: $e');
-        print('[EntityExtractor] Response preview: ${response.length > 200 ? "${response.substring(0, 200)}..." : response}');
+        print(
+            '[EntityExtractor] Response preview: ${response.length > 200 ? "${response.substring(0, 200)}..." : response}');
         return true;
       }());
       return _fallbackParsing(response);
@@ -649,7 +672,7 @@ class LLMEntityExtractor implements EntityExtractor {
   /// Extract JSON from response that might contain extra text or markdown
   String _extractJson(String response) {
     var text = response;
-    
+
     // Remove markdown code blocks if present
     if (text.contains('```json')) {
       final jsonStart = text.indexOf('```json');
@@ -671,10 +694,10 @@ class LLMEntityExtractor implements EntityExtractor {
         text = text.substring(codeStart + 3).trim();
       }
     }
-    
+
     // Find the first {
     final start = text.indexOf('{');
-    
+
     if (start >= 0) {
       // Extract from first { to end and always try to repair
       // This handles truncated JSON where lastIndexOf('}') finds a nested }
@@ -682,66 +705,67 @@ class LLMEntityExtractor implements EntityExtractor {
       final repaired = _repairTruncatedJson(jsonPart);
       return repaired;
     }
-    
+
     throw const FormatException('No JSON found in response');
   }
-  
+
   /// Try to repair truncated JSON by adding missing closing brackets
   String _repairTruncatedJson(String partialJson) {
     var result = partialJson.trim();
-    
+
     // Count open brackets
     var openBraces = 0;
     var openBrackets = 0;
     var inString = false;
     var escape = false;
-    
+
     for (var i = 0; i < result.length; i++) {
       final char = result[i];
-      
+
       if (escape) {
         escape = false;
         continue;
       }
-      
+
       if (char == '\\') {
         escape = true;
         continue;
       }
-      
+
       if (char == '"') {
         inString = !inString;
         continue;
       }
-      
+
       if (inString) continue;
-      
+
       if (char == '{') openBraces++;
       if (char == '}') openBraces--;
       if (char == '[') openBrackets++;
       if (char == ']') openBrackets--;
     }
-    
+
     // If we're in a string, close it
     if (inString) {
       result += '"';
     }
-    
+
     // If last character is a comma or colon, remove it
     result = result.trimRight();
     if (result.endsWith(',') || result.endsWith(':')) {
       result = result.substring(0, result.length - 1);
     }
-    
+
     // Add missing closing brackets
     result += ']' * openBrackets;
     result += '}' * openBraces;
-    
+
     assert(() {
-      print('[EntityExtractor] Repaired JSON: added $openBrackets ] and $openBraces }');
+      print(
+          '[EntityExtractor] Repaired JSON: added $openBrackets ] and $openBraces }');
       return true;
     }());
-    
+
     return result;
   }
 
@@ -749,16 +773,16 @@ class LLMEntityExtractor implements EntityExtractor {
   _ParsedExtraction _fallbackParsing(String response) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
-    
+
     // Try to extract partial JSON - look for individual entity objects
     final entityPattern = RegExp(
       r'\{"name"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"([^"]+)"',
       caseSensitive: false,
     );
-    
+
     // Collect entity names for relationship validation
     final entityNames = <String>{};
-    
+
     for (final match in entityPattern.allMatches(response)) {
       final name = match.group(1) ?? '';
       final type = match.group(2) ?? 'UNKNOWN';
@@ -771,16 +795,16 @@ class LLMEntityExtractor implements EntityExtractor {
         entityNames.add(name.toLowerCase());
       }
     }
-    
+
     // Try to extract relationships - only keep those referencing found entities
     // Also track seen relationships to avoid duplicates from hallucinated JSON
     final relPattern = RegExp(
       r'\{"source"\s*:\s*"([^"]+)"\s*,\s*"target"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"([^"]+)"',
       caseSensitive: false,
     );
-    
+
     final seenRelationships = <String>{}; // Track unique relationships
-    
+
     for (final match in relPattern.allMatches(response)) {
       final source = match.group(1) ?? '';
       final target = match.group(2) ?? '';
@@ -790,10 +814,11 @@ class LLMEntityExtractor implements EntityExtractor {
         // This prevents orphan relationships from truncated JSON
         final sourceFound = entityNames.contains(source.toLowerCase());
         final targetFound = entityNames.contains(target.toLowerCase());
-        
+
         if (sourceFound && targetFound) {
           // Create a unique key to detect duplicates
-          final relKey = '${source.toLowerCase()}|${target.toLowerCase()}|${type.toLowerCase()}';
+          final relKey =
+              '${source.toLowerCase()}|${target.toLowerCase()}|${type.toLowerCase()}';
           if (!seenRelationships.contains(relKey)) {
             seenRelationships.add(relKey);
             relationships.add(ExtractedRelationship(
@@ -805,13 +830,14 @@ class LLMEntityExtractor implements EntityExtractor {
           }
         } else {
           assert(() {
-            print('[EntityExtractor] Fallback: Skipping orphan relationship $source -> $target (source found: $sourceFound, target found: $targetFound)');
+            print(
+                '[EntityExtractor] Fallback: Skipping orphan relationship $source -> $target (source found: $sourceFound, target found: $targetFound)');
             return true;
           }());
         }
       }
     }
-    
+
     // If still no entities, fallback to capitalized word extraction
     if (entities.isEmpty) {
       final namePattern = RegExp(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b');
@@ -828,25 +854,26 @@ class LLMEntityExtractor implements EntityExtractor {
         }
       }
     }
-    
+
     assert(() {
-      print('[EntityExtractor] Fallback parsed ${entities.length} entities, ${relationships.length} relationships');
+      print(
+          '[EntityExtractor] Fallback parsed ${entities.length} entities, ${relationships.length} relationships');
       return true;
     }());
-    
+
     return _ParsedExtraction(entities: entities, relationships: relationships);
   }
 
   /// Convert structured data to text for generic extraction
   String _structuredDataToText(Map<String, dynamic> data) {
     final buffer = StringBuffer();
-    
+
     for (final entry in data.entries) {
       final key = entry.key;
       final value = entry.value;
-      
+
       if (value == null) continue;
-      
+
       if (value is List) {
         if (value.isNotEmpty) {
           buffer.writeln('$key: ${value.join(', ')}');
@@ -857,7 +884,7 @@ class LLMEntityExtractor implements EntityExtractor {
         buffer.writeln('$key: $value');
       }
     }
-    
+
     return buffer.toString();
   }
 }
@@ -874,14 +901,14 @@ class _ParsedExtraction {
 }
 
 /// Direct entity extractor that extracts from structured data without LLM
-/// 
+///
 /// This extractor is much faster than LLM-based extraction and should be used
 /// for structured data sources like contacts, calendar events, photos, and calls.
 /// It deterministically extracts entities from known fields.
 class DirectEntityExtractor implements EntityExtractor {
   /// Callback to generate embeddings (still needed for entity embeddings)
   final Future<List<double>> Function(String text) embeddingCallback;
-  
+
   /// Configuration
   final EntityExtractionConfig config;
 
@@ -968,7 +995,7 @@ class DirectEntityExtractor implements EntityExtractor {
     final fullName = contact['fullName'] ?? contact['name'];
     final givenName = contact['givenName'];
     final familyName = contact['familyName'];
-    
+
     String personName = '';
     if (fullName != null && fullName.toString().isNotEmpty) {
       personName = fullName.toString();
@@ -980,18 +1007,19 @@ class DirectEntityExtractor implements EntityExtractor {
       final jobTitle = contact['jobTitle']?.toString();
       final note = contact['note']?.toString();
       // Support both phoneNumbers list and single telephoneNumber
-      final phones = contact['phoneNumbers'] ?? 
-          (contact['telephoneNumber'] != null ? [contact['telephoneNumber']] : null);
-      
+      final phones = contact['phoneNumbers'] ??
+          (contact['telephoneNumber'] != null
+              ? [contact['telephoneNumber']]
+              : null);
+
       entities.add(ExtractedEntity(
         name: personName,
         type: EntityTypes.person,
         description: jobTitle ?? note,
         attributes: {
-          if (contact['emailAddresses'] != null) 
+          if (contact['emailAddresses'] != null)
             'emails': contact['emailAddresses'],
-          if (phones != null) 
-            'phones': phones,
+          if (phones != null) 'phones': phones,
           if (jobTitle != null) 'jobTitle': jobTitle,
           if (sourceApp != null) 'source_app': sourceApp,
         },
@@ -1044,15 +1072,16 @@ class DirectEntityExtractor implements EntityExtractor {
       final notes = event['notes'] ?? event['description'];
       final startDate = event['startDate'] ?? event['start'];
       final endDate = event['endDate'] ?? event['end'];
-      
+
       // Recurrence info
       final isRecurring = event['isRecurring'] == true ||
           event['recurrenceInfo'] == 'recurrent' ||
-          (event['recurrenceRule'] != null && event['recurrenceRule'].toString().isNotEmpty);
+          (event['recurrenceRule'] != null &&
+              event['recurrenceRule'].toString().isNotEmpty);
       final recurrenceInfo = isRecurring ? 'recurrent' : 'single-occurrence';
       final repeatFrequency = event['repeatFrequency']?.toString();
       final onValue = event['on']?.toString();
-      
+
       entities.add(ExtractedEntity(
         name: eventName,
         type: EntityTypes.event,
@@ -1149,13 +1178,14 @@ class DirectEntityExtractor implements EntityExtractor {
     // Extract photo entity
     final photoId = photo['id'] ?? photo['name'] ?? photo['filename'];
     final filename = photo['filename'] ?? photo['name'];
-    
+
     if (photoId != null) {
       final photoName = filename?.toString() ?? photoId.toString();
-      final creationDate = photo['creationDate'] ?? photo['dateTaken'] ?? photo['timestamp'];
+      final creationDate =
+          photo['creationDate'] ?? photo['dateTaken'] ?? photo['timestamp'];
       final width = photo['width'];
       final height = photo['height'];
-      
+
       entities.add(ExtractedEntity(
         name: photoName,
         type: EntityTypes.photo,
@@ -1174,7 +1204,7 @@ class DirectEntityExtractor implements EntityExtractor {
       final locationName = photo['locationName'] ?? photo['location'];
       final latitude = photo['latitude'];
       final longitude = photo['longitude'];
-      
+
       if (locationName != null && locationName.toString().isNotEmpty) {
         entities.add(ExtractedEntity(
           name: locationName.toString(),
@@ -1287,10 +1317,10 @@ class DirectEntityExtractor implements EntityExtractor {
 
     // Always create a PHONE_CALL entity for the call itself
     final callId = call['id']?.toString() ?? sourceId;
-    final callLabel = contactName != null 
+    final callLabel = contactName != null
         ? 'Call with $contactName'
         : 'Call ${phoneNumber ?? callId}';
-    
+
     entities.add(ExtractedEntity(
       name: callLabel,
       type: EntityTypes.phoneCall,
@@ -1384,14 +1414,14 @@ class DirectEntityExtractor implements EntityExtractor {
     final relationships = <ExtractedRelationship>[];
 
     // Extract document entity
-    final documentName = document['name']?.toString() ?? 
-                         document['filename']?.toString() ?? 
-                         'Unknown Document';
+    final documentName = document['name']?.toString() ??
+        document['filename']?.toString() ??
+        'Unknown Document';
     final documentPath = document['path']?.toString() ?? '';
-    final documentTypeStr = document['documentType']?.toString() ?? 
-                           document['type']?.toString() ?? 
-                           document['mimeType']?.toString() ?? 
-                           'unknown';
+    final documentTypeStr = document['documentType']?.toString() ??
+        document['type']?.toString() ??
+        document['mimeType']?.toString() ??
+        'unknown';
     final fileSize = document['fileSize'] ?? document['size'];
     final textPreview = document['textPreview'] ?? document['content'];
 
@@ -1452,7 +1482,8 @@ class DirectEntityExtractor implements EntityExtractor {
     }
 
     // Extract topics from filename or text preview (simple keyword extraction)
-    final keywords = _extractKeywordsFromDocument(documentName, textPreview?.toString());
+    final keywords =
+        _extractKeywordsFromDocument(documentName, textPreview?.toString());
     for (final keyword in keywords) {
       entities.add(ExtractedEntity(
         name: keyword,
@@ -1489,16 +1520,15 @@ class DirectEntityExtractor implements EntityExtractor {
     final alarmId = alarm['alarm'] ?? alarm['id'] ?? sourceId;
     final label = alarm['label']?.toString() ?? 'Alarm';
     final time = alarm['time']?.toString() ?? '';
-    final recurrenceType = alarm['recurrenceType']?.toString() ?? 'single-occurrence';
+    final recurrenceType =
+        alarm['recurrenceType']?.toString() ?? 'single-occurrence';
     final isRecurrent = recurrenceType == 'recurrent';
     final date = alarm['date']?.toString();
     final repeatFrequency = alarm['repeatFrequency']?.toString();
     final onValue = alarm['on']?.toString();
 
     // Create ALARM entity
-    final alarmName = isRecurrent
-        ? 'Recurring alarm: $label'
-        : 'Alarm: $label';
+    final alarmName = isRecurrent ? 'Recurring alarm: $label' : 'Alarm: $label';
 
     entities.add(ExtractedEntity(
       name: alarmName,
@@ -1582,9 +1612,8 @@ class DirectEntityExtractor implements EntityExtractor {
 
     // Create DATE entity for creation date
     if (dateCreated != null && dateCreated.isNotEmpty) {
-      final dateStr = dateCreated.contains('T')
-          ? dateCreated.split('T')[0]
-          : dateCreated;
+      final dateStr =
+          dateCreated.contains('T') ? dateCreated.split('T')[0] : dateCreated;
       if (dateStr.isNotEmpty) {
         entities.add(ExtractedEntity(
           name: dateStr,
@@ -1612,18 +1641,17 @@ class DirectEntityExtractor implements EntityExtractor {
   /// Extract simple keywords from document name and content
   List<String> _extractKeywordsFromDocument(String name, String? content) {
     final keywords = <String>{};
-    
+
     // Extract from filename (remove extension and split by common separators)
-    final nameWithoutExt = name.contains('.') 
-        ? name.substring(0, name.lastIndexOf('.')) 
-        : name;
+    final nameWithoutExt =
+        name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
     final nameParts = nameWithoutExt.split(RegExp(r'[-_\s]+'));
     for (final part in nameParts) {
       if (part.length > 3 && !_isCommonWord(part)) {
         keywords.add(_capitalizeFirst(part.toLowerCase()));
       }
     }
-    
+
     // Extract capitalized words from content preview (likely proper nouns)
     if (content != null && content.isNotEmpty) {
       final capitalPattern = RegExp(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b');
@@ -1635,21 +1663,71 @@ class DirectEntityExtractor implements EntityExtractor {
         }
       }
     }
-    
+
     return keywords.take(5).toList();
   }
 
   /// Check if a word is a common word to ignore
   bool _isCommonWord(String word) {
     const commonWords = {
-      'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
-      'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day',
-      'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new',
-      'now', 'old', 'see', 'way', 'who', 'did', 'let', 'put',
-      'say', 'she', 'too', 'use', 'that', 'this', 'with',
-      'have', 'from', 'they', 'been', 'will', 'your', 'when',
-      'there', 'which', 'their', 'would', 'about', 'could',
-      'document', 'file', 'text', 'note', 'notes', 'draft',
+      'the',
+      'and',
+      'for',
+      'are',
+      'but',
+      'not',
+      'you',
+      'all',
+      'can',
+      'had',
+      'her',
+      'was',
+      'one',
+      'our',
+      'out',
+      'day',
+      'get',
+      'has',
+      'him',
+      'his',
+      'how',
+      'its',
+      'may',
+      'new',
+      'now',
+      'old',
+      'see',
+      'way',
+      'who',
+      'did',
+      'let',
+      'put',
+      'say',
+      'she',
+      'too',
+      'use',
+      'that',
+      'this',
+      'with',
+      'have',
+      'from',
+      'they',
+      'been',
+      'will',
+      'your',
+      'when',
+      'there',
+      'which',
+      'their',
+      'would',
+      'about',
+      'could',
+      'document',
+      'file',
+      'text',
+      'note',
+      'notes',
+      'draft',
     };
     return commonWords.contains(word.toLowerCase());
   }
@@ -1672,7 +1750,7 @@ class DirectEntityExtractor implements EntityExtractor {
         dt = DateTime.parse(date);
       } catch (_) {}
     }
-    
+
     if (dt != null) {
       return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
     }
@@ -1689,17 +1767,18 @@ class EntityMerger {
   }) {
     final merged = <ExtractedEntity>[];
     final processed = <int>{};
-    
+
     for (var i = 0; i < entities.length; i++) {
       if (processed.contains(i)) continue;
-      
+
       var best = entities[i];
-      
+
       // Find similar entities
       for (var j = i + 1; j < entities.length; j++) {
         if (processed.contains(j)) continue;
-        
-        if (_areSimilarNames(best.name, entities[j].name, similarityThreshold)) {
+
+        if (_areSimilarNames(
+            best.name, entities[j].name, similarityThreshold)) {
           // Merge: keep the one with higher confidence or more info
           if (entities[j].confidence > best.confidence ||
               (entities[j].description?.isNotEmpty ?? false) &&
@@ -1709,11 +1788,11 @@ class EntityMerger {
           processed.add(j);
         }
       }
-      
+
       merged.add(best);
       processed.add(i);
     }
-    
+
     return merged;
   }
 
@@ -1721,22 +1800,22 @@ class EntityMerger {
   static bool _areSimilarNames(String a, String b, double threshold) {
     final aLower = a.toLowerCase().trim();
     final bLower = b.toLowerCase().trim();
-    
+
     // Exact match
     if (aLower == bLower) return true;
-    
+
     // One contains the other
     if (aLower.contains(bLower) || bLower.contains(aLower)) {
       return true;
     }
-    
+
     // Simple Jaccard similarity on words
     final aWords = aLower.split(RegExp(r'\s+')).toSet();
     final bWords = bLower.split(RegExp(r'\s+')).toSet();
-    
+
     final intersection = aWords.intersection(bWords).length;
     final union = aWords.union(bWords).length;
-    
+
     return union > 0 && (intersection / union) >= threshold;
   }
 
@@ -1746,9 +1825,11 @@ class EntityMerger {
     Map<String, String> nameMapping,
   ) {
     return relationships.map((r) {
-      final source = nameMapping[r.sourceEntity.toLowerCase()] ?? r.sourceEntity;
-      final target = nameMapping[r.targetEntity.toLowerCase()] ?? r.targetEntity;
-      
+      final source =
+          nameMapping[r.sourceEntity.toLowerCase()] ?? r.sourceEntity;
+      final target =
+          nameMapping[r.targetEntity.toLowerCase()] ?? r.targetEntity;
+
       return ExtractedRelationship(
         sourceEntity: source,
         targetEntity: target,
@@ -1762,22 +1843,23 @@ class EntityMerger {
 }
 
 /// Vision-enhanced entity extractor for images
-/// 
+///
 /// Uses a vision LLM to generate captions for photos, then extracts entities
 /// from those captions. This provides much richer entity extraction than
 /// metadata-only extraction.
-/// 
+///
 /// Reference: https://ai.google.dev/gemma/docs/capabilities/vision/image-interpretation
 class VisionEntityExtractor {
   /// Callback to generate caption from image using vision LLM
-  final Future<String> Function(String prompt, Uint8List imageBytes) visionLlmCallback;
-  
+  final Future<String> Function(String prompt, Uint8List imageBytes)
+      visionLlmCallback;
+
   /// Callback to extract entities from text using regular LLM
   final Future<String> Function(String prompt) llmCallback;
-  
+
   /// Callback to generate embeddings
   final Future<List<double>> Function(String text) embeddingCallback;
-  
+
   /// Fallback direct extractor for metadata
   final DirectEntityExtractor _directExtractor;
 
@@ -1785,7 +1867,8 @@ class VisionEntityExtractor {
     required this.visionLlmCallback,
     required this.llmCallback,
     required this.embeddingCallback,
-  }) : _directExtractor = DirectEntityExtractor(embeddingCallback: embeddingCallback);
+  }) : _directExtractor =
+            DirectEntityExtractor(embeddingCallback: embeddingCallback);
 
   /// Generate a caption for a photo using vision LLM
   Future<String> generateCaption(
@@ -1799,7 +1882,7 @@ class VisionEntityExtractor {
       locationName: locationName,
       creationDate: creationDate,
     );
-    
+
     try {
       final caption = await visionLlmCallback(prompt, imageBytes);
       return caption.trim();
@@ -1825,7 +1908,7 @@ class VisionEntityExtractor {
       sourceId: sourceId,
       sourceType: sourceType,
     );
-    
+
     // Generate caption from image
     final filename = photoData['filename']?.toString();
     final locationName = photoData['locationName']?.toString();
@@ -1836,41 +1919,41 @@ class VisionEntityExtractor {
     } else if (creationDate is int) {
       dateTime = DateTime.fromMillisecondsSinceEpoch(creationDate);
     }
-    
+
     final caption = await generateCaption(
       imageBytes,
       filename: filename,
       locationName: locationName,
       creationDate: dateTime,
     );
-    
+
     if (caption.isEmpty) {
       // Fall back to metadata-only extraction
       return metadataExtraction;
     }
-    
+
     // Extract entities from caption
     final prompt = ExtractionPrompts.imageCaptionEntityExtractionPrompt(
       caption,
       filename: filename,
       locationName: locationName,
     );
-    
+
     try {
       final response = await llmCallback(prompt);
       final captionEntities = _parseEntitiesFromResponse(response);
-      
+
       // Merge metadata entities with caption entities
       final allEntities = <ExtractedEntity>[
         ...metadataExtraction.entities,
         ...captionEntities.entities,
       ];
-      
+
       final allRelationships = <ExtractedRelationship>[
         ...metadataExtraction.relationships,
         ...captionEntities.relationships,
       ];
-      
+
       // Add caption as description to the photo entity
       final photoEntityIndex = allEntities.indexWhere((e) => e.type == 'PHOTO');
       if (photoEntityIndex >= 0) {
@@ -1883,10 +1966,10 @@ class VisionEntityExtractor {
           confidence: photoEntity.confidence,
         );
       }
-      
+
       // Deduplicate entities
       final deduped = EntityMerger.deduplicateEntities(allEntities);
-      
+
       return ExtractionResult(
         entities: deduped,
         relationships: allRelationships,
@@ -1895,7 +1978,8 @@ class VisionEntityExtractor {
       );
     } catch (e) {
       assert(() {
-        print('[VisionEntityExtractor] Entity extraction from caption failed: $e');
+        print(
+            '[VisionEntityExtractor] Entity extraction from caption failed: $e');
         return true;
       }());
       return metadataExtraction;
@@ -1906,7 +1990,7 @@ class VisionEntityExtractor {
   _ParsedExtraction _parseEntitiesFromResponse(String response) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
-    
+
     try {
       // Try to extract JSON
       var jsonStr = response;
@@ -1920,9 +2004,9 @@ class VisionEntityExtractor {
         final start = jsonStr.indexOf('{');
         jsonStr = jsonStr.substring(start);
       }
-      
+
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-      
+
       if (json.containsKey('entities')) {
         final entityList = json['entities'] as List<dynamic>;
         for (final e in entityList) {
@@ -1931,7 +2015,7 @@ class VisionEntityExtractor {
           }
         }
       }
-      
+
       if (json.containsKey('relationships')) {
         final relList = json['relationships'] as List<dynamic>;
         for (final r in relList) {
@@ -1946,18 +2030,18 @@ class VisionEntityExtractor {
         return true;
       }());
     }
-    
+
     return _ParsedExtraction(entities: entities, relationships: relationships);
   }
 }
 
 /// Document entity extractor for text files and PDFs
-/// 
+///
 /// Extracts entities from document content using LLM
 class DocumentEntityExtractor {
   /// Callback to extract entities from text using LLM
   final Future<String> Function(String prompt) llmCallback;
-  
+
   /// Callback to generate embeddings
   final Future<List<double>> Function(String text) embeddingCallback;
 
@@ -1972,18 +2056,18 @@ class DocumentEntityExtractor {
     required String sourceId,
     required String sourceType,
   }) async {
-    final documentName = documentData['name']?.toString() ?? 
-                         documentData['filename']?.toString() ?? 
-                         'Unknown Document';
-    final documentType = documentData['type']?.toString() ?? 
-                         documentData['mimeType']?.toString() ?? 
-                         'unknown';
-    final textContent = documentData['content']?.toString() ?? 
-                        documentData['text']?.toString();
-    
+    final documentName = documentData['name']?.toString() ??
+        documentData['filename']?.toString() ??
+        'Unknown Document';
+    final documentType = documentData['type']?.toString() ??
+        documentData['mimeType']?.toString() ??
+        'unknown';
+    final textContent =
+        documentData['content']?.toString() ?? documentData['text']?.toString();
+
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
-    
+
     // Create document entity
     entities.add(ExtractedEntity(
       name: documentName,
@@ -1995,7 +2079,7 @@ class DocumentEntityExtractor {
       },
       confidence: 1.0,
     ));
-    
+
     // If we have text content, extract entities using LLM
     if (textContent != null && textContent.isNotEmpty) {
       final prompt = ExtractionPrompts.documentExtractionPrompt(
@@ -2003,15 +2087,15 @@ class DocumentEntityExtractor {
         documentType,
         textContent,
       );
-      
+
       try {
         final response = await llmCallback(prompt);
         final parsed = _parseEntitiesFromResponse(response);
-        
+
         // Add extracted entities and create relationships to document
         for (final entity in parsed.entities) {
           entities.add(entity);
-          
+
           // Link entity to document
           relationships.add(ExtractedRelationship(
             sourceEntity: entity.name,
@@ -2020,7 +2104,7 @@ class DocumentEntityExtractor {
             confidence: entity.confidence,
           ));
         }
-        
+
         relationships.addAll(parsed.relationships);
       } catch (e) {
         assert(() {
@@ -2029,7 +2113,7 @@ class DocumentEntityExtractor {
         }());
       }
     }
-    
+
     // Extract date if available
     final createdDate = documentData['createdDate'] ?? documentData['created'];
     if (createdDate != null) {
@@ -2040,7 +2124,7 @@ class DocumentEntityExtractor {
           type: EntityTypes.date,
           confidence: 1.0,
         ));
-        
+
         relationships.add(ExtractedRelationship(
           sourceEntity: documentName,
           targetEntity: dateStr,
@@ -2049,7 +2133,7 @@ class DocumentEntityExtractor {
         ));
       }
     }
-    
+
     return ExtractionResult(
       entities: entities,
       relationships: relationships,
@@ -2062,7 +2146,7 @@ class DocumentEntityExtractor {
   _ParsedExtraction _parseEntitiesFromResponse(String response) {
     final entities = <ExtractedEntity>[];
     final relationships = <ExtractedRelationship>[];
-    
+
     try {
       var jsonStr = response;
       if (jsonStr.contains('```json')) {
@@ -2075,9 +2159,9 @@ class DocumentEntityExtractor {
         final start = jsonStr.indexOf('{');
         jsonStr = jsonStr.substring(start);
       }
-      
+
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
-      
+
       if (json.containsKey('entities')) {
         final entityList = json['entities'] as List<dynamic>;
         for (final e in entityList) {
@@ -2086,7 +2170,7 @@ class DocumentEntityExtractor {
           }
         }
       }
-      
+
       if (json.containsKey('relationships')) {
         final relList = json['relationships'] as List<dynamic>;
         for (final r in relList) {
@@ -2101,7 +2185,7 @@ class DocumentEntityExtractor {
         return true;
       }());
     }
-    
+
     return _ParsedExtraction(entities: entities, relationships: relationships);
   }
 
@@ -2114,7 +2198,7 @@ class DocumentEntityExtractor {
     } else if (date is String) {
       dt = DateTime.tryParse(date);
     }
-    
+
     if (dt != null) {
       return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
     }
