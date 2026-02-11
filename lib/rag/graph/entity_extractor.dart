@@ -927,6 +927,7 @@ class DirectEntityExtractor implements EntityExtractor {
       case 'phone_calls':
       case 'call':
       case 'calls':
+      case 'calllog':
         return _extractFromPhoneCall(data, sourceId, sourceType);
       case 'document':
       case 'documents':

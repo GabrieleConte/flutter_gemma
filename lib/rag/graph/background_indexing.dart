@@ -169,11 +169,24 @@ class BackgroundIndexingService {
     'CONTACT', 'CONTACTS',
     'CALENDAR', 'CALENDAR_EVENT', 'EVENT',
     'PHOTO', 'PHOTOS',
-    'PHONE_CALL', 'PHONE_CALLS', 'CALL', 'CALLS',
+    'PHONE_CALL', 'PHONE_CALLS', 'CALL', 'CALLS', 'CALLLOG',
     'DOCUMENT', 'DOCUMENTS',
     'ALARM', 'ALARMS',
     'NOTE', 'NOTES',
   };
+
+  /// Normalize connector data-type strings to canonical forms used in switch
+  /// statements throughout the pipeline (entity extraction, link prediction,
+  /// hub linking, incremental-skip).
+  static const _dataTypeAliases = {
+    'CALLLOG': 'PHONE_CALL',
+  };
+
+  /// Return the canonical data-type string for [raw].
+  static String _normalizeDataType(String raw) {
+    final upper = raw.toUpperCase();
+    return _dataTypeAliases[upper] ?? raw;
+  }
   
   IndexingProgress _progress = IndexingProgress(
     status: IndexingStatus.idle,
@@ -491,7 +504,11 @@ class BackgroundIndexingService {
   }
 
   /// Process a batch of items
-  Future<void> _processBatch(List<dynamic> items, String dataType) async {
+  Future<void> _processBatch(List<dynamic> items, String rawDataType) async {
+    // Normalize the connector data-type (e.g. 'callLog' → 'PHONE_CALL')
+    // so that all downstream switch statements match correctly.
+    final dataType = _normalizeDataType(rawDataType);
+
     for (final item in items) {
       try {
         // Convert item to map for extraction

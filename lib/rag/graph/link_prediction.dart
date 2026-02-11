@@ -799,6 +799,7 @@ class LinkPredictor {
       case 'PHONE_CALLS':
       case 'CALL':
       case 'CALLS':
+      case 'CALLLOG':
         return inferFromPhoneCall(data);
       case 'PHOTO':
       case 'PHOTOS':
