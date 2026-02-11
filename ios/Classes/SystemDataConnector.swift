@@ -321,9 +321,9 @@ class SystemDataConnector {
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
-        // Filter by date if sinceTimestamp provided
+        // Filter by date if sinceTimestamp provided (sinceTimestamp is in milliseconds)
         if let timestamp = sinceTimestamp {
-            let sinceDate = Date(timeIntervalSince1970: Double(timestamp))
+            let sinceDate = Date(timeIntervalSince1970: Double(timestamp) / 1000.0)
             fetchOptions.predicate = NSPredicate(format: "creationDate > %@", sinceDate as NSDate)
         }
 
@@ -355,8 +355,8 @@ class SystemDataConnector {
                 filename: asset.value(forKey: "filename") as? String,
                 width: Int64(asset.pixelWidth),
                 height: Int64(asset.pixelHeight),
-                creationDate: Int64(asset.creationDate?.timeIntervalSince1970 ?? 0),
-                modificationDate: Int64(asset.modificationDate?.timeIntervalSince1970 ?? 0),
+                creationDate: Int64((asset.creationDate?.timeIntervalSince1970 ?? 0) * 1000),
+                modificationDate: Int64((asset.modificationDate?.timeIntervalSince1970 ?? 0) * 1000),
                 latitude: latitude,
                 longitude: longitude,
                 locationName: locationName,

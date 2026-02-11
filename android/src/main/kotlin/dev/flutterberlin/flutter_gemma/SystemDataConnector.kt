@@ -700,7 +700,7 @@ class SystemDataConnector(
             android.provider.MediaStore.Images.Media.DISPLAY_NAME,
             android.provider.MediaStore.Images.Media.WIDTH,
             android.provider.MediaStore.Images.Media.HEIGHT,
-            android.provider.MediaStore.Images.Media.DATE_ADDED,
+            android.provider.MediaStore.Images.Media.DATE_TAKEN,
             android.provider.MediaStore.Images.Media.DATE_MODIFIED,
             android.provider.MediaStore.Images.Media.MIME_TYPE,
             android.provider.MediaStore.Images.Media.SIZE
@@ -713,11 +713,11 @@ class SystemDataConnector(
         }
 
         val selection = if (sinceTimestamp != null) {
-            "${android.provider.MediaStore.Images.Media.DATE_ADDED} > ?"
+            "${android.provider.MediaStore.Images.Media.DATE_MODIFIED} > ?"
         } else null
 
         val selectionArgs = if (sinceTimestamp != null) {
-            arrayOf((sinceTimestamp / 1000).toString()) // MediaStore uses seconds
+            arrayOf((sinceTimestamp / 1000).toString()) // DATE_MODIFIED is in seconds
         } else null
 
         val cursor: Cursor? = contentResolver.query(
@@ -725,7 +725,7 @@ class SystemDataConnector(
             projection.toTypedArray(),
             selection,
             selectionArgs,
-            "${android.provider.MediaStore.Images.Media.DATE_ADDED} DESC"
+            "${android.provider.MediaStore.Images.Media.DATE_MODIFIED} DESC"
         )
 
         Log.d(TAG, "Photos cursor returned: ${cursor?.count ?: 0} photos")
@@ -735,7 +735,7 @@ class SystemDataConnector(
             val nameIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DISPLAY_NAME)
             val widthIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.WIDTH)
             val heightIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.HEIGHT)
-            val dateAddedIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATE_ADDED)
+            val dateTakenIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATE_TAKEN)
             val dateModifiedIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DATE_MODIFIED)
             val mimeTypeIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.MIME_TYPE)
             val sizeIndex = it.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.SIZE)
@@ -746,8 +746,11 @@ class SystemDataConnector(
                     val filename = it.getString(nameIndex)
                     val width = it.getInt(widthIndex)
                     val height = it.getInt(heightIndex)
-                    val dateAdded = it.getLong(dateAddedIndex) * 1000 // Convert to milliseconds
-                    val dateModified = it.getLong(dateModifiedIndex) * 1000
+                    val dateTakenRaw = it.getLong(dateTakenIndex) // DATE_TAKEN is in ms, 0 if NULL
+                    val dateModified = it.getLong(dateModifiedIndex) * 1000 // DATE_MODIFIED is in seconds
+                    // Prefer DATE_TAKEN (actual capture time from EXIF) but fall back to
+                    // DATE_MODIFIED when DATE_TAKEN is unavailable (e.g. pushed files)
+                    val creationDate = if (dateTakenRaw > 0) dateTakenRaw else dateModified
                     val mimeType = it.getString(mimeTypeIndex)
                     val fileSize = it.getLong(sizeIndex)
 
@@ -773,7 +776,7 @@ class SystemDataConnector(
                         filename = filename,
                         width = width.toLong(),
                         height = height.toLong(),
-                        creationDate = dateAdded,
+                        creationDate = creationDate,
                         modificationDate = dateModified,
                         latitude = latitude,
                         longitude = longitude,

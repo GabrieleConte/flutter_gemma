@@ -575,7 +575,7 @@ class LinkPredictor {
     );
     final location = photo['location'] ?? photo['gpsLocation'];
     final people = photo['people'] ?? photo['faces'] as List<dynamic>?;
-    final dateTaken = photo['dateTaken'] ?? photo['timestamp'];
+    final dateTaken = photo['creationDate'] ?? photo['dateTaken'] ?? photo['timestamp'];
     
     // Photo at location
     if (location != null && location.toString().isNotEmpty) {
