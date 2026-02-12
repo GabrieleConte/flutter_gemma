@@ -618,6 +618,10 @@ class GraphRAGQueryEngine {
       final dateStr = _formatDateTimeValue(meta['creationDate']);
       if (dateStr != null) buf.write(' — taken on $dateStr');
     }
+    final desc = e.description;
+    if (desc != null && desc.isNotEmpty) {
+      buf.write(' — $desc');
+    }
     buf.writeln();
   }
 
