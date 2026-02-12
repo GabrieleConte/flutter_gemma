@@ -151,6 +151,7 @@ class GraphRAGService {
         databasePath: dbPath,
         queryConfig: GraphRAGQueryConfig(
           maxContextTokens: maxTokens,
+          similarityThreshold: 0.4
         ),
         indexingConfig: IndexingConfig(
           enableImageCaptioning: enableImageCaptioning && visionChat != null,
