@@ -408,8 +408,9 @@ Unified Summary:''';
     final contextInfo = StringBuffer();
     if (filename != null) contextInfo.writeln('Filename: $filename');
     if (locationName != null) contextInfo.writeln('Location: $locationName');
-    if (creationDate != null)
+    if (creationDate != null) {
       contextInfo.writeln('Date taken: ${creationDate.toIso8601String()}');
+    }
 
     final context =
         contextInfo.isNotEmpty ? '\n\nContext information:\n$contextInfo' : '';

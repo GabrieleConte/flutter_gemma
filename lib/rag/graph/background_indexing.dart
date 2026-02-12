@@ -591,7 +591,7 @@ class BackgroundIndexingService {
                       '[BackgroundIndexing] Indexing document content: ${item.name} (${content.length} chars)');
                   return true;
                 }());
-                await _documentIndexCallback!(
+                await _documentIndexCallback(
                   documentId: item.id,
                   name: item.name,
                   content: content,

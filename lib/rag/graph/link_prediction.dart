@@ -932,8 +932,9 @@ class LinkPredictor {
         if (timeB == null) continue;
 
         final difference = timeB.difference(timeA);
-        if (difference > config.temporalWindow)
+        if (difference > config.temporalWindow) {
           break; // Items are sorted, no need to check further
+        }
 
         // Create temporal proximity link
         final idA = _getItemId(itemA, dataSourceType);
