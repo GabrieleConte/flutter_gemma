@@ -714,6 +714,21 @@ class GraphRAGService {
     return documents;
   }
   
+  /// Read the text content of a previously-picked document.
+  ///
+  /// Returns `null` if the content could not be read or is empty.
+  Future<String?> readDocumentContent(String documentId) async {
+    _checkInitialized();
+
+    final documentsConnector = _graphRag!.connectors.getConnector('documents');
+    if (documentsConnector == null) {
+      throw StateError('Documents connector not found');
+    }
+
+    final connector = documentsConnector as DocumentsConnector;
+    return connector.readContent(documentId);
+  }
+
   /// Index specific documents from a list (e.g., from pickDocuments)
   /// This bypasses the automatic fetch and indexes only the provided documents
   Future<void> indexDocuments(List<Document> documents) async {

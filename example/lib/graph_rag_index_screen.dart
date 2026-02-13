@@ -1,10 +1,12 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_example/services/graph_rag_service.dart';
 import 'package:flutter_gemma_example/widgets/graph_visualizer.dart';
 import 'package:android_intent_plus/android_intent.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// Screen for managing the knowledge graph index and visualizing the graph
 class GraphRAGIndexScreen extends StatefulWidget {
@@ -161,6 +163,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
 
   bool _isIndexingAlarm = false;
 
+  bool _isProcessingBatch = false;
+
   Future<void> _addNote() async {
     final result = await showDialog<Map<String, String>>(
       context: context,
@@ -271,21 +275,151 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         _showSnackBar('No documents selected');
         return;
       }
-      
-      _showSnackBar('Indexing ${documents.length} documents...');
-      
-      // Index selected documents
-      await _service.indexDocuments(documents);
-      
-      // Reload stats and graph
-      await _loadStats();
-      await _loadGraphData();
-      
-      _showSnackBar('${documents.length} documents indexed! 🎉');
+
+      // Separate batch-query files (test.txt) from normal documents
+      final batchFiles = documents
+          .where((d) => d.name.toLowerCase() == 'test.txt')
+          .toList();
+      final normalDocs = documents
+          .where((d) => d.name.toLowerCase() != 'test.txt')
+          .toList();
+
+      // Index normal documents
+      if (normalDocs.isNotEmpty) {
+        _showSnackBar('Indexing ${normalDocs.length} documents...');
+        await _service.indexDocuments(normalDocs);
+        await _loadStats();
+        await _loadGraphData();
+        _showSnackBar('${normalDocs.length} documents indexed! 🎉');
+      }
+
+      // Process batch-query files
+      for (final batchFile in batchFiles) {
+        await _processBatchQueryFile(batchFile);
+      }
     } catch (e) {
       _showSnackBar('Error: $e', isError: true);
     } finally {
       setState(() => _isPickingDocuments = false);
+    }
+  }
+
+  /// Process a "test.txt" file: read each line as a query, run
+  /// `queryWithAnswer` for each, and export a results file via share sheet.
+  Future<void> _processBatchQueryFile(Document doc) async {
+    if (_isProcessingBatch) return;
+    setState(() => _isProcessingBatch = true);
+
+    // Show a progress dialog that we will update as queries progress.
+    final progressNotifier = ValueNotifier<String>('Reading file...');
+    final fractionNotifier = ValueNotifier<double>(0);
+
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF1a3a5c),
+            title: const Text(
+              'Batch Query',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ValueListenableBuilder<double>(
+                  valueListenable: fractionNotifier,
+                  builder: (_, value, __) => LinearProgressIndicator(
+                    value: value,
+                    backgroundColor: Colors.white24,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.cyan),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ValueListenableBuilder<String>(
+                  valueListenable: progressNotifier,
+                  builder: (_, msg, __) => Text(
+                    msg,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    try {
+      // Read file content via the service
+      final content = await _service.readDocumentContent(doc.id);
+      if (content == null || content.trim().isEmpty) {
+        if (mounted) Navigator.of(context).pop();
+        _showSnackBar('test.txt is empty', isError: true);
+        return;
+      }
+
+      final lines = content
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .toList();
+
+      if (lines.isEmpty) {
+        if (mounted) Navigator.of(context).pop();
+        _showSnackBar('test.txt contains no queries', isError: true);
+        return;
+      }
+
+      final answers = <String>[];
+
+      for (var i = 0; i < lines.length; i++) {
+        final query = lines[i];
+        progressNotifier.value =
+            'Query ${i + 1}/${lines.length}:\n$query';
+        fractionNotifier.value = i / lines.length;
+
+        try {
+          final result = await _service.queryWithAnswer(query);
+          answers.add(result.generatedAnswer ?? result.contextString);
+        } catch (e) {
+          answers.add('[ERROR: $e]');
+          debugPrint('[BatchQuery] Error on query "$query": $e');
+        }
+      }
+
+      fractionNotifier.value = 1.0;
+      progressNotifier.value = 'Preparing results file...';
+
+      // Write results to a temporary file
+      final tempDir = await getTemporaryDirectory();
+      final outFile = File('${tempDir.path}/test_results.txt');
+      await outFile.writeAsString(answers.join('\n'));
+
+      // Dismiss progress dialog
+      if (mounted) Navigator.of(context).pop();
+
+      // Share via native share sheet
+      await Share.shareXFiles(
+        [XFile(outFile.path)],
+        subject: 'Batch Query Results',
+      );
+
+      _showSnackBar(
+          'Batch query complete — ${answers.length} answers exported');
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop();
+      _showSnackBar('Batch query error: $e', isError: true);
+    } finally {
+      progressNotifier.dispose();
+      fractionNotifier.dispose();
+      setState(() => _isProcessingBatch = false);
     }
   }
 

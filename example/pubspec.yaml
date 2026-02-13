@@ -36,6 +36,7 @@ dependencies:
   # Dependencies for working with images
   image_picker: ^1.0.4 # For selecting images on mobile devices
   android_intent_plus: ^5.0.2 # For launching system alarm on Android
+  share_plus: ^10.1.4 # For sharing batch query results
 
 dev_dependencies:
   integration_test:
