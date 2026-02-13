@@ -11,7 +11,7 @@ class HomeScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0b2351),
       appBar: AppBar(
-        title: const Text('Flutter Gemma Example'),
+        title: const Text('EpisTwin'),
         backgroundColor: const Color(0xFF0b2351),
       ),
       body: Padding(

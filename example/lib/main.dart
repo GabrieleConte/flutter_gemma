@@ -21,7 +21,7 @@ class ChatApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Gemma Example',
+      title: 'EpisTwin',
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         textTheme: const TextTheme(
