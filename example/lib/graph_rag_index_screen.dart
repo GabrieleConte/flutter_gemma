@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Directory, File, Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_gemma_example/services/graph_rag_service.dart';
@@ -395,24 +395,75 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
       }
 
       fractionNotifier.value = 1.0;
-      progressNotifier.value = 'Preparing results file...';
+      progressNotifier.value = 'Saving results...';
 
-      // Write results to a temporary file
-      final tempDir = await getTemporaryDirectory();
-      final outFile = File('${tempDir.path}/test_results.txt');
+      // Save to user-accessible storage (visible in file manager on Android)
+      final Directory saveDir;
+      if (Platform.isAndroid) {
+        saveDir = (await getExternalStorageDirectory())!;
+      } else {
+        saveDir = await getApplicationDocumentsDirectory();
+      }
+      final outFile = File('${saveDir.path}/test_results.txt');
       await outFile.writeAsString(answers.join('\n'));
 
       // Dismiss progress dialog
       if (mounted) Navigator.of(context).pop();
 
-      // Share via native share sheet
-      await Share.shareXFiles(
-        [XFile(outFile.path)],
-        subject: 'Batch Query Results',
-      );
-
-      _showSnackBar(
-          'Batch query complete — ${answers.length} answers exported');
+      // Show result dialog with Save confirmation and Share option
+      if (mounted) {
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1a3a5c),
+            title: const Text(
+              'Batch Query Complete',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${answers.length} answers generated.',
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Saved to:',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                SelectableText(
+                  outFile.path,
+                  style: const TextStyle(
+                    color: Colors.cyan,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Done'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Share.shareXFiles(
+                    [XFile(outFile.path, mimeType: 'text/plain')],
+                    subject: 'Batch Query Results',
+                  );
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.cyan),
+                child: const Text('Share'),
+              ),
+            ],
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _showSnackBar('Batch query error: $e', isError: true);
