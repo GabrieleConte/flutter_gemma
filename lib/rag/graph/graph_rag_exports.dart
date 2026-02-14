@@ -134,6 +134,18 @@ export 'background_indexing.dart'
         IndexingProgress,
         IndexingConfig,
         BackgroundIndexingService;
+// Graph pruning (stale entity detection + orphan cleanup)
+export 'graph_pruning.dart'
+    show
+        PruningResult,
+        GraphPruner;
+
+// Community maintenance (update communities on topology changes)
+export 'community_maintenance.dart'
+    show
+        CommunityMaintenanceResult,
+        CommunityMaintainer;
+
 // Link prediction
 export 'link_prediction.dart'
     show

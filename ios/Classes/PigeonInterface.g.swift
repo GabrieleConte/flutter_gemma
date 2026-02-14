@@ -1088,6 +1088,8 @@ protocol PlatformService {
   func getRelationships(entityId: String, completion: @escaping (Result<[RelationshipResult], Error>) -> Void)
   func addCommunity(id: String, level: Int64, summary: String, entityIds: [String], embedding: [Double], metadata: String?, completion: @escaping (Result<Void, Error>) -> Void)
   func updateCommunitySummary(id: String, summary: String, embedding: [Double], completion: @escaping (Result<Void, Error>) -> Void)
+  func deleteCommunity(id: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func getCommunitiesForEntity(entityId: String, completion: @escaping (Result<[CommunityResult], Error>) -> Void)
   func getCommunitiesByLevel(level: Int64, completion: @escaping (Result<[CommunityResult], Error>) -> Void)
   func getEntityNeighbors(entityId: String, depth: Int64, relationshipType: String?, completion: @escaping (Result<[EntityResult], Error>) -> Void)
   func searchEntitiesBySimilarity(queryEmbedding: [Double], topK: Int64, threshold: Double, entityType: String?, completion: @escaping (Result<[EntityWithScoreResult], Error>) -> Void)
@@ -1718,6 +1720,40 @@ class PlatformServiceSetup {
       }
     } else {
       updateCommunitySummaryChannel.setMessageHandler(nil)
+    }
+    let deleteCommunityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.deleteCommunity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteCommunityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let idArg = args[0] as! String
+        api.deleteCommunity(id: idArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      deleteCommunityChannel.setMessageHandler(nil)
+    }
+    let getCommunitiesForEntityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getCommunitiesForEntity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getCommunitiesForEntityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let entityIdArg = args[0] as! String
+        api.getCommunitiesForEntity(entityId: entityIdArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getCommunitiesForEntityChannel.setMessageHandler(nil)
     }
     let getCommunitiesByLevelChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.flutter_gemma.PlatformService.getCommunitiesByLevel\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

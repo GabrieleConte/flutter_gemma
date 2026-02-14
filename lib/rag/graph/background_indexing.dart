@@ -7,6 +7,8 @@ import '../connectors/data_connector.dart';
 import 'graph_repository.dart';
 import 'entity_extractor.dart';
 import 'community_detection.dart';
+import 'community_maintenance.dart';
+import 'graph_pruning.dart';
 import 'link_prediction.dart';
 
 /// Indexing job status
@@ -355,6 +357,10 @@ class BackgroundIndexingService {
 
       // Phase 1: Fetch data from connectors
       await _fetchDataPhase(fullReindex);
+      if (_cancelRequested) return;
+
+      // Phase 1.1: Prune stale entities (deleted from device)
+      await _pruneStaleEntitiesPhase();
       if (_cancelRequested) return;
 
       // Phase 1.5: Link prediction (after entity extraction)
@@ -1570,6 +1576,48 @@ class BackgroundIndexingService {
         return _generateEntityId(alarmName, 'ALARM');
     }
     return null;
+  }
+
+  /// Detect and remove entities whose source data has been deleted from
+  /// the device, then clean up any orphan nodes left behind.
+  Future<void> _pruneStaleEntitiesPhase() async {
+    _updateProgress(_progress.copyWith(
+      currentPhase: 'Pruning deleted data',
+    ));
+
+    final pruner = GraphPruner(
+      repository: repository,
+      connectorManager: connectorManager,
+    );
+
+    final result = await pruner.prune();
+
+    if (result.totalRemoved > 0) {
+      print(
+          '[BackgroundIndexing] Pruning removed '
+          '${result.removedStaleEntities.length} stale + '
+          '${result.removedOrphanEntities.length} orphan entities');
+
+      // Update communities affected by the deleted entities.
+      final allDeletedIds = [
+        ...result.removedStaleEntities,
+        ...result.removedOrphanEntities,
+      ];
+
+      final maintainer = CommunityMaintainer(
+        repository: repository,
+        summarizer: _summarizer,
+        communityConfig: CommunityDetectionConfig(
+          maxDepth: config.maxCommunityDepth,
+        ),
+      );
+
+      final maintenance = await maintainer.onEntitiesDeleted(allDeletedIds);
+      if (maintenance.totalAffected > 0) {
+        print(
+            '[BackgroundIndexing] Community maintenance after pruning: $maintenance');
+      }
+    }
   }
 
   /// Update progress and notify listeners

@@ -155,7 +155,7 @@ class GraphRAGService {
         ),
         indexingConfig: IndexingConfig(
           enableImageCaptioning: enableImageCaptioning && visionChat != null,
-          calendarNameFilter: {'EpisTwin'},
+          calendarNameFilter: {'RUVA'},
         ),
         extendedConfig: GraphRAGExtendedConfig(
           enableFunctionCalling: extractionCallback != null,
@@ -451,6 +451,16 @@ class GraphRAGService {
     );
   }
   
+  /// Detect and remove entities whose source data has been deleted from the
+  /// device, then clean up orphan nodes.
+  Future<PruningResult> pruneDeletedData() async {
+    _checkInitialized();
+    debugPrint('[GraphRAGService] Pruning deleted data');
+    final result = await _graphRag!.pruneDeletedData();
+    debugPrint('[GraphRAGService] Pruning result: $result');
+    return result;
+  }
+
   /// Pause indexing
   void pauseIndexing() {
     _checkInitialized();

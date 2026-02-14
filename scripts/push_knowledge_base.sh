@@ -10,8 +10,8 @@
 #   ./scripts/push_knowledge_base.sh -s emulator-5554   # specific device
 #
 # What it does:
-#   1. Pushes epistwin_images/*.{JPG,jpeg} → /sdcard/Pictures/EpisTwin/
-#   2. Pushes epistwin_docs/*.pdf          → /sdcard/Documents/EpisTwin/
+#   1. Pushes epistwin_images/*.{JPG,jpeg} → /sdcard/Pictures/RUVA/
+#   2. Pushes epistwin_docs/*.pdf          → /sdcard/Documents/RUVA/
 #   3. Triggers MediaScanner so files appear immediately in the gallery
 #      and document pickers.
 #   4. Inserts calendar events from epistwin_jsontxt/event_*.txt
@@ -34,8 +34,8 @@ KB_DOCS="$PROJECT_ROOT/knowledge_base/epistwin_docs"
 KB_JSON="$PROJECT_ROOT/knowledge_base/epistwin_jsontxt"
 
 # Destination paths on the emulator (shared storage)
-DEST_IMAGES="/sdcard/Pictures/EpisTwin"
-DEST_DOCS="/sdcard/Documents/EpisTwin"
+DEST_IMAGES="/sdcard/Pictures/RUVA"
+DEST_DOCS="/sdcard/Documents/RUVA"
 
 # ---------- Parse optional -s <serial> argument ----------
 ADB_ARGS=()
@@ -76,9 +76,61 @@ echo "📁 Creating directories on device..."
 adb_cmd shell mkdir -p "$DEST_IMAGES"
 adb_cmd shell mkdir -p "$DEST_DOCS"
 
+# We need python3 for reliable JSON parsing
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 is required for JSON parsing. Install it and re-run."
+    exit 1
+fi
+
+# Helper: extract a JSON field using python3 (handles nested .metadata.field)
+json_field() {
+    local file="$1" field="$2"
+    python3 - "$file" "$field" <<'PYEOF'
+import json, sys, re
+with open(sys.argv[1]) as f:
+    txt = f.read()
+
+# Replace Unicode smart quotes with standard ASCII quotes
+txt = txt.replace('\u201c', '"').replace('\u201d', '"')
+txt = txt.replace('\u2018', "'").replace('\u2019', "'")
+
+# Fix unquoted values: lines like   "location": La Rambla, 91, ...
+# Process line-by-line to fix values that are not properly quoted
+lines = txt.split('\n')
+fixed = []
+for line in lines:
+    # Match key-value lines where value isn't quoted/numeric/bool/null/brace
+    m = re.match(r'^(\s*"[^"]+"\s*:\s*)([^"{}\'\[\]0-9tfn\s][^\n]*)$', line)
+    if m:
+        prefix = m.group(1)
+        raw_val = m.group(2).rstrip()
+        # Strip trailing comma
+        has_comma = raw_val.endswith(',')
+        if has_comma:
+            raw_val = raw_val[:-1].rstrip()
+        # Escape any embedded double quotes inside the value
+        raw_val = raw_val.replace('"', '\\"')
+        line = prefix + '"' + raw_val + '"' + (',' if has_comma else '')
+    fixed.append(line)
+txt = '\n'.join(fixed)
+
+# Fix missing closing braces (some files are malformed)
+open_braces = txt.count('{')
+close_braces = txt.count('}')
+txt += '}' * (open_braces - close_braces)
+
+d = json.loads(txt)
+keys = sys.argv[2].split('.')
+v = d
+for k in keys:
+    v = v[k]
+print(v)
+PYEOF
+}
+
 # ---------- Clean up previous data ----------
 echo ""
-echo "🧹 Cleaning up previous EpisTwin data on device..."
+echo "🧹 Cleaning up previous RUVA data on device..."
 
 # 1. Remove old images & documents
 adb_cmd shell "rm -rf '$DEST_IMAGES'/*" 2>/dev/null || true
@@ -92,8 +144,8 @@ adb_cmd shell "content delete --uri content://media/external/file \
     --where \"_data LIKE '$DEST_DOCS/%'\"" > /dev/null 2>&1 || true
 echo "   ✅ Old MediaStore entries removed."
 
-# 3. Delete all events from the EpisTwin local calendar (if it exists)
-OLD_CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calendars --projection _id --where \"account_type='LOCAL' AND account_name='EpisTwin'\" 2>/dev/null" \
+# 3. Delete all events from the RUVA local calendar (if it exists)
+OLD_CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calendars --projection _id --where \"account_type='LOCAL' AND account_name='RUVA'\" 2>/dev/null" \
     | grep -oE '_id=[0-9]+' | head -1 | cut -d= -f2 || true)
 if [ -n "$OLD_CAL_ID" ]; then
     adb_cmd shell "content delete --uri content://com.android.calendar/events \
@@ -101,9 +153,9 @@ if [ -n "$OLD_CAL_ID" ]; then
     echo "   ✅ Old calendar events deleted (calendar $OLD_CAL_ID)."
 fi
 
-# 4. Delete all EpisTwin contacts
-OLD_RAW_IDS=$(adb_cmd shell "content query --uri content://com.android.contacts/raw_contacts --projection _id --where \"account_name='EpisTwin' AND account_type='LOCAL'\"" \
-    | grep -oE '_id=[0-9]+' | cut -d= -f2)
+# 4. Delete all RUVA contacts
+OLD_RAW_IDS=$(adb_cmd shell "content query --uri content://com.android.contacts/raw_contacts --projection _id --where \"account_name='RUVA' AND account_type='LOCAL'\"" \
+    | grep -oE '_id=[0-9]+' | cut -d= -f2 || true)
 if [ -n "$OLD_RAW_IDS" ]; then
     for rid in $OLD_RAW_IDS; do
         adb_cmd shell "content delete --uri content://com.android.contacts/raw_contacts/$rid" > /dev/null 2>&1 || true
@@ -111,7 +163,7 @@ if [ -n "$OLD_RAW_IDS" ]; then
     echo "   ✅ Old contacts deleted."
 fi
 
-# 5. Delete EpisTwin call log entries (by matching known contact numbers)
+# 5. Delete RUVA call log entries (by matching known contact numbers)
 #    We read the phone numbers from the knowledge base so we know what to clean
 for f in "$KB_JSON"/contact_*.txt; do
     [ -f "$f" ] || continue
@@ -390,14 +442,14 @@ CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calen
 
 if [ -z "$CAL_ID" ]; then
     echo "   Creating local calendar..."
-    adb_cmd shell "content insert --uri 'content://com.android.calendar/calendars?caller_is_syncadapter=true&account_name=EpisTwin&account_type=LOCAL' \
-        --bind account_name:s:EpisTwin \
+    adb_cmd shell "content insert --uri 'content://com.android.calendar/calendars?caller_is_syncadapter=true&account_name=RUVA&account_type=LOCAL' \
+        --bind account_name:s:RUVA \
         --bind account_type:s:LOCAL \
-        --bind name:s:EpisTwin \
-        --bind calendar_displayName:s:EpisTwin \
+        --bind name:s:RUVA \
+        --bind calendar_displayName:s:RUVA \
         --bind calendar_color:i:-14069085 \
         --bind calendar_access_level:i:700 \
-        --bind ownerAccount:s:EpisTwin \
+        --bind ownerAccount:s:RUVA \
         --bind visible:i:1 \
         --bind sync_events:i:1 \
         --bind calendar_timezone:s:Europe/Rome" > /dev/null
@@ -523,7 +575,7 @@ for f in "$KB_JSON"/contact_*.txt; do
     # Step 1: Insert raw contact
     adb_cmd shell "content insert --uri content://com.android.contacts/raw_contacts \
         --bind account_type:s:LOCAL \
-        --bind account_name:s:EpisTwin" > /dev/null
+        --bind account_name:s:RUVA" > /dev/null
 
     # Get the raw_contact_id we just created
     RAW_ID=$(adb_cmd shell "content query --uri content://com.android.contacts/raw_contacts \

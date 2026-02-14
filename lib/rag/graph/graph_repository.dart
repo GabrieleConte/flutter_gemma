@@ -229,9 +229,11 @@ abstract class GraphRepository {
 
   // Community operations
   Future<void> addCommunity(GraphCommunity community);
+  Future<void> deleteCommunity(String id);
   Future<void> updateCommunitySummary(
       String id, String summary, List<double> embedding);
   Future<List<GraphCommunity>> getCommunitiesByLevel(int level);
+  Future<List<GraphCommunity>> getCommunitiesForEntity(String entityId);
 
   // Graph traversal
   Future<List<GraphEntity>> getEntityNeighbors(
@@ -405,6 +407,12 @@ class NativeGraphRepository implements GraphRepository {
   }
 
   @override
+  Future<void> deleteCommunity(String id) async {
+    _checkInitialized();
+    await _platform.deleteCommunity(id);
+  }
+
+  @override
   Future<void> updateCommunitySummary(
     String id,
     String summary,
@@ -422,6 +430,13 @@ class NativeGraphRepository implements GraphRepository {
   Future<List<GraphCommunity>> getCommunitiesByLevel(int level) async {
     _checkInitialized();
     final results = await _platform.getCommunitiesByLevel(level);
+    return results.map((r) => GraphCommunity.fromCommunityResult(r)).toList();
+  }
+
+  @override
+  Future<List<GraphCommunity>> getCommunitiesForEntity(String entityId) async {
+    _checkInitialized();
+    final results = await _platform.getCommunitiesForEntity(entityId);
     return results.map((r) => GraphCommunity.fromCommunityResult(r)).toList();
   }
 
