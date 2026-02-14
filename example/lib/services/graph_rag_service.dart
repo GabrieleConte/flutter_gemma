@@ -59,6 +59,11 @@ class GraphRAGService {
   
   /// Mutex that serializes every LLM call through the single native session.
   final _AsyncMutex _llmLock = _AsyncMutex();
+
+  /// Notifier that is `true` whenever the LLM is busy with an ad-hoc
+  /// operation (note/alarm indexing, note update/delete). The chat screen
+  /// listens to this to disable input.
+  final ValueNotifier<bool> llmBusy = ValueNotifier<bool>(false);
   
   /// Whether the service is initialized
   bool get isInitialized => _isInitialized;
@@ -788,22 +793,27 @@ class GraphRAGService {
       return;
     }
 
-    debugPrint(
-        '[GraphRAGService] Indexing note: "$title" (${content.length} chars)');
+    llmBusy.value = true;
+    try {
+      debugPrint(
+          '[GraphRAGService] Indexing note: "$title" (${content.length} chars)');
 
-    final noteId =
-        '${title.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
+      final noteId =
+          '${title.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
 
-    await _graphRag!.indexNoteContent(
-      noteId: noteId,
-      title: title,
-      content: content,
-      dateCreated: dateCreated,
-      dateModified: dateModified,
-      sourceApp: sourceApp,
-    );
+      await _graphRag!.indexNoteContent(
+        noteId: noteId,
+        title: title,
+        content: content,
+        dateCreated: dateCreated,
+        dateModified: dateModified,
+        sourceApp: sourceApp,
+      );
 
-    debugPrint('[GraphRAGService] Note "$title" indexed successfully');
+      debugPrint('[GraphRAGService] Note "$title" indexed successfully');
+    } finally {
+      llmBusy.value = false;
+    }
   }
 
   /// Index a user-created alarm into the knowledge graph.
@@ -814,22 +824,99 @@ class GraphRAGService {
   }) async {
     _checkInitialized();
 
-    debugPrint('[GraphRAGService] Indexing alarm: "$label"');
+    llmBusy.value = true;
+    try {
+      debugPrint('[GraphRAGService] Indexing alarm: "$label"');
 
-    final alarmId =
-        '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
+      final alarmId =
+          '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
 
-    await _graphRag!.indexAlarmContent(
-      alarmId: alarmId,
-      label: label,
-      dateTime: dateTime,
-      recurrence: recurrence,
-      sourceApp: 'user_input',
-    );
+      await _graphRag!.indexAlarmContent(
+        alarmId: alarmId,
+        label: label,
+        dateTime: dateTime,
+        recurrence: recurrence,
+        sourceApp: 'user_input',
+      );
 
-    debugPrint('[GraphRAGService] Alarm "$label" indexed successfully');
+      debugPrint('[GraphRAGService] Alarm "$label" indexed successfully');
+    } finally {
+      llmBusy.value = false;
+    }
   }
-  
+
+  /// Get all user-created notes from the graph.
+  ///
+  /// Returns NOTE entities sorted by last modified date (newest first).
+  Future<List<GraphEntity>> getNotes() async {
+    _checkInitialized();
+
+    final notes = await _graphRag!.getEntitiesByType('NOTE');
+
+    // Filter to only user-created notes (have sourceApp or 'user_input' pattern)
+    // and sort by lastModified descending
+    notes.sort((a, b) => b.lastModified.compareTo(a.lastModified));
+
+    debugPrint('[GraphRAGService] Retrieved ${notes.length} notes');
+    return notes;
+  }
+
+  /// Delete a user-created note and all its associated graph data.
+  ///
+  /// This cascades: NOTE_CHUNK entities, orphaned extracted entities,
+  /// and community updates.
+  Future<void> deleteNote(String noteEntityId) async {
+    _checkInitialized();
+
+    llmBusy.value = true;
+    try {
+      debugPrint('[GraphRAGService] Deleting note: "$noteEntityId"');
+      await _graphRag!.deleteNote(noteEntityId);
+      debugPrint('[GraphRAGService] Note "$noteEntityId" deleted successfully');
+    } finally {
+      llmBusy.value = false;
+    }
+  }
+
+  /// Update a user-created note by deleting the old one and re-indexing.
+  ///
+  /// This is a delete + create operation because entity extraction
+  /// must be re-run on the new content.
+  Future<void> updateNote({
+    required String oldEntityId,
+    required String title,
+    required String content,
+    DateTime? dateCreated,
+  }) async {
+    _checkInitialized();
+
+    llmBusy.value = true;
+    try {
+      debugPrint(
+          '[GraphRAGService] Updating note: "$oldEntityId" -> "$title"');
+
+      // 1. Delete old note and its graph data
+      await _graphRag!.deleteNote(oldEntityId);
+
+      // 2. Re-index with new content (call internal — llmBusy already set)
+      final noteId =
+          '${title.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
+
+      await _graphRag!.indexNoteContent(
+        noteId: noteId,
+        title: title,
+        content: content,
+        dateCreated: dateCreated,
+        dateModified: DateTime.now(),
+        sourceApp: 'user_input',
+      );
+
+      debugPrint('[GraphRAGService] Note updated successfully');
+    } finally {
+      llmBusy.value = false;
+    }
+  }
+
   /// Dispose resources
   Future<void> dispose() async {
     if (_graphRag != null) {
