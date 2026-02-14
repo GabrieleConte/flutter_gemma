@@ -663,6 +663,82 @@ class GraphStore {
         sqlite3_finalize(stmt)
     }
 
+    /// Delete a community and its entity_communities mappings
+    func deleteCommunity(id: String) throws {
+        guard let db = db else {
+            throw GraphStoreError.databaseNotInitialized
+        }
+
+        var stmt: OpaquePointer?
+
+        // Delete entity-community mappings first
+        let deleteECSQL = "DELETE FROM \(Self.tableEntityCommunities) WHERE \(Self.columnCommunityId) = ?;"
+        if sqlite3_prepare_v2(db, deleteECSQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
+            sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+
+        // Delete the community itself
+        let deleteSQL = "DELETE FROM \(Self.tableCommunities) WHERE \(Self.columnId) = ?;"
+        if sqlite3_prepare_v2(db, deleteSQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
+
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                sqlite3_finalize(stmt)
+                throw GraphStoreError.deleteFailed("Failed to delete community")
+            }
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    /// Get all communities that a given entity belongs to
+    func getCommunitiesForEntity(entityId: String) throws -> [CommunityResult] {
+        guard let db = db else {
+            throw GraphStoreError.databaseNotInitialized
+        }
+
+        // Find community IDs for this entity
+        let querySQL = """
+        SELECT c.\(Self.columnId), c.\(Self.columnLevel), c.\(Self.columnSummary), c.\(Self.columnMetadata)
+        FROM \(Self.tableCommunities) c
+        INNER JOIN \(Self.tableEntityCommunities) ec ON ec.\(Self.columnCommunityId) = c.\(Self.columnId)
+        WHERE ec.\(Self.columnEntityId) = ?;
+        """
+
+        var stmt: OpaquePointer?
+        var results: [CommunityResult] = []
+
+        if sqlite3_prepare_v2(db, querySQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, (entityId as NSString).utf8String, -1, nil)
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let communityId = String(cString: sqlite3_column_text(stmt, 0))
+                let level = Int(sqlite3_column_int64(stmt, 1))
+                let summary = String(cString: sqlite3_column_text(stmt, 2))
+
+                var metadata: String? = nil
+                if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
+                    metadata = String(cString: sqlite3_column_text(stmt, 3))
+                }
+
+                // Get all entity IDs for this community
+                let entityIds = try getEntityIdsForCommunity(communityId: communityId)
+
+                results.append(CommunityResult(
+                    id: communityId,
+                    level: Int64(level),
+                    summary: summary,
+                    entityIds: entityIds,
+                    metadata: metadata
+                ))
+            }
+        }
+
+        sqlite3_finalize(stmt)
+        return results
+    }
+
     /// Get communities by level
     func getCommunitiesByLevel(level: Int) throws -> [CommunityResult] {
         guard let db = db else {

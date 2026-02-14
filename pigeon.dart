@@ -215,6 +215,12 @@ abstract class PlatformService {
   });
 
   @async
+  void deleteCommunity(String id);
+
+  @async
+  List<CommunityResult> getCommunitiesForEntity(String entityId);
+
+  @async
   List<CommunityResult> getCommunitiesByLevel(int level);
 
   @async

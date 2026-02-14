@@ -76,6 +76,58 @@ echo "📁 Creating directories on device..."
 adb_cmd shell mkdir -p "$DEST_IMAGES"
 adb_cmd shell mkdir -p "$DEST_DOCS"
 
+# We need python3 for reliable JSON parsing
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 is required for JSON parsing. Install it and re-run."
+    exit 1
+fi
+
+# Helper: extract a JSON field using python3 (handles nested .metadata.field)
+json_field() {
+    local file="$1" field="$2"
+    python3 - "$file" "$field" <<'PYEOF'
+import json, sys, re
+with open(sys.argv[1]) as f:
+    txt = f.read()
+
+# Replace Unicode smart quotes with standard ASCII quotes
+txt = txt.replace('\u201c', '"').replace('\u201d', '"')
+txt = txt.replace('\u2018', "'").replace('\u2019', "'")
+
+# Fix unquoted values: lines like   "location": La Rambla, 91, ...
+# Process line-by-line to fix values that are not properly quoted
+lines = txt.split('\n')
+fixed = []
+for line in lines:
+    # Match key-value lines where value isn't quoted/numeric/bool/null/brace
+    m = re.match(r'^(\s*"[^"]+"\s*:\s*)([^"{}\'\[\]0-9tfn\s][^\n]*)$', line)
+    if m:
+        prefix = m.group(1)
+        raw_val = m.group(2).rstrip()
+        # Strip trailing comma
+        has_comma = raw_val.endswith(',')
+        if has_comma:
+            raw_val = raw_val[:-1].rstrip()
+        # Escape any embedded double quotes inside the value
+        raw_val = raw_val.replace('"', '\\"')
+        line = prefix + '"' + raw_val + '"' + (',' if has_comma else '')
+    fixed.append(line)
+txt = '\n'.join(fixed)
+
+# Fix missing closing braces (some files are malformed)
+open_braces = txt.count('{')
+close_braces = txt.count('}')
+txt += '}' * (open_braces - close_braces)
+
+d = json.loads(txt)
+keys = sys.argv[2].split('.')
+v = d
+for k in keys:
+    v = v[k]
+print(v)
+PYEOF
+}
+
 # ---------- Clean up previous data ----------
 echo ""
 echo "🧹 Cleaning up previous RUVA data on device..."
@@ -103,7 +155,7 @@ fi
 
 # 4. Delete all RUVA contacts
 OLD_RAW_IDS=$(adb_cmd shell "content query --uri content://com.android.contacts/raw_contacts --projection _id --where \"account_name='RUVA' AND account_type='LOCAL'\"" \
-    | grep -oE '_id=[0-9]+' | cut -d= -f2)
+    | grep -oE '_id=[0-9]+' | cut -d= -f2 || true)
 if [ -n "$OLD_RAW_IDS" ]; then
     for rid in $OLD_RAW_IDS; do
         adb_cmd shell "content delete --uri content://com.android.contacts/raw_contacts/$rid" > /dev/null 2>&1 || true

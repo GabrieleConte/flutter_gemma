@@ -12,6 +12,8 @@ import 'graph/community_detection.dart';
 import 'graph/graphrag_query_engine.dart';
 import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
+import 'graph/graph_pruning.dart';
+import 'graph/community_maintenance.dart';
 import 'graph/link_prediction.dart';
 import 'graph/cache_manager.dart';
 import 'graph_rag_config.dart';
@@ -694,6 +696,67 @@ class GraphRAG {
     await _connectorManager.resetSyncState();
   }
 
+  /// Detect and remove entities whose source data has been deleted from the
+  /// device, then clean up orphan nodes with no relationships.
+  /// Also updates communities affected by the deletions.
+  ///
+  /// Returns a [PruningResult] with details about what was removed.
+  Future<PruningResult> pruneDeletedData() async {
+    _checkInitialized();
+    final pruner = GraphPruner(
+      repository: _repository,
+      connectorManager: _connectorManager,
+    );
+    final result = await pruner.prune();
+
+    if (result.totalRemoved > 0) {
+      try {
+        final summarizer = CommunitySummarizer(
+          llmCallback: _llmCallback,
+          embeddingCallback: _embeddingCallback,
+        );
+
+        final maintainer = CommunityMaintainer(
+          repository: _repository,
+          summarizer: summarizer,
+          communityConfig: _config.communityConfig,
+        );
+
+        final allDeletedIds = [
+          ...result.removedStaleEntities,
+          ...result.removedOrphanEntities,
+        ];
+        await maintainer.onEntitiesDeleted(allDeletedIds);
+      } catch (e) {
+        debugPrint(
+            '[GraphRAG] Community maintenance after prune failed (non-fatal): $e');
+      }
+    }
+
+    return result;
+  }
+
+  /// Remove entities whose source data no longer exists on the device.
+  Future<List<String>> pruneStaleEntities() async {
+    _checkInitialized();
+    final pruner = GraphPruner(
+      repository: _repository,
+      connectorManager: _connectorManager,
+    );
+    return await pruner.pruneStaleEntities();
+  }
+
+  /// Remove orphan entities (zero relationships), excluding structural nodes.
+  /// Runs recursively until the graph is stable.
+  Future<List<String>> cleanupOrphanNodes() async {
+    _checkInitialized();
+    final pruner = GraphPruner(
+      repository: _repository,
+      connectorManager: _connectorManager,
+    );
+    return await pruner.cleanupOrphanNodes();
+  }
+
   // === Entity Extraction ===
 
   /// Extract entities from text
@@ -917,6 +980,9 @@ class GraphRAG {
 
     debugPrint(
         '[GraphRAG] Indexed document "$name": ${chunks.length} chunk(s)');
+
+    // Update communities to include the new document entity.
+    await _updateCommunitiesForNewEntities([docEntityId]);
   }
 
   // === Document Chunking ===
@@ -1380,6 +1446,10 @@ class GraphRAG {
 
     debugPrint('[GraphRAG] Indexed note "$title": ${chunks.length} chunk(s), '
         '${uniqueEntityIds.length} extracted entities');
+
+    // Update communities to include the new note and extracted entities.
+    final newIds = [noteEntityId, ...uniqueEntityIds];
+    await _updateCommunitiesForNewEntities(newIds);
   }
 
   /// Index an alarm created by the user into the knowledge graph.
@@ -1523,6 +1593,9 @@ class GraphRAG {
     } catch (_) {}
 
     debugPrint('[GraphRAG] Indexed alarm "$label" for $timeStr on $dateStr');
+
+    // Update communities to include the new alarm entity.
+    await _updateCommunitiesForNewEntities([alarmEntityId]);
   }
 
   // === Community Detection ===
@@ -1554,6 +1627,32 @@ class GraphRAG {
   Future<List<GraphCommunity>> getCommunitiesByLevel(int level) async {
     _checkInitialized();
     return await _repository.getCommunitiesByLevel(level);
+  }
+
+  /// Run incremental community maintenance after new entities are added
+  /// outside of the main indexing pipeline (notes, alarms, documents).
+  Future<void> _updateCommunitiesForNewEntities(
+    List<String> newEntityIds,
+  ) async {
+    try {
+      final summarizer = CommunitySummarizer(
+        llmCallback: _llmCallback,
+        embeddingCallback: _embeddingCallback,
+      );
+
+      final maintainer = CommunityMaintainer(
+        repository: _repository,
+        summarizer: summarizer,
+        communityConfig: _config.communityConfig,
+      );
+
+      final result = await maintainer.onEntitiesAdded(newEntityIds);
+      if (result.totalAffected > 0) {
+        debugPrint('[GraphRAG] Community update after add: $result');
+      }
+    } catch (e) {
+      debugPrint('[GraphRAG] Community maintenance failed (non-fatal): $e');
+    }
   }
 
   void _checkInitialized() {

@@ -877,6 +877,30 @@ private class PlatformServiceImpl(
     }
   }
 
+  override fun deleteCommunity(id: String, callback: (Result<Unit>) -> Unit) {
+    scope.launch {
+      try {
+        graphStore?.deleteCommunity(id)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(Unit))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
+  override fun getCommunitiesForEntity(entityId: String, callback: (Result<List<CommunityResult>>) -> Unit) {
+    scope.launch {
+      try {
+        val communities = graphStore?.getCommunitiesForEntity(entityId)
+          ?: throw IllegalStateException("Graph store not initialized")
+        callback(Result.success(communities))
+      } catch (e: Exception) {
+        callback(Result.failure(e))
+      }
+    }
+  }
+
   override fun getCommunitiesByLevel(level: Long, callback: (Result<List<CommunityResult>>) -> Unit) {
     scope.launch {
       try {

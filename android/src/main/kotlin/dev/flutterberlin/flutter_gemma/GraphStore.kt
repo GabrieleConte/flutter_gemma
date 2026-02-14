@@ -454,6 +454,44 @@ class GraphStore(
         db.update(TABLE_COMMUNITIES, values, "$COLUMN_ID = ?", arrayOf(id))
     }
 
+    fun deleteCommunity(id: String) {
+        val db = database ?: throw IllegalStateException("Database not initialized")
+
+        // Delete entity-community mappings first
+        db.delete(TABLE_ENTITY_COMMUNITIES, "$COLUMN_COMMUNITY_ID = ?", arrayOf(id))
+
+        // Delete the community itself
+        db.delete(TABLE_COMMUNITIES, "$COLUMN_ID = ?", arrayOf(id))
+    }
+
+    fun getCommunitiesForEntity(entityId: String): List<CommunityResult> {
+        val db = database ?: throw IllegalStateException("Database not initialized")
+
+        val cursor = db.rawQuery("""
+            SELECT c.$COLUMN_ID, c.$COLUMN_LEVEL, c.$COLUMN_SUMMARY, c.$COLUMN_METADATA
+            FROM $TABLE_COMMUNITIES c
+            INNER JOIN $TABLE_ENTITY_COMMUNITIES ec ON ec.$COLUMN_COMMUNITY_ID = c.$COLUMN_ID
+            WHERE ec.$COLUMN_ENTITY_ID = ?
+        """.trimIndent(), arrayOf(entityId))
+
+        val results = mutableListOf<CommunityResult>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val communityId = it.getString(0)
+                val entityIds = getEntityIdsForCommunity(communityId)
+
+                results.add(CommunityResult(
+                    id = communityId,
+                    level = it.getLong(1),
+                    summary = it.getString(2),
+                    entityIds = entityIds,
+                    metadata = it.getString(3)
+                ))
+            }
+        }
+        return results
+    }
+
     fun getCommunitiesByLevel(level: Long): List<CommunityResult> {
         val db = database ?: throw IllegalStateException("Database not initialized")
 
