@@ -1652,6 +1652,8 @@ class BackgroundIndexingService {
           '${result.removedOrphanEntities.length} orphan entities');
 
       // Update communities affected by the deleted entities.
+      // Pass summarizer: null because Phase 2 will re-run full Leiden and
+      // Phase 3 will regenerate summaries — no point wasting LLM calls here.
       final allDeletedIds = [
         ...result.removedStaleEntities,
         ...result.removedOrphanEntities,
@@ -1659,7 +1661,7 @@ class BackgroundIndexingService {
 
       final maintainer = CommunityMaintainer(
         repository: repository,
-        summarizer: _summarizer,
+        summarizer: null,
         communityConfig: CommunityDetectionConfig(
           maxDepth: config.maxCommunityDepth,
         ),

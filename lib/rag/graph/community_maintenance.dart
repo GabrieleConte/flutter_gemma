@@ -1,9 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
 import 'graph_repository.dart';
-import 'entity_extractor.dart';
 import 'community_detection.dart';
 
 /// Result of a community maintenance operation.
@@ -40,9 +37,10 @@ class CommunityMaintenanceResult {
 /// Handles two scenarios:
 /// 1. **Entity deletions**: removes entities from their communities, deletes
 ///    empty communities, and regenerates summaries for affected ones.
-/// 2. **Entity additions**: re-runs Leiden community detection on the full
-///    graph (or local subgraph) and reconciles the result with the existing
-///    communities in the database.
+/// 2. **Entity additions**: uses incremental community assignment — finds the
+///    new entity's neighbors, assigns it to the community with the most
+///    neighbor connections, and only regenerates that community's summary.
+///    Full Leiden is only run by the indexing pipeline (Phase 2).
 class CommunityMaintainer {
   final GraphRepository repository;
   final CommunitySummarizer? summarizer;
@@ -156,21 +154,21 @@ class CommunityMaintainer {
   // ---------------------------------------------------------------------------
 
   /// Update communities after new entities have been added to the graph
-  /// outside of the main indexing pipeline.
+  /// outside of the main indexing pipeline (notes, alarms, single documents).
   ///
-  /// This runs full Leiden community detection, then **diffs** the result
-  /// against the existing communities stored in the database so that only
-  /// actually-changed communities incur expensive LLM summary regeneration.
+  /// Uses **incremental community assignment** instead of re-running full
+  /// Leiden detection. For each new entity we:
+  /// 1. Look up its neighbors via relationships.
+  /// 2. Find which existing communities those neighbors belong to.
+  /// 3. Assign the new entity to the community with the most neighbor votes.
+  /// 4. Only regenerate the summary for the affected community.
   ///
-  /// Specifically:
-  /// - Communities whose entity-set is identical to an existing record (and
-  ///   already have a non-empty summary) are **skipped** — zero LLM calls.
-  /// - New / changed communities are saved and summarized.
-  /// - Old community rows that no longer correspond to any detected community
-  ///   are **deleted** to prevent unbounded growth.
+  /// This avoids the non-deterministic Leiden shuffle that would reshuffle
+  /// unrelated large communities (e.g. PDF chunks) and trigger unnecessary
+  /// LLM summarization calls.
   ///
   /// Use [duringIndexing] = true to skip this (Phase 2 of the indexing pipeline
-  /// already rebuilds all communities).
+  /// already rebuilds all communities via full Leiden).
   Future<CommunityMaintenanceResult> onEntitiesAdded(
     List<String> newEntityIds, {
     bool duringIndexing = false,
@@ -180,96 +178,103 @@ class CommunityMaintainer {
     }
 
     debugPrint(
-        '[CommunityMaintainer] Processing ${newEntityIds.length} added entities');
+        '[CommunityMaintainer] Processing ${newEntityIds.length} added entities (incremental)');
 
-    // 1. Snapshot existing communities indexed by canonical entity set.
-    final existingByCanonical = await _snapshotExistingCommunities();
+    final updatedCommunityIds = <String>{};
+    final createdCommunityIds = <String>[];
+    final newEntitySet = newEntityIds.toSet();
 
-    // 2. Run full Leiden on the current graph state.
-    final result = await _detectCommunitiesFromGraph();
-    if (result == null) {
-      return CommunityMaintenanceResult();
-    }
+    for (final entityId in newEntityIds) {
+      // 1. Get this entity's relationships to find its neighbors.
+      final relationships = await repository.getRelationships(entityId);
+      final neighborIds = <String>{};
+      for (final rel in relationships) {
+        if (rel.sourceId == entityId) {
+          neighborIds.add(rel.targetId);
+        } else {
+          neighborIds.add(rel.sourceId);
+        }
+      }
+      // Exclude other new entities from neighbor lookup (they don't have
+      // communities yet either).
+      neighborIds.removeAll(newEntitySet);
 
-    // 3. Diff old vs new by comparing sorted entity sets.
-    final validEntityIds = await _getAllEntityIds();
-    final updatedCommunityIds = <String>[];
-    final unchangedCount = <String>[];
-    final matchedOldIds = <String>{};
+      // 2. Vote: for each neighbor, find its level-0 communities and tally.
+      final communityVotes = <String, int>{};
+      final communitiesById = <String, GraphCommunity>{};
 
-    for (final community in result.communities) {
-      // Filter to only valid (existing) entity IDs.
-      final validCommunityEntityIds = community.entityIds
-          .where((id) => validEntityIds.contains(id))
-          .toList();
-
-      if (validCommunityEntityIds.isEmpty) continue;
-
-      final key = canonicalKey(validCommunityEntityIds);
-      final existing = existingByCanonical[key];
-
-      if (existing != null && existing.summary.isNotEmpty) {
-        // Community entity-set unchanged and already has a valid summary —
-        // no need to re-save or re-summarize.
-        matchedOldIds.add(existing.id);
-        unchangedCount.add(existing.id);
-        continue;
+      for (final neighborId in neighborIds) {
+        final neighborCommunities =
+            await repository.getCommunitiesForEntity(neighborId);
+        for (final c in neighborCommunities) {
+          if (c.level == 0) {
+            communityVotes[c.id] = (communityVotes[c.id] ?? 0) + 1;
+            communitiesById[c.id] = c;
+          }
+        }
       }
 
-      // New or changed community — save and mark for summarization.
-      final metadata = <String, dynamic>{
-        'modularity': community.modularity,
-      };
-      if (community.childCommunityIds != null &&
-          community.childCommunityIds!.isNotEmpty) {
-        metadata['childCommunityIds'] = community.childCommunityIds;
-      }
-      if (community.parentCommunityId != null) {
-        metadata['parentCommunityId'] = community.parentCommunityId;
-      }
+      if (communityVotes.isNotEmpty) {
+        // 3a. Assign to the community with the most neighbor connections.
+        final bestCommunityId = communityVotes.entries
+            .reduce((a, b) => a.value >= b.value ? a : b)
+            .key;
+        final bestCommunity = communitiesById[bestCommunityId]!;
 
-      final graphCommunity = GraphCommunity(
-        id: community.id,
-        level: community.level,
-        summary: '', // Will be regenerated below.
-        entityIds: validCommunityEntityIds,
-        embedding: null,
-        metadata: metadata,
-      );
+        // Add entity to the community's member list if not already present.
+        if (!bestCommunity.entityIds.contains(entityId)) {
+          final updatedEntityIds = [...bestCommunity.entityIds, entityId];
+          final updatedCommunity = GraphCommunity(
+            id: bestCommunity.id,
+            level: bestCommunity.level,
+            summary: bestCommunity.summary,
+            entityIds: updatedEntityIds,
+            embedding: bestCommunity.embedding,
+            metadata: bestCommunity.metadata,
+          );
+          await repository.addCommunity(updatedCommunity);
+          updatedCommunityIds.add(bestCommunity.id);
+          debugPrint(
+              '[CommunityMaintainer] Added $entityId to existing community '
+              '${bestCommunity.id} (${communityVotes[bestCommunityId]} neighbor votes)');
+        }
 
-      try {
-        await repository.addCommunity(graphCommunity);
-        updatedCommunityIds.add(community.id);
-      } catch (e) {
+        // Also propagate to level-1+ parent communities that contain
+        // the best level-0 community's entities.
+        await _propagateToParentCommunities(entityId, bestCommunityId,
+            updatedCommunityIds);
+      } else {
+        // 3b. No neighbors have communities — create a new singleton community.
+        final newCommunityId = 'community_0_$entityId';
+        final newCommunity = GraphCommunity(
+          id: newCommunityId,
+          level: 0,
+          summary: '',
+          entityIds: [entityId],
+          embedding: null,
+          metadata: {'modularity': 0.0},
+        );
+        await repository.addCommunity(newCommunity);
+        createdCommunityIds.add(newCommunityId);
+        updatedCommunityIds.add(newCommunityId);
         debugPrint(
-            '[CommunityMaintainer] Failed to store community ${community.id}: $e');
+            '[CommunityMaintainer] Created new community $newCommunityId '
+            'for isolated entity $entityId');
       }
     }
 
-    // 4. Delete orphan communities — old rows whose entity-set no longer
-    //    matches any detected community.
-    final deletedCommunityIds = <String>[];
-    for (final oldCommunity in existingByCanonical.values) {
-      if (!matchedOldIds.contains(oldCommunity.id)) {
-        await repository.deleteCommunity(oldCommunity.id);
-        deletedCommunityIds.add(oldCommunity.id);
-      }
-    }
-
-    // 5. Only regenerate summaries for actually changed / new communities.
+    // 4. Regenerate summaries only for communities that actually changed.
     if (summarizer != null && updatedCommunityIds.isNotEmpty) {
-      await _regenerateSummariesForAll(updatedCommunityIds);
+      await _regenerateSummariesForAll(updatedCommunityIds.toList());
     }
 
     debugPrint(
         '[CommunityMaintainer] Addition maintenance complete: '
         '${updatedCommunityIds.length} updated, '
-        '${unchangedCount.length} unchanged (skipped), '
-        '${deletedCommunityIds.length} orphans deleted');
+        '${createdCommunityIds.length} new communities created');
 
     return CommunityMaintenanceResult(
-      updatedCommunities: updatedCommunityIds,
-      deletedCommunities: deletedCommunityIds,
+      updatedCommunities: updatedCommunityIds.toList(),
     );
   }
 
@@ -313,23 +318,6 @@ class CommunityMaintainer {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  /// Snapshot all existing communities indexed by their canonical entity-set
-  /// key (sorted, comma-joined entity IDs).
-  ///
-  /// This allows O(1) lookup to check whether a detected community's
-  /// membership matches an already-stored community.
-  Future<Map<String, GraphCommunity>> _snapshotExistingCommunities() async {
-    final snapshot = <String, GraphCommunity>{};
-    for (var level = communityConfig.maxDepth; level >= 0; level--) {
-      final communities = await repository.getCommunitiesByLevel(level);
-      for (final c in communities) {
-        final key = canonicalKey(c.entityIds);
-        snapshot[key] = c;
-      }
-    }
-    return snapshot;
-  }
-
   /// Canonical key for a community: sorted entity IDs joined by commas.
   ///
   /// Two communities with the same entity set produce the same key regardless
@@ -342,48 +330,60 @@ class CommunityMaintainer {
     return sorted.join(',');
   }
 
-  /// Run Leiden community detection on the full current graph.
-  Future<CommunityDetectionResult?> _detectCommunitiesFromGraph() async {
-    final entities = <GraphEntity>[];
-    final relationships = <GraphRelationship>[];
+  /// Propagate a newly-assigned entity to parent communities (level 1+).
+  ///
+  /// Finds any higher-level community that contains the given level-0
+  /// community's ID in its child list or whose entity set overlaps with that
+  /// community, then adds the entity there as well.
+  Future<void> _propagateToParentCommunities(
+    String entityId,
+    String level0CommunityId,
+    Set<String> updatedCommunityIds,
+  ) async {
+    for (var level = 1; level <= communityConfig.maxDepth; level++) {
+      final levelCommunities = await repository.getCommunitiesByLevel(level);
+      for (final parent in levelCommunities) {
+        // Check if this parent community already contains the level-0
+        // community's entities (i.e. it's a parent in the hierarchy).
+        final childIds = parent.childCommunityIds;
+        final isParent = (childIds != null &&
+                childIds.contains(level0CommunityId)) ||
+            parent.entityIds.any((id) =>
+                id == entityId); // already there
 
-    // Load all entities that participate in community detection
-    // (same filter as BackgroundIndexingService._detectCommunitiesPhase).
-    final communityEntityTypes = [
-      'SELF',
-      ...EntityTypes.all
-          .where((t) => t != EntityTypes.date && t != EntityTypes.hub),
-    ];
-
-    for (final type in communityEntityTypes) {
-      entities.addAll(await repository.getEntitiesByType(type));
+        // Alternative: check overlap with the level-0 community members.
+        if (!isParent) {
+          // Get the level-0 community to check membership overlap.
+          final level0Communities =
+              await repository.getCommunitiesByLevel(0);
+          final level0 =
+              level0Communities.where((c) => c.id == level0CommunityId);
+          if (level0.isNotEmpty) {
+            final level0EntitySet = level0.first.entityIds.toSet();
+            // If the parent contains any of the level-0 community's entities,
+            // the new entity probably belongs there too.
+            if (parent.entityIds.any((id) => level0EntitySet.contains(id))) {
+              if (!parent.entityIds.contains(entityId)) {
+                final updatedEntityIds = [...parent.entityIds, entityId];
+                final updatedParent = GraphCommunity(
+                  id: parent.id,
+                  level: parent.level,
+                  summary: parent.summary,
+                  entityIds: updatedEntityIds,
+                  embedding: parent.embedding,
+                  metadata: parent.metadata,
+                );
+                await repository.addCommunity(updatedParent);
+                updatedCommunityIds.add(parent.id);
+                debugPrint(
+                    '[CommunityMaintainer] Propagated $entityId to '
+                    'parent community ${parent.id} (level $level)');
+              }
+            }
+          }
+        }
+      }
     }
-
-    if (entities.isEmpty) {
-      debugPrint('[CommunityMaintainer] No entities for community detection');
-      return null;
-    }
-
-    for (final entity in entities) {
-      relationships.addAll(await repository.getRelationships(entity.id));
-    }
-
-    final detector = LeidenCommunityDetector(config: communityConfig);
-    return await detector.detectCommunities(entities, relationships);
-  }
-
-  /// Collect all valid entity IDs currently in the graph.
-  Future<Set<String>> _getAllEntityIds() async {
-    final ids = <String>{};
-    final allTypes = [
-      'SELF',
-      ...EntityTypes.all,
-    ];
-    for (final type in allTypes) {
-      final entities = await repository.getEntitiesByType(type);
-      ids.addAll(entities.map((e) => e.id));
-    }
-    return ids;
   }
 
   /// Regenerate the summary for a single community.
