@@ -10,6 +10,7 @@ import 'package:flutter_gemma_example/models/embedding_model.dart'
     as app_models;
 import 'package:flutter_gemma_example/graph_rag_index_screen.dart';
 import 'package:flutter_gemma_example/graph_rag_chat_screen.dart';
+import 'package:flutter_gemma_example/notes_management_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Navigator that checks model installation and provides tab navigation
@@ -54,7 +55,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     // Set default — only gemma3n_2B_litertlm is available for GraphRAG
     _selectedInferenceModel = _availableInferenceModels.isNotEmpty
         ? _availableInferenceModels.first
@@ -363,6 +364,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           tabs: const [
             Tab(icon: Icon(Icons.account_tree), text: 'Index'),
             Tab(icon: Icon(Icons.chat), text: 'Chat'),
+            Tab(icon: Icon(Icons.note), text: 'Notes'),
             Tab(icon: Icon(Icons.settings), text: 'Settings'),
           ],
           indicatorColor: Colors.orange,
@@ -375,6 +377,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         children: [
           const GraphRAGIndexScreen(),
           const GraphRAGChatScreen(),
+          const NotesManagementScreen(),
           _buildSettingsTab(),
         ],
       ),

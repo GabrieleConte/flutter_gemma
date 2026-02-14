@@ -40,18 +40,28 @@ class _GraphRAGChatScreenState extends State<GraphRAGChatScreen> {
   void initState() {
     super.initState();
     // Seed current state
-    _isIndexing = _service.isIndexing;
+    _isIndexing = _service.isIndexing || _service.llmBusy.value;
     // Listen for indexing progress changes
     _indexingSub = _service.progressStream?.listen((progress) {
       final running = progress.status == IndexingStatus.running;
       if (running != _isIndexing) {
-        setState(() => _isIndexing = running);
+        setState(() => _isIndexing = running || _service.llmBusy.value);
       }
     });
+    // Listen for ad-hoc LLM operations (note/alarm indexing, etc.)
+    _service.llmBusy.addListener(_onLlmBusyChanged);
+  }
+
+  void _onLlmBusyChanged() {
+    final busy = _service.llmBusy.value || _service.isIndexing;
+    if (busy != _isIndexing) {
+      setState(() => _isIndexing = busy);
+    }
   }
 
   @override
   void dispose() {
+    _service.llmBusy.removeListener(_onLlmBusyChanged);
     _indexingSub?.cancel();
     _queryController.dispose();
     _scrollController.dispose();

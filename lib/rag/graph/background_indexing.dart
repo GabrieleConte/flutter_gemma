@@ -1224,8 +1224,23 @@ class BackgroundIndexingService {
     final validEntityIds = entities.map((e) => e.id).toSet();
     print('[BackgroundIndexing] Valid entity IDs: ${validEntityIds.length}');
 
-    // Store communities
+    // Snapshot existing communities so we can diff and skip unchanged ones.
+    // This avoids wiping summaries that are still valid and saves expensive
+    // LLM calls in Phase 3.
+    final existingByCanonical = <String, GraphCommunity>{};
+    for (var level = config.maxCommunityDepth; level >= 0; level--) {
+      final existing = await repository.getCommunitiesByLevel(level);
+      for (final c in existing) {
+        final key = CommunityMaintainer.canonicalKey(c.entityIds);
+        existingByCanonical[key] = c;
+      }
+    }
+
+    // Store communities — only new/changed ones
     var storedCount = 0;
+    var unchangedCount = 0;
+    final matchedOldIds = <String>{};
+
     for (final community in result.communities) {
       // Filter entity IDs to only include ones that exist in the database
       final validCommunityEntityIds = community.entityIds
@@ -1241,6 +1256,19 @@ class BackgroundIndexingService {
       if (validCommunityEntityIds.length != community.entityIds.length) {
         print(
             '[BackgroundIndexing] Community ${community.id} filtered from ${community.entityIds.length} to ${validCommunityEntityIds.length} entity IDs');
+      }
+
+      // Check if an existing community has the same entity set and a
+      // valid summary — if so, skip the overwrite to preserve it.
+      final canonicalKey =
+          CommunityMaintainer.canonicalKey(validCommunityEntityIds);
+      final existing = existingByCanonical[canonicalKey];
+
+      if (existing != null && existing.summary.isNotEmpty) {
+        // Entity set unchanged and summary already exists — skip.
+        matchedOldIds.add(existing.id);
+        unchangedCount++;
+        continue;
       }
 
       // Include child community IDs in metadata for hierarchical summarization
@@ -1273,7 +1301,23 @@ class BackgroundIndexingService {
       }
     }
 
-    print('[BackgroundIndexing] Successfully stored $storedCount communities');
+    // Delete orphan communities — old rows whose entity-set no longer
+    // matches any detected community.
+    var deletedCount = 0;
+    for (final oldCommunity in existingByCanonical.values) {
+      if (!matchedOldIds.contains(oldCommunity.id)) {
+        try {
+          await repository.deleteCommunity(oldCommunity.id);
+          deletedCount++;
+        } catch (e) {
+          print(
+              '[BackgroundIndexing] Failed to delete orphan community ${oldCommunity.id}: $e');
+        }
+      }
+    }
+
+    print('[BackgroundIndexing] Communities: $storedCount stored, '
+        '$unchangedCount unchanged (kept), $deletedCount orphans deleted');
 
     _updateProgress(_progress.copyWith(
       detectedCommunities: result.communities.length,
@@ -1333,6 +1377,15 @@ class BackgroundIndexingService {
 
       for (final community in communities) {
         if (_cancelRequested) return;
+
+        // Skip communities that already have a valid summary (preserved
+        // during the diff-based Phase 2 because their entity set was
+        // unchanged). This avoids redundant LLM calls on re-index.
+        if (community.summary.isNotEmpty) {
+          print(
+              '[BackgroundIndexing] Skipping summary for ${community.id} — already valid');
+          continue;
+        }
 
         final detectedCommunity = DetectedCommunity(
           id: community.id,

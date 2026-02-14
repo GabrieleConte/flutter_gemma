@@ -757,6 +757,62 @@ class GraphRAG {
     return await pruner.cleanupOrphanNodes();
   }
 
+  /// Delete a user-created note and all its associated graph data.
+  ///
+  /// This removes:
+  /// 1. All NOTE_CHUNK entities whose `parentNoteId` matches [noteEntityId]
+  /// 2. The NOTE entity itself
+  /// 3. Orphaned entities that were only connected to this note
+  /// 4. Updates affected communities
+  ///
+  /// The native `deleteEntity` cascade-deletes relationships automatically.
+  Future<void> deleteNote(String noteEntityId) async {
+    _checkInitialized();
+
+    // 1. Find and delete associated NOTE_CHUNK entities
+    final chunks = await _repository.getEntitiesByType('NOTE_CHUNK');
+    final noteChunks = chunks
+        .where((c) => c.metadata?['parentNoteId'] == noteEntityId)
+        .toList();
+
+    final deletedIds = <String>[];
+    for (final chunk in noteChunks) {
+      await _repository.deleteEntity(chunk.id);
+      deletedIds.add(chunk.id);
+    }
+
+    // 2. Delete the NOTE entity itself
+    await _repository.deleteEntity(noteEntityId);
+    deletedIds.add(noteEntityId);
+
+    debugPrint('[GraphRAG] Deleted note "$noteEntityId" and '
+        '${noteChunks.length} chunk(s)');
+
+    // 3. Clean up orphan entities (e.g. extracted PERSON/ORG only linked here)
+    final orphanIds = await cleanupOrphanNodes();
+    deletedIds.addAll(orphanIds);
+
+    // 4. Update communities affected by the deletions
+    if (deletedIds.isNotEmpty) {
+      try {
+        final summarizer = CommunitySummarizer(
+          llmCallback: _llmCallback,
+          embeddingCallback: _embeddingCallback,
+        );
+        final maintainer = CommunityMaintainer(
+          repository: _repository,
+          summarizer: summarizer,
+          communityConfig: _config.communityConfig,
+        );
+        await maintainer.onEntitiesDeleted(deletedIds);
+      } catch (e) {
+        debugPrint(
+            '[GraphRAG] Community maintenance after note delete failed '
+            '(non-fatal): $e');
+      }
+    }
+  }
+
   // === Entity Extraction ===
 
   /// Extract entities from text
@@ -1283,6 +1339,7 @@ class GraphRAG {
         'noteId': noteId,
         'chunkCount': chunks.length,
         'totalLength': content.length,
+        'fullContent': content,
         if (dateCreated != null) 'dateCreated': dateCreated.toIso8601String(),
         if (dateModified != null)
           'dateModified': dateModified.toIso8601String(),
@@ -1304,6 +1361,39 @@ class GraphRAG {
         lastModified: now,
       );
     }
+
+    // --- Create DATE entity and CREATED_ON relationship ---
+    final effectiveDate = dateCreated ?? now;
+    final dateStr =
+        '${effectiveDate.year}-${effectiveDate.month.toString().padLeft(2, '0')}-${effectiveDate.day.toString().padLeft(2, '0')}';
+    final dateEntityId = normalizeId(dateStr, 'DATE');
+    final dateEmbedding = await _embeddingCallback(dateStr);
+
+    final dateEntity = GraphEntity(
+      id: dateEntityId,
+      name: dateStr,
+      type: 'DATE',
+      description: dateStr,
+      embedding: dateEmbedding,
+      metadata: {},
+      lastModified: now,
+    );
+
+    try {
+      await _repository.addEntity(dateEntity);
+    } catch (_) {}
+
+    final createdOnRel = GraphRelationship(
+      id: '${noteEntityId}_created_on_$dateEntityId',
+      sourceId: noteEntityId,
+      targetId: dateEntityId,
+      type: 'CREATED_ON',
+      weight: 1.0,
+      metadata: {},
+    );
+    try {
+      await _repository.addRelationship(createdOnRel);
+    } catch (_) {}
 
     // --- Create chunk entities and link them (only if multiple chunks) ---
     if (chunks.length > 1) {

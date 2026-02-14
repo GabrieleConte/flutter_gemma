@@ -159,44 +159,9 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
 
   bool _isPickingDocuments = false;
 
-  bool _isIndexingNote = false;
-
   bool _isIndexingAlarm = false;
 
   bool _isProcessingBatch = false;
-
-  Future<void> _addNote() async {
-    final result = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (context) => const _AddNoteDialog(),
-    );
-
-    if (result == null || result['content']?.isEmpty == true) {
-      return;
-    }
-
-    setState(() => _isIndexingNote = true);
-
-    try {
-      final title = result['title']?.isNotEmpty == true
-          ? result['title']!
-          : 'Note ${DateTime.now().toIso8601String().substring(0, 16)}';
-      final content = result['content']!;
-
-      _showSnackBar('Indexing note "$title"...');
-
-      await _service.indexNote(title: title, content: content);
-
-      await _loadStats();
-      await _loadGraphData();
-
-      _showSnackBar('Note indexed successfully!');
-    } catch (e) {
-      _showSnackBar('Error indexing note: $e', isError: true);
-    } finally {
-      setState(() => _isIndexingNote = false);
-    }
-  }
 
   Future<void> _addAlarm() async {
     final result = await showDialog<Map<String, dynamic>>(
@@ -824,21 +789,6 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                   style: TextButton.styleFrom(foregroundColor: Colors.lightBlue),
                 ),
                 TextButton.icon(
-                  onPressed: _isIndexingNote ? null : _addNote,
-                  icon: _isIndexingNote
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white70,
-                        ),
-                      )
-                    : const Icon(Icons.note_add, size: 18),
-                  label: Text(_isIndexingNote ? 'Indexing...' : 'Add Note'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.cyan),
-                ),
-                TextButton.icon(
                   onPressed: _isIndexingAlarm ? null : _addAlarm,
                   icon: _isIndexingAlarm
                     ? const SizedBox(
@@ -1252,94 +1202,6 @@ class _PermissionChip extends StatelessWidget {
       avatar: Icon(icon, color: color, size: 18),
       label: Text(label),
       backgroundColor: const Color(0xFF0b2351),
-    );
-  }
-}
-
-class _AddNoteDialog extends StatefulWidget {
-  const _AddNoteDialog();
-
-  @override
-  State<_AddNoteDialog> createState() => _AddNoteDialogState();
-}
-
-class _AddNoteDialogState extends State<_AddNoteDialog> {
-  final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _contentController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: const Color(0xFF1a3a5c),
-      title: const Text(
-        'Add Note',
-        style: TextStyle(color: Colors.white),
-      ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _titleController,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Title (optional)',
-                labelStyle: TextStyle(color: Colors.white54),
-                enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white24),
-                ),
-                focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Colors.cyan),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _contentController,
-              style: const TextStyle(color: Colors.white),
-              maxLines: 8,
-              minLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Note content',
-                labelStyle: TextStyle(color: Colors.white54),
-                hintText: 'Type your note here...',
-                hintStyle: TextStyle(color: Colors.white24),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.white24),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Colors.cyan),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () {
-            if (_contentController.text.trim().isEmpty) return;
-            Navigator.pop(context, {
-              'title': _titleController.text.trim(),
-              'content': _contentController.text.trim(),
-            });
-          },
-          style: TextButton.styleFrom(foregroundColor: Colors.cyan),
-          child: const Text('Index'),
-        ),
-      ],
     );
   }
 }
