@@ -60,10 +60,15 @@ class CommunityMaintainer {
 
   /// Update communities after entities have been deleted from the graph.
   ///
-  /// For each deleted entity:
-  /// 1. Find communities it belonged to.
-  /// 2. Re-save the community without that entity (or delete if empty).
-  /// 3. Regenerate the summary for affected non-empty communities.
+  /// **Important:** The native `deleteEntity()` cascade-deletes the
+  /// `entity_communities` mapping rows, so `getCommunitiesForEntity()` will
+  /// return nothing for already-deleted entities. We therefore scan all
+  /// communities and check membership by inspecting `entityIds` directly.
+  ///
+  /// For each affected community:
+  /// 1. Remove deleted entity IDs from its member list.
+  /// 2. Delete the community if it becomes empty.
+  /// 3. Re-save and regenerate the summary otherwise.
   Future<CommunityMaintenanceResult> onEntitiesDeleted(
     List<String> deletedEntityIds,
   ) async {
@@ -74,13 +79,20 @@ class CommunityMaintainer {
     debugPrint(
         '[CommunityMaintainer] Processing ${deletedEntityIds.length} deleted entities');
 
-    // Collect all affected community IDs (unique).
+    final deletedEntitySet = deletedEntityIds.toSet();
+
+    // Scan all communities across all levels to find those that reference
+    // any of the deleted entity IDs. We cannot rely on
+    // getCommunitiesForEntity() because the entity_communities mapping rows
+    // are already cascade-deleted by the native deleteEntity().
     final affectedCommunities = <String, GraphCommunity>{};
 
-    for (final entityId in deletedEntityIds) {
-      final communities = await repository.getCommunitiesForEntity(entityId);
+    for (var level = communityConfig.maxDepth; level >= 0; level--) {
+      final communities = await repository.getCommunitiesByLevel(level);
       for (final community in communities) {
-        affectedCommunities[community.id] = community;
+        if (community.entityIds.any((id) => deletedEntitySet.contains(id))) {
+          affectedCommunities[community.id] = community;
+        }
       }
     }
 
@@ -95,7 +107,6 @@ class CommunityMaintainer {
 
     final deletedCommunityIds = <String>[];
     final regeneratedCommunityIds = <String>[];
-    final deletedEntitySet = deletedEntityIds.toSet();
 
     for (final community in affectedCommunities.values) {
       // Remove deleted entities from the community's entity list.
@@ -147,8 +158,16 @@ class CommunityMaintainer {
   /// Update communities after new entities have been added to the graph
   /// outside of the main indexing pipeline.
   ///
-  /// This runs full Leiden community detection and reconciles results with the
-  /// existing communities stored in the database.
+  /// This runs full Leiden community detection, then **diffs** the result
+  /// against the existing communities stored in the database so that only
+  /// actually-changed communities incur expensive LLM summary regeneration.
+  ///
+  /// Specifically:
+  /// - Communities whose entity-set is identical to an existing record (and
+  ///   already have a non-empty summary) are **skipped** — zero LLM calls.
+  /// - New / changed communities are saved and summarized.
+  /// - Old community rows that no longer correspond to any detected community
+  ///   are **deleted** to prevent unbounded growth.
   ///
   /// Use [duringIndexing] = true to skip this (Phase 2 of the indexing pipeline
   /// already rebuilds all communities).
@@ -163,15 +182,20 @@ class CommunityMaintainer {
     debugPrint(
         '[CommunityMaintainer] Processing ${newEntityIds.length} added entities');
 
-    // Perform full community detection on the current graph state.
+    // 1. Snapshot existing communities indexed by canonical entity set.
+    final existingByCanonical = await _snapshotExistingCommunities();
+
+    // 2. Run full Leiden on the current graph state.
     final result = await _detectCommunitiesFromGraph();
     if (result == null) {
       return CommunityMaintenanceResult();
     }
 
-    // Reconcile: overwrite stored communities with the new detection result.
-    final updatedCommunityIds = <String>[];
+    // 3. Diff old vs new by comparing sorted entity sets.
     final validEntityIds = await _getAllEntityIds();
+    final updatedCommunityIds = <String>[];
+    final unchangedCount = <String>[];
+    final matchedOldIds = <String>{};
 
     for (final community in result.communities) {
       // Filter to only valid (existing) entity IDs.
@@ -181,6 +205,18 @@ class CommunityMaintainer {
 
       if (validCommunityEntityIds.isEmpty) continue;
 
+      final key = canonicalKey(validCommunityEntityIds);
+      final existing = existingByCanonical[key];
+
+      if (existing != null && existing.summary.isNotEmpty) {
+        // Community entity-set unchanged and already has a valid summary —
+        // no need to re-save or re-summarize.
+        matchedOldIds.add(existing.id);
+        unchangedCount.add(existing.id);
+        continue;
+      }
+
+      // New or changed community — save and mark for summarization.
       final metadata = <String, dynamic>{
         'modularity': community.modularity,
       };
@@ -210,17 +246,30 @@ class CommunityMaintainer {
       }
     }
 
-    // Regenerate summaries for updated communities.
-    if (summarizer != null) {
+    // 4. Delete orphan communities — old rows whose entity-set no longer
+    //    matches any detected community.
+    final deletedCommunityIds = <String>[];
+    for (final oldCommunity in existingByCanonical.values) {
+      if (!matchedOldIds.contains(oldCommunity.id)) {
+        await repository.deleteCommunity(oldCommunity.id);
+        deletedCommunityIds.add(oldCommunity.id);
+      }
+    }
+
+    // 5. Only regenerate summaries for actually changed / new communities.
+    if (summarizer != null && updatedCommunityIds.isNotEmpty) {
       await _regenerateSummariesForAll(updatedCommunityIds);
     }
 
     debugPrint(
         '[CommunityMaintainer] Addition maintenance complete: '
-        '${updatedCommunityIds.length} communities updated');
+        '${updatedCommunityIds.length} updated, '
+        '${unchangedCount.length} unchanged (skipped), '
+        '${deletedCommunityIds.length} orphans deleted');
 
     return CommunityMaintenanceResult(
       updatedCommunities: updatedCommunityIds,
+      deletedCommunities: deletedCommunityIds,
     );
   }
 
@@ -263,6 +312,35 @@ class CommunityMaintainer {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /// Snapshot all existing communities indexed by their canonical entity-set
+  /// key (sorted, comma-joined entity IDs).
+  ///
+  /// This allows O(1) lookup to check whether a detected community's
+  /// membership matches an already-stored community.
+  Future<Map<String, GraphCommunity>> _snapshotExistingCommunities() async {
+    final snapshot = <String, GraphCommunity>{};
+    for (var level = communityConfig.maxDepth; level >= 0; level--) {
+      final communities = await repository.getCommunitiesByLevel(level);
+      for (final c in communities) {
+        final key = canonicalKey(c.entityIds);
+        snapshot[key] = c;
+      }
+    }
+    return snapshot;
+  }
+
+  /// Canonical key for a community: sorted entity IDs joined by commas.
+  ///
+  /// Two communities with the same entity set produce the same key regardless
+  /// of the order in which entity IDs were stored.
+  ///
+  /// Public so that callers (e.g. [BackgroundIndexingService]) can reuse the
+  /// same canonical-key logic for their own diff comparisons.
+  static String canonicalKey(List<String> entityIds) {
+    final sorted = List<String>.from(entityIds)..sort();
+    return sorted.join(',');
+  }
 
   /// Run Leiden community detection on the full current graph.
   Future<CommunityDetectionResult?> _detectCommunitiesFromGraph() async {
