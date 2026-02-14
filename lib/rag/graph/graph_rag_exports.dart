@@ -134,6 +134,12 @@ export 'background_indexing.dart'
         IndexingProgress,
         IndexingConfig,
         BackgroundIndexingService;
+// Graph pruning (stale entity detection + orphan cleanup)
+export 'graph_pruning.dart'
+    show
+        PruningResult,
+        GraphPruner;
+
 // Link prediction
 export 'link_prediction.dart'
     show

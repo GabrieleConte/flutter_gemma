@@ -12,6 +12,7 @@ import 'graph/community_detection.dart';
 import 'graph/graphrag_query_engine.dart';
 import 'graph/global_query_engine.dart';
 import 'graph/background_indexing.dart';
+import 'graph/graph_pruning.dart';
 import 'graph/link_prediction.dart';
 import 'graph/cache_manager.dart';
 import 'graph_rag_config.dart';
@@ -692,6 +693,40 @@ class GraphRAG {
     await _repository.clear();
     // Reset connector sync times so next "Start" fetches all data
     await _connectorManager.resetSyncState();
+  }
+
+  /// Detect and remove entities whose source data has been deleted from the
+  /// device, then clean up orphan nodes with no relationships.
+  ///
+  /// Returns a [PruningResult] with details about what was removed.
+  Future<PruningResult> pruneDeletedData() async {
+    _checkInitialized();
+    final pruner = GraphPruner(
+      repository: _repository,
+      connectorManager: _connectorManager,
+    );
+    return await pruner.prune();
+  }
+
+  /// Remove entities whose source data no longer exists on the device.
+  Future<List<String>> pruneStaleEntities() async {
+    _checkInitialized();
+    final pruner = GraphPruner(
+      repository: _repository,
+      connectorManager: _connectorManager,
+    );
+    return await pruner.pruneStaleEntities();
+  }
+
+  /// Remove orphan entities (zero relationships), excluding structural nodes.
+  /// Runs recursively until the graph is stable.
+  Future<List<String>> cleanupOrphanNodes() async {
+    _checkInitialized();
+    final pruner = GraphPruner(
+      repository: _repository,
+      connectorManager: _connectorManager,
+    );
+    return await pruner.cleanupOrphanNodes();
   }
 
   // === Entity Extraction ===
