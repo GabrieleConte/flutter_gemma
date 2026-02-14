@@ -282,7 +282,7 @@ class LinkPredictionConfig {
     this.enableTemplateLinks = true,
     this.enableEmbeddingSimilarityLinks = true,
     this.embeddingSimilarityThreshold = 0.75,
-    this.sameTypeSimilarityThreshold = 0.65,
+    this.sameTypeSimilarityThreshold = 0.75,
     this.maxEmbeddingCandidates = 100,
   });
 }
@@ -1258,7 +1258,7 @@ class EmbeddingSimilarityLinkPredictor {
     String? maxPairA, maxPairB;
 
     // Skip same-type pairs for these types - they have generic embeddings that make them all appear similar
-    final skipSameTypeForTypes = {'EVENT', 'DATE', 'CALENDAR'};
+    final skipSameTypeForTypes = {'EVENT', 'DATE', 'CALENDAR', 'PHOTO', 'ALARM'};
 
     for (var i = 0; i < entitiesWithEmbeddings.length; i++) {
       for (var j = i + 1; j < entitiesWithEmbeddings.length; j++) {
