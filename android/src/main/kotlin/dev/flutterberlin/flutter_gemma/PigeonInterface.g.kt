@@ -1027,6 +1027,8 @@ interface PlatformService {
   fun getRelationships(entityId: String, callback: (Result<List<RelationshipResult>>) -> Unit)
   fun addCommunity(id: String, level: Long, summary: String, entityIds: List<String>, embedding: List<Double>, metadata: String?, callback: (Result<Unit>) -> Unit)
   fun updateCommunitySummary(id: String, summary: String, embedding: List<Double>, callback: (Result<Unit>) -> Unit)
+  fun deleteCommunity(id: String, callback: (Result<Unit>) -> Unit)
+  fun getCommunitiesForEntity(entityId: String, callback: (Result<List<CommunityResult>>) -> Unit)
   fun getCommunitiesByLevel(level: Long, callback: (Result<List<CommunityResult>>) -> Unit)
   fun getEntityNeighbors(entityId: String, depth: Long, relationshipType: String?, callback: (Result<List<EntityResult>>) -> Unit)
   fun searchEntitiesBySimilarity(queryEmbedding: List<Double>, topK: Long, threshold: Double, entityType: String?, callback: (Result<List<EntityWithScoreResult>>) -> Unit)
@@ -1735,6 +1737,45 @@ interface PlatformService {
                 reply.reply(wrapError(error))
               } else {
                 reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.deleteCommunity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val idArg = args[0] as String
+            api.deleteCommunity(idArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.flutter_gemma.PlatformService.getCommunitiesForEntity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val entityIdArg = args[0] as String
+            api.getCommunitiesForEntity(entityIdArg) { result: Result<List<CommunityResult>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
               }
             }
           }

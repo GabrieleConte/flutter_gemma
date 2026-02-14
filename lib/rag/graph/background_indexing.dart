@@ -7,6 +7,7 @@ import '../connectors/data_connector.dart';
 import 'graph_repository.dart';
 import 'entity_extractor.dart';
 import 'community_detection.dart';
+import 'community_maintenance.dart';
 import 'graph_pruning.dart';
 import 'link_prediction.dart';
 
@@ -1596,6 +1597,26 @@ class BackgroundIndexingService {
           '[BackgroundIndexing] Pruning removed '
           '${result.removedStaleEntities.length} stale + '
           '${result.removedOrphanEntities.length} orphan entities');
+
+      // Update communities affected by the deleted entities.
+      final allDeletedIds = [
+        ...result.removedStaleEntities,
+        ...result.removedOrphanEntities,
+      ];
+
+      final maintainer = CommunityMaintainer(
+        repository: repository,
+        summarizer: _summarizer,
+        communityConfig: CommunityDetectionConfig(
+          maxDepth: config.maxCommunityDepth,
+        ),
+      );
+
+      final maintenance = await maintainer.onEntitiesDeleted(allDeletedIds);
+      if (maintenance.totalAffected > 0) {
+        print(
+            '[BackgroundIndexing] Community maintenance after pruning: $maintenance');
+      }
     }
   }
 

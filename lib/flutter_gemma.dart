@@ -68,5 +68,6 @@ export 'rag/graph/community_detection.dart';
 export 'rag/graph/graphrag_query_engine.dart';
 export 'rag/graph/background_indexing.dart';
 export 'rag/graph/graph_pruning.dart';
+export 'rag/graph/community_maintenance.dart';
 export 'rag/graph/native_function_extractor.dart';
 

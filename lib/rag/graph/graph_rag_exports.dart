@@ -140,6 +140,12 @@ export 'graph_pruning.dart'
         PruningResult,
         GraphPruner;
 
+// Community maintenance (update communities on topology changes)
+export 'community_maintenance.dart'
+    show
+        CommunityMaintenanceResult,
+        CommunityMaintainer;
+
 // Link prediction
 export 'link_prediction.dart'
     show

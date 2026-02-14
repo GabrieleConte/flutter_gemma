@@ -1130,6 +1130,72 @@ class PlatformServiceImpl : NSObject, PlatformService, FlutterStreamHandler {
         }
     }
 
+    func deleteCommunity(id: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        print("[PLUGIN] Deleting community: \(id)")
+
+        guard let graphStore = graphStore else {
+            completion(.failure(PigeonError(
+                code: "GraphStoreNotInitialized",
+                message: "Graph store not initialized. Call initializeGraphStore first.",
+                details: nil
+            )))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try graphStore.deleteCommunity(id: id)
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Community deleted successfully")
+                    completion(.success(()))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to delete community: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "DeleteCommunityFailed",
+                        message: "Failed to delete community: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
+    func getCommunitiesForEntity(entityId: String, completion: @escaping (Result<[CommunityResult], Error>) -> Void) {
+        print("[PLUGIN] Getting communities for entity: \(entityId)")
+
+        guard let graphStore = graphStore else {
+            completion(.failure(PigeonError(
+                code: "GraphStoreNotInitialized",
+                message: "Graph store not initialized. Call initializeGraphStore first.",
+                details: nil
+            )))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let communities = try graphStore.getCommunitiesForEntity(entityId: entityId)
+
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Found \(communities.count) communities for entity")
+                    completion(.success(communities))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("[PLUGIN] Failed to get communities for entity: \(error)")
+                    completion(.failure(PigeonError(
+                        code: "GetCommunitiesForEntityFailed",
+                        message: "Failed to get communities for entity: \(error.localizedDescription)",
+                        details: nil
+                    )))
+                }
+            }
+        }
+    }
+
     func getCommunitiesByLevel(level: Int64, completion: @escaping (Result<[CommunityResult], Error>) -> Void) {
         print("[PLUGIN] Getting communities by level: \(level)")
 
