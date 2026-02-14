@@ -84,7 +84,7 @@ class _KioskAppState extends State<KioskApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'EpisTwin',
+      title: 'RUVA',
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         textTheme: const TextTheme(
