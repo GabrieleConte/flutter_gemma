@@ -595,10 +595,6 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                     onPressed: () => _startIndexing(),
                     child: const Text('Start'),
                   ),
-                  TextButton(
-                    onPressed: () => _startIndexing(fullReindex: true),
-                    child: const Text('Full Reindex'),
-                  ),
                 ],
               ],
             ),
