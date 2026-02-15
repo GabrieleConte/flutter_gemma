@@ -37,7 +37,9 @@ EMBED_DIM = 768  # embeddinggemma output dimension
 VISION_PROMPT = (
     "Describe this image in detail. Focus on what is depicted, "
     "the setting, objects, people, colors, and any notable features. "
-    "Keep your description concise but informative (2-4 sentences)."
+    "Keep your description concise but informative (2-4 sentences). "
+    "Do NOT wrap your response in <think> tags or include any reasoning. "
+    "Just output the description directly."
 )
 
 
@@ -58,7 +60,11 @@ def generate_description(image_path: str) -> str:
     }
     resp = requests.post(f"{OLLAMA_BASE}/api/generate", json=payload, timeout=120)
     resp.raise_for_status()
-    return resp.json()["response"].strip()
+    raw = resp.json()["response"].strip()
+    # Strip <think>...</think> blocks that some models produce
+    import re
+    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    return cleaned if cleaned else raw
 
 
 def generate_embedding(text: str) -> list[float]:
@@ -143,8 +149,8 @@ def main():
 
     cursor = conn.cursor()
 
-    # Fetch all PHOTO entities
-    cursor.execute("SELECT id, name FROM entities WHERE type = 'PHOTO'")
+    # Fetch all PHOTO entities (include metadata for date info)
+    cursor.execute("SELECT id, name, metadata FROM entities WHERE type = 'PHOTO'")
     photos = cursor.fetchall()
     print(f"Found {len(photos)} PHOTO entities in database")
     print(f"Found {len(available_images)} images in {IMAGES_DIR}\n")
@@ -152,7 +158,7 @@ def main():
     success = 0
     skipped = 0
 
-    for entity_id, entity_name in photos:
+    for entity_id, entity_name, metadata_json in photos:
         # Match entity name to image file
         image_path = available_images.get(entity_name)
         if image_path is None:
@@ -161,6 +167,17 @@ def main():
             continue
 
         print(f"Processing: {entity_name}")
+
+        # Parse metadata for date info
+        date_info = ""
+        if metadata_json:
+            try:
+                meta = json.loads(metadata_json)
+                date_val = meta.get("creationDate") or meta.get("timestamp") or meta.get("dateCreated")
+                if date_val is not None:
+                    date_info = f" Date: {date_val}"
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         # Step 1: Generate description
         try:
@@ -174,11 +191,14 @@ def main():
             skipped += 1
             continue
 
-        # Step 2: Generate embedding from description
+        # Step 2: Generate embedding
+        # Match the Dart embedding pattern: '{entity.name} {description}{dateInfo}'
+        embedding_text = f"{entity_name} {description}{date_info}"
         try:
             print(f"  Generating embedding...")
+            print(f"  Embedding text: {embedding_text[:120]}...")
             t0 = time.time()
-            embedding = generate_embedding(description)
+            embedding = generate_embedding(embedding_text)
             dt = time.time() - t0
             print(f"  Embedding generated ({dt:.1f}s): {EMBED_DIM} dimensions")
         except Exception as e:

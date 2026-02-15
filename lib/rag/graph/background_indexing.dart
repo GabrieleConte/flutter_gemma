@@ -668,8 +668,14 @@ class BackgroundIndexingService {
 
         // Add extracted entities to graph
         for (final entity in extraction.entities) {
+          // Include date info in embedding text for better temporal matching
+          final attrs = entity.attributes;
+          final dateAttr = attrs?['creationDate'] ??
+              attrs?['timestamp'] ??
+              attrs?['dateCreated'];
+          final dateInfo = dateAttr != null ? ' Date: $dateAttr' : '';
           final embedding = await _embeddingCallback(
-            '${entity.name} ${entity.description ?? ""}',
+            '${entity.name} ${entity.description ?? ""}$dateInfo',
           );
 
           final graphEntity = GraphEntity(

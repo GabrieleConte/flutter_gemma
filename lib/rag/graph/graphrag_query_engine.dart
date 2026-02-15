@@ -31,10 +31,27 @@ class GraphRAGQueryConfig {
 
   /// Entity types considered "hub" nodes – too generic, excluded from both
   /// seed retrieval results and hop traversal neighbours.
+  /// HUB nodes are still used as pass-through during graph traversal
+  /// (edges through them are followed) but they are excluded from the
+  /// final result set and LLM context.
   final Set<String> hubEntityTypes;
 
   /// Default hub entity types that are excluded from retrieval.
   static const Set<String> defaultHubEntityTypes = {EntityTypes.hub};
+
+  /// Score boost multiplier for personal entity types (NOTE, PHOTO, ALARM,
+  /// PERSON, PHONE_CALL). Applied to both seed and hop similarity scores
+  /// so personal data floats above noisy document chunks.
+  final double personalEntityBoost;
+
+  /// Entity types considered "personal" – receive [personalEntityBoost].
+  static const Set<String> personalEntityTypes = {
+    EntityTypes.note,
+    EntityTypes.photo,
+    EntityTypes.alarm,
+    EntityTypes.person,
+    EntityTypes.phoneCall,
+  };
 
   GraphRAGQueryConfig({
     this.topK = 4,
@@ -43,7 +60,8 @@ class GraphRAGQueryConfig {
     this.maxContextTokens = 4096,
     this.contextBudgetRatio = 0.9,
     this.communityDropThreshold = 0.7,
-    this.includeCommunityContext = true,
+    this.includeCommunityContext = false,
+    this.personalEntityBoost = 1.1,
     Set<String>? hubEntityTypes,
   }) : hubEntityTypes = hubEntityTypes ?? defaultHubEntityTypes;
 }
@@ -253,12 +271,18 @@ class GraphRAGQueryEngine {
     );
 
     // Seed entities with their similarity scores (exclude hub types)
+    // Personal entity types receive a configurable score boost so they
+    // float above noisy document chunks in the ranking.
     final seedEntities = <String, GraphRAGScoredEntity>{};
     for (final result in embeddingResults) {
       if (effective.hubEntityTypes.contains(result.entity.type)) continue;
+      final boost = GraphRAGQueryConfig.personalEntityTypes
+              .contains(result.entity.type)
+          ? effective.personalEntityBoost
+          : 1.0;
       seedEntities[result.entity.id] = GraphRAGScoredEntity(
         entity: result.entity,
-        score: result.score,
+        score: result.score * boost,
         source: 'embedding',
       );
     }
@@ -280,6 +304,9 @@ class GraphRAGQueryEngine {
 
     // --- Step 2: Graph traversal from each seed entity (up to maxHops) ---
     // Collect all unique neighbor IDs first, then batch-fetch embeddings.
+    // HUB nodes are used as pass-through: we follow edges through them
+    // to reach entities on the other side, but exclude HUBs themselves
+    // from the result set.
     final neighborIdSet = <String>{};
     final neighborEntities = <String, GraphEntity>{};
 
@@ -288,11 +315,34 @@ class GraphRAGQueryEngine {
         seed.entity.id,
         depth: effective.maxHops,
       );
+
+      // Collect direct neighbors and pass-through HUB neighbors
+      final hubIds = <String>[];
       for (final neighbor in neighbors) {
         if (seedEntities.containsKey(neighbor.id)) continue;
-        if (effective.hubEntityTypes.contains(neighbor.type)) continue;
+        if (effective.hubEntityTypes.contains(neighbor.type)) {
+          // HUB node: remember for pass-through expansion
+          hubIds.add(neighbor.id);
+          continue;
+        }
         neighborIdSet.add(neighbor.id);
         neighborEntities[neighbor.id] = neighbor;
+      }
+
+      // Pass-through: expand HUB neighbors one more hop to reach
+      // entities on the other side of the hub (e.g. hub_notes → note_X)
+      for (final hubId in hubIds) {
+        final hubNeighbors = await repository.getEntityNeighbors(
+          hubId,
+          depth: 1,
+        );
+        for (final hn in hubNeighbors) {
+          if (seedEntities.containsKey(hn.id)) continue;
+          if (effective.hubEntityTypes.contains(hn.type)) continue;
+          if (hn.id == seed.entity.id) continue; // skip back-link
+          neighborIdSet.add(hn.id);
+          neighborEntities[hn.id] = hn;
+        }
       }
     }
 
@@ -314,9 +364,13 @@ class GraphRAGQueryEngine {
 
         final similarity =
             MathUtils.cosineSimilarity(queryEmbedding, embedding);
+        final boost = GraphRAGQueryConfig.personalEntityTypes
+                .contains(neighborEntities[id]!.type)
+            ? effective.personalEntityBoost
+            : 1.0;
         hopEntities[id] = GraphRAGScoredEntity(
           entity: neighborEntities[id]!,
-          score: similarity,
+          score: similarity * boost,
           source: 'graph_traversal',
         );
       }
@@ -571,9 +625,13 @@ class GraphRAGQueryEngine {
       if (emails is List && emails.isNotEmpty) {
         parts.add('email: ${emails.join(', ')}');
       }
+      // Support both plural 'phones' (list) and singular 'phoneNumber' (string)
       final phones = meta['phones'];
+      final phoneNumber = meta['phoneNumber'];
       if (phones is List && phones.isNotEmpty) {
         parts.add('phone: ${phones.join(', ')}');
+      } else if (phoneNumber is String && phoneNumber.isNotEmpty) {
+        parts.add('phone: $phoneNumber');
       }
       if (parts.isNotEmpty) buf.writeln('  ${parts.join(' | ')}');
     }
@@ -682,6 +740,8 @@ class GraphRAGQueryEngine {
   }
 
   /// Format NOTE entity: title, creation date, content preview.
+  /// Uses fullContent from metadata when available and when it fits within
+  /// the configured token budget; otherwise falls back to the description.
   void _formatNote(StringBuffer buf, GraphEntity e) {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     final meta = e.metadata;
@@ -690,11 +750,15 @@ class GraphRAGQueryEngine {
       if (dateStr != null) buf.write(' — created $dateStr');
     }
     buf.writeln();
-    if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
-      buf.writeln('  $preview');
+    // Prefer fullContent when available and fits within half the token budget
+    final fullContent = meta?['fullContent'];
+    final maxNoteChars = config.maxContextTokens * 2; // ~half budget in chars
+    if (fullContent is String &&
+        fullContent.isNotEmpty &&
+        fullContent.length <= maxNoteChars) {
+      buf.writeln('  $fullContent');
+    } else if (e.description != null && e.description!.isNotEmpty) {
+      buf.writeln('  ${e.description}');
     }
   }
 
@@ -765,7 +829,6 @@ class GraphRAGQueryEngine {
   static const _skipMetadataKeys = {
     'sourceId',
     'source_app',
-    'path',
     'width',
     'height',
     'mediaType',
@@ -1057,8 +1120,26 @@ class GraphRAGQueryEngine {
   // ---------------------------------------------------------------------------
 
   /// System prompt for the personal assistant answering from graph context.
-  static const _systemPrompt =
-      '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
+  /// Build the system prompt, injecting the current date for temporal
+  /// reasoning. Made a method (not a const) so it can include dynamic data.
+  static String _buildSystemPrompt() {
+    final now = DateTime.now();
+    final todayStr =
+        '${_months[now.month - 1]} ${now.day}, ${now.year}';
+    // Day-of-week name
+    const dayNames = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final dayOfWeek = dayNames[now.weekday - 1];
+
+    return '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
+Today is $dayOfWeek, $todayStr.
 
 The context includes entities (people, events, photos, notes, calls, locations, documents) and the relationships connecting them (shown as "→ relationship → target").
 
@@ -1066,12 +1147,16 @@ Instructions:
 - Answer based ONLY on the context provided. Do not use external knowledge.
 - Be specific: use names, dates, and details from the entities.
 - Use the relationships to connect information (e.g., who attended an event, where a photo was taken, when a call happened).
-- If the context does not contain enough information to answer, say so honestly rather than guessing.
+- If dates in the context are close to the dates mentioned in the question, use them. Make reasonable inferences from the available data rather than refusing.
+- Use today's date to resolve relative time references like "yesterday", "last week", "last Friday". Check if entity dates match the referenced time period.
+- Call direction: [outgoing] means YOU (the user) called the person. [incoming] means the person called YOU.
 - Be conversational and concise.''';
+  }
 
   /// Build the full prompt for answer generation.
   String _buildAnswerPrompt(String query, String contextString) {
-    return '''$_systemPrompt
+    final systemPrompt = _buildSystemPrompt();
+    return '''$systemPrompt
 
 Context:
 $contextString
