@@ -68,6 +68,10 @@ class GraphRAGQueryResult {
   /// Generated answer from local retrieval (if answer generation was requested)
   final String? generatedAnswer;
 
+  /// The full prompt sent to the LLM (system + context + question).
+  /// Populated only when answer generation is performed.
+  final String? fullPrompt;
+
   GraphRAGQueryResult({
     required this.entities,
     this.relationships = const [],
@@ -75,10 +79,11 @@ class GraphRAGQueryResult {
     required this.contextString,
     required this.metadata,
     this.generatedAnswer,
+    this.fullPrompt,
   });
 
-  /// Create a copy with a generated answer
-  GraphRAGQueryResult withAnswer(String answer) {
+  /// Create a copy with a generated answer and optionally the full prompt.
+  GraphRAGQueryResult withAnswer(String answer, {String? fullPrompt}) {
     return GraphRAGQueryResult(
       entities: entities,
       relationships: relationships,
@@ -86,6 +91,7 @@ class GraphRAGQueryResult {
       contextString: contextString,
       metadata: metadata,
       generatedAnswer: answer,
+      fullPrompt: fullPrompt,
     );
   }
 }
@@ -205,8 +211,9 @@ class GraphRAGQueryEngine {
 
     if (llmCallback == null) return result;
 
+    final prompt = _buildAnswerPrompt(query, result.contextString);
     final answer = await _generateLocalAnswer(query, result);
-    return result.withAnswer(answer);
+    return result.withAnswer(answer, fullPrompt: prompt);
   }
 
   /// Stream tokens while generating a local answer
@@ -1102,6 +1109,17 @@ Answer:''';
     } catch (e) {
       return 'Unable to generate an answer: $e';
     }
+  }
+
+  /// Build and return the full prompt for a query (public for batch usage).
+  Future<String> buildPrompt(String query, {
+    List<String>? entityTypes,
+    int? topK,
+    int? maxHops,
+  }) async {
+    final result = await this
+        .query(query, entityTypes: entityTypes, topK: topK, maxHops: maxHops);
+    return _buildAnswerPrompt(query, result.contextString);
   }
 }
 

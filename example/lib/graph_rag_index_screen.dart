@@ -342,7 +342,9 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         return;
       }
 
-      final answers = <String>[];
+      final csvRows = <String>[];
+      // CSV header
+      csvRows.add('question;answer;context');
 
       for (var i = 0; i < lines.length; i++) {
         final query = lines[i];
@@ -352,9 +354,15 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
 
         try {
           final result = await _service.queryWithAnswer(query);
-          answers.add(result.generatedAnswer ?? result.contextString);
+          final answer = result.generatedAnswer ?? result.contextString;
+          final context = result.fullPrompt ?? result.contextString;
+          csvRows.add(
+            '${_csvEscape(query)};${_csvEscape(answer)};${_csvEscape(context)}',
+          );
         } catch (e) {
-          answers.add('[ERROR: $e]');
+          csvRows.add(
+            '${_csvEscape(query)};${_csvEscape('[ERROR: $e]')};',
+          );
           debugPrint('[BatchQuery] Error on query "$query": $e');
         }
       }
@@ -369,8 +377,8 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
       } else {
         saveDir = await getApplicationDocumentsDirectory();
       }
-      final outFile = File('${saveDir.path}/test_results.txt');
-      await outFile.writeAsString(answers.join('\n'));
+      final outFile = File('${saveDir.path}/test_results.csv');
+      await outFile.writeAsString(csvRows.join('\n'));
 
       // Dismiss progress dialog
       if (mounted) Navigator.of(context).pop();
@@ -390,7 +398,7 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${answers.length} answers generated.',
+                  '${csvRows.length - 1} answers generated.',
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
                 const SizedBox(height: 12),
@@ -418,7 +426,7 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
                 onPressed: () {
                   Navigator.pop(ctx);
                   Share.shareXFiles(
-                    [XFile(outFile.path, mimeType: 'text/plain')],
+                    [XFile(outFile.path, mimeType: 'text/csv')],
                     subject: 'Batch Query Results',
                   );
                 },
@@ -473,6 +481,13 @@ class _GraphRAGIndexScreenState extends State<GraphRAGIndexScreen> {
         _showSnackBar('Error: $e', isError: true);
       }
     }
+  }
+
+  /// Escape a value for semicolon-delimited CSV.
+  /// Wraps in double quotes and escapes internal double quotes.
+  String _csvEscape(String value) {
+    final escaped = value.replaceAll('"', '""');
+    return '"$escaped"';
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
