@@ -1341,9 +1341,14 @@ class DirectEntityExtractor implements EntityExtractor {
     // Always create a PHONE_CALL entity for the call itself
     final callId = call['id']?.toString() ?? sourceId;
     final hasContactName = contactName != null && contactName.toString().isNotEmpty;
+
+    // Include date in label to make each call entity unique
+    final dateStr = _formatDateForEntity(timestamp);
+    final dateSuffix = dateStr.isNotEmpty ? ' on $dateStr' : '';
+    final timeSuffix = startTime != null ? ' $startTime' : '';
     final callLabel = hasContactName
-        ? 'Call with $contactName'
-        : 'Call ${phoneNumber ?? callId}';
+        ? 'Call with $contactName$dateSuffix$timeSuffix'
+        : 'Call ${phoneNumber ?? callId}$dateSuffix$timeSuffix';
 
     entities.add(ExtractedEntity(
       name: callLabel,

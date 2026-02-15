@@ -1595,16 +1595,31 @@ class BackgroundIndexingService {
         break;
       case 'PHONE_CALL':
       case 'PHONE_CALLS':
-        // Entity extractor names calls "Call with <contact>" or "Call <number>"
+        // Entity extractor names calls "Call with <contact> on <date> <time>"
         final contactName = itemMap['contactName'] ?? itemMap['name'];
         final phoneNumber = itemMap['phoneNumber'] ?? itemMap['number'];
         final callId = itemMap['id']?.toString() ?? '';
+        // Reconstruct date+time suffix to match entity extractor
+        String dateSuffix = '';
+        final ts = itemMap['timestamp'] ?? itemMap['date'];
+        final startTime = itemMap['startTime'];
+        if (ts != null) {
+          final millis = ts is int ? ts : int.tryParse(ts.toString());
+          if (millis != null) {
+            final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+            final dateStr = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+            dateSuffix = ' on $dateStr';
+          }
+        }
+        if (startTime != null) {
+          dateSuffix = '$dateSuffix $startTime';
+        }
         if (contactName != null && contactName.toString().isNotEmpty) {
-          return _generateEntityId('Call with $contactName', 'PHONE_CALL');
+          return _generateEntityId('Call with $contactName$dateSuffix', 'PHONE_CALL');
         } else if (phoneNumber != null && phoneNumber.toString().isNotEmpty) {
-          return _generateEntityId('Call $phoneNumber', 'PHONE_CALL');
+          return _generateEntityId('Call $phoneNumber$dateSuffix', 'PHONE_CALL');
         } else if (callId.isNotEmpty) {
-          return _generateEntityId('Call $callId', 'PHONE_CALL');
+          return _generateEntityId('Call $callId$dateSuffix', 'PHONE_CALL');
         }
         break;
       case 'NOTE':
