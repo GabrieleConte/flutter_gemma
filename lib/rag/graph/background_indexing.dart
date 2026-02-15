@@ -672,8 +672,29 @@ class BackgroundIndexingService {
           final attrs = entity.attributes;
           final dateAttr = attrs?['creationDate'] ??
               attrs?['timestamp'] ??
-              attrs?['dateCreated'];
-          final dateInfo = dateAttr != null ? ' Date: $dateAttr' : '';
+              attrs?['dateCreated'] ??
+              attrs?['startDate'] ??
+              attrs?['date'];
+          // Convert date to human-readable format with day-of-week
+          String dateInfo = '';
+          if (dateAttr != null) {
+            final dt = _parseDateForEmbedding(dateAttr);
+            if (dt != null) {
+              const dayNames = [
+                'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                'Friday', 'Saturday', 'Sunday',
+              ];
+              const months = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December',
+              ];
+              final dayName = dayNames[dt.weekday - 1];
+              final month = months[dt.month - 1];
+              dateInfo = ' Date: $dayName, $month ${dt.day}, ${dt.year}';
+            } else {
+              dateInfo = ' Date: $dateAttr';
+            }
+          }
           final embedding = await _embeddingCallback(
             '${entity.name} ${entity.description ?? ""}$dateInfo',
           );
@@ -1559,6 +1580,24 @@ class BackgroundIndexingService {
     return DateTime.now().millisecondsSinceEpoch.toString();
   }
 
+  /// Parse a dynamic date value (ISO-8601 or epoch millis) into DateTime.
+  /// Used for embedding text generation to create human-readable dates.
+  static DateTime? _parseDateForEmbedding(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is! String) return null;
+    // Try epoch millis (numeric string)
+    final asInt = int.tryParse(value);
+    if (asInt != null && asInt > 1000000000) {
+      if (asInt > 1e12.toInt()) {
+        return DateTime.fromMillisecondsSinceEpoch(asInt);
+      }
+      return DateTime.fromMillisecondsSinceEpoch(asInt * 1000);
+    }
+    // Try ISO-8601
+    return DateTime.tryParse(value);
+  }
+
   /// Generate entity ID from name and type
   String _generateEntityId(String name, String type) {
     final normalized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
@@ -1595,16 +1634,31 @@ class BackgroundIndexingService {
         break;
       case 'PHONE_CALL':
       case 'PHONE_CALLS':
-        // Entity extractor names calls "Call with <contact>" or "Call <number>"
+        // Entity extractor names calls "Call with <contact> on <date> <time>"
         final contactName = itemMap['contactName'] ?? itemMap['name'];
         final phoneNumber = itemMap['phoneNumber'] ?? itemMap['number'];
         final callId = itemMap['id']?.toString() ?? '';
+        // Reconstruct date+time suffix to match entity extractor
+        String dateSuffix = '';
+        final ts = itemMap['timestamp'] ?? itemMap['date'];
+        final startTime = itemMap['startTime'];
+        if (ts != null) {
+          final millis = ts is int ? ts : int.tryParse(ts.toString());
+          if (millis != null) {
+            final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+            final dateStr = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+            dateSuffix = ' on $dateStr';
+          }
+        }
+        if (startTime != null) {
+          dateSuffix = '$dateSuffix $startTime';
+        }
         if (contactName != null && contactName.toString().isNotEmpty) {
-          return _generateEntityId('Call with $contactName', 'PHONE_CALL');
+          return _generateEntityId('Call with $contactName$dateSuffix', 'PHONE_CALL');
         } else if (phoneNumber != null && phoneNumber.toString().isNotEmpty) {
-          return _generateEntityId('Call $phoneNumber', 'PHONE_CALL');
+          return _generateEntityId('Call $phoneNumber$dateSuffix', 'PHONE_CALL');
         } else if (callId.isNotEmpty) {
-          return _generateEntityId('Call $callId', 'PHONE_CALL');
+          return _generateEntityId('Call $callId$dateSuffix', 'PHONE_CALL');
         }
         break;
       case 'NOTE':

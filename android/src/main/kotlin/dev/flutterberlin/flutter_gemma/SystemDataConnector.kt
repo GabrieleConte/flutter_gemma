@@ -881,8 +881,15 @@ class SystemDataConnector(
             while (it.moveToNext() && count < maxCount) {
                 try {
                     val callId = it.getLong(idIndex)
-                    val name = it.getString(nameIndex)
+                    val cachedName = it.getString(nameIndex)
                     val number = it.getString(numberIndex) ?: ""
+
+                    // If CACHED_NAME is empty, resolve from contacts provider
+                    val name = if (cachedName.isNullOrBlank() && number.isNotEmpty()) {
+                        resolveContactName(contentResolver, number)
+                    } else {
+                        cachedName
+                    }
                     val type = it.getInt(typeIndex)
                     val date = it.getLong(dateIndex)
                     val duration = it.getLong(durationIndex)
@@ -919,6 +926,33 @@ class SystemDataConnector(
 
         Log.d(TAG, "fetchCallLog completed, returning ${results.size} calls")
         return results
+    }
+
+    /**
+     * Resolve a contact display name from a phone number using the contacts provider.
+     * Returns null if no matching contact is found.
+     */
+    private fun resolveContactName(contentResolver: ContentResolver, phoneNumber: String): String? {
+        try {
+            val uri = android.net.Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                android.net.Uri.encode(phoneNumber)
+            )
+            contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    return cursor.getString(0)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not resolve contact name for $phoneNumber: ${e.message}")
+        }
+        return null
     }
 
     // MARK: - Documents

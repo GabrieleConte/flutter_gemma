@@ -268,25 +268,40 @@ class GraphPruner {
         break;
       case 'callLog':
         if (item is PhoneCall) {
+          final dt = item.timestamp;
+          final dateStr = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+          final timeStr = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
           if (item.contactName != null && item.contactName!.isNotEmpty) {
-            name = 'Call with ${item.contactName}';
+            name = 'Call with ${item.contactName} on $dateStr $timeStr';
           } else if (item.phoneNumber.isNotEmpty) {
-            name = 'Call ${item.phoneNumber}';
+            name = 'Call ${item.phoneNumber} on $dateStr $timeStr';
           } else {
-            name = 'Call ${item.id}';
+            name = 'Call ${item.id} on $dateStr $timeStr';
           }
         } else if (item is Map<String, dynamic>) {
           final contactName = item['contactName'] ?? item['name'];
           final phoneNumber = item['phoneNumber'] ?? item['number'];
           final callId = item['id']?.toString() ?? '';
+          // Reconstruct date suffix to match entity extractor
+          String dateSuffix = '';
+          final ts = item['timestamp'] ?? item['date'];
+          if (ts != null) {
+            final millis = ts is int ? ts : int.tryParse(ts.toString());
+            if (millis != null) {
+              final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+              final dateStr = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+              final timeStr = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+              dateSuffix = ' on $dateStr $timeStr';
+            }
+          }
           if (contactName != null &&
               contactName.toString().isNotEmpty) {
-            name = 'Call with $contactName';
+            name = 'Call with $contactName$dateSuffix';
           } else if (phoneNumber != null &&
               phoneNumber.toString().isNotEmpty) {
-            name = 'Call $phoneNumber';
+            name = 'Call $phoneNumber$dateSuffix';
           } else if (callId.isNotEmpty) {
-            name = 'Call $callId';
+            name = 'Call $callId$dateSuffix';
           }
         }
         break;
