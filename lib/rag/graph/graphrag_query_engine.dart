@@ -1321,7 +1321,7 @@ class GraphRAGQueryEngine {
   ];
 
   static String _buildSystemPrompt() {
-    final now = DateTime(2025, 9, 1); //DateTime.now();
+    final now = DateTime.now();
     final todayStr =
         '${_months[now.month - 1]} ${now.day}, ${now.year}';
     final dayOfWeek = _dayNames[now.weekday - 1];
