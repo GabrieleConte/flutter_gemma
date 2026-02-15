@@ -1231,8 +1231,11 @@ class GraphRAG {
 
     // --- Create parent NOTE entity ---
     final noteEntityId = normalizeId(title, 'NOTE');
+    final dateInfo = dateCreated != null
+        ? ' Created on ${dateCreated.year}-${dateCreated.month.toString().padLeft(2, '0')}-${dateCreated.day.toString().padLeft(2, '0')}'
+        : '';
     final noteEmbedding = await _embeddingCallback(
-      '$title ${content.length > 200 ? content.substring(0, 200) : content}',
+      '$title ${content.length > 200 ? content.substring(0, 200) : content}$dateInfo',
     );
 
     final noteEntity = GraphEntity(
