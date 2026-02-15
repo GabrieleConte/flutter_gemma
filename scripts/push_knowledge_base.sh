@@ -437,7 +437,7 @@ echo ""
 echo "📅 Ensuring a local calendar account exists..."
 
 # Check if a local calendar already exists
-CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calendars --projection _id --where \"account_type='LOCAL'\" 2>/dev/null" \
+CAL_ID=$(adb_cmd shell "content query --uri content://com.android.calendar/calendars --projection _id --where \"account_type='LOCAL' AND account_name='RUVA'\" 2>/dev/null" \
     | grep -oE '_id=[0-9]+' | head -1 | cut -d= -f2 || true)
 
 if [ -z "$CAL_ID" ]; then
