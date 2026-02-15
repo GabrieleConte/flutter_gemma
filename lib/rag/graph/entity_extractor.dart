@@ -198,6 +198,7 @@ class RelationshipTypes {
   static const String recurringOn = 'RECURRING_ON';
   static const String occursOn = 'OCCURS_ON';
   static const String occurredOn = 'OCCURRED_ON';
+  static const String hasPhoneNumber = 'HAS_PHONE_NUMBER';
 }
 
 /// Configuration for entity extraction
@@ -1026,6 +1027,27 @@ class DirectEntityExtractor implements EntityExtractor {
         },
         confidence: 1.0, // Deterministic extraction
       ));
+
+      // Create PHONE entities and PERSON -> HAS_PHONE_NUMBER relationships
+      if (phones != null) {
+        final phoneList = phones is List ? phones : [phones];
+        for (final phone in phoneList) {
+          final phoneStr = phone.toString();
+          if (phoneStr.isNotEmpty) {
+            entities.add(ExtractedEntity(
+              name: phoneStr,
+              type: EntityTypes.phone,
+              confidence: 1.0,
+            ));
+            relationships.add(ExtractedRelationship(
+              sourceEntity: personName,
+              targetEntity: phoneStr,
+              type: RelationshipTypes.hasPhoneNumber,
+              confidence: 1.0,
+            ));
+          }
+        }
+      }
     }
 
     // Extract organization entity if present
@@ -1318,7 +1340,8 @@ class DirectEntityExtractor implements EntityExtractor {
 
     // Always create a PHONE_CALL entity for the call itself
     final callId = call['id']?.toString() ?? sourceId;
-    final callLabel = contactName != null
+    final hasContactName = contactName != null && contactName.toString().isNotEmpty;
+    final callLabel = hasContactName
         ? 'Call with $contactName'
         : 'Call ${phoneNumber ?? callId}';
 
