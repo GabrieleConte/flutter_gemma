@@ -257,6 +257,101 @@ class GraphRAGQueryEngine {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Pre-retrieval temporal query expansion
+  // ---------------------------------------------------------------------------
+
+  /// Relative temporal references and their patterns.
+  static final _temporalPatterns = [
+    // "yesterday", "the day before yesterday"
+    (RegExp(r'\bthe day before yesterday\b', caseSensitive: false), -2),
+    (RegExp(r'\byesterday\b', caseSensitive: false), -1),
+    (RegExp(r'\btoday\b', caseSensitive: false), 0),
+    (RegExp(r'\btomorrow\b', caseSensitive: false), 1),
+  ];
+
+  /// Day-name patterns: "last Monday", "this Friday", etc.
+  static final _dayPatterns = [
+    for (var i = 0; i < _dayNames.length; i++)
+      (
+        RegExp('\\b(?:last|past|previous)\\s+${_dayNames[i]}\\b',
+            caseSensitive: false),
+        i + 1, // weekday (1=Monday)
+        true, // look backward
+      ),
+    for (var i = 0; i < _dayNames.length; i++)
+      (
+        RegExp('\\b(?:this|next)\\s+${_dayNames[i]}\\b',
+            caseSensitive: false),
+        i + 1,
+        false, // look forward
+      ),
+  ];
+
+  /// Expand temporal references in a query to concrete dates.
+  ///
+  /// "What did I do yesterday?" → appends resolved date.
+  /// Returns the augmented query and any resolved date strings.
+  static (String expandedQuery, List<String> resolvedDates) _expandTemporalQuery(
+      String query) {
+    final now = DateTime.now();
+    final resolvedDates = <String>[];
+    var expanded = query;
+
+    // Resolve relative day references (yesterday, today, tomorrow, etc.)
+    for (final (pattern, offset) in _temporalPatterns) {
+      if (pattern.hasMatch(query)) {
+        final date = now.add(Duration(days: offset));
+        final dateStr =
+            '${_dayNames[date.weekday - 1]}, ${_months[date.month - 1]} ${date.day}, ${date.year}';
+        resolvedDates.add(
+            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}');
+        expanded = '$expanded (date: $dateStr)';
+      }
+    }
+
+    // Resolve "last Monday", "this Friday", etc.
+    for (final (pattern, targetWeekday, lookBack) in _dayPatterns) {
+      if (pattern.hasMatch(query)) {
+        DateTime date;
+        if (lookBack) {
+          // Find the most recent past occurrence of targetWeekday
+          var diff = now.weekday - targetWeekday;
+          if (diff <= 0) diff += 7;
+          date = now.subtract(Duration(days: diff));
+        } else {
+          // Find the next occurrence of targetWeekday
+          var diff = targetWeekday - now.weekday;
+          if (diff <= 0) diff += 7;
+          date = now.add(Duration(days: diff));
+        }
+        final dateStr =
+            '${_dayNames[date.weekday - 1]}, ${_months[date.month - 1]} ${date.day}, ${date.year}';
+        resolvedDates.add(
+            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}');
+        expanded = '$expanded (date: $dateStr)';
+      }
+    }
+
+    // Resolve "last week" → range of 7 days
+    if (RegExp(r'\blast\s+week\b', caseSensitive: false).hasMatch(query)) {
+      for (var i = 7; i >= 1; i--) {
+        final date = now.subtract(Duration(days: i));
+        resolvedDates.add(
+            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}');
+      }
+      final start = now.subtract(const Duration(days: 7));
+      final end = now.subtract(const Duration(days: 1));
+      final startStr =
+          '${_months[start.month - 1]} ${start.day}';
+      final endStr =
+          '${_months[end.month - 1]} ${end.day}, ${end.year}';
+      expanded = '$expanded (date range: $startStr - $endStr)';
+    }
+
+    return (expanded, resolvedDates);
+  }
+
   /// Execute a GraphRAG query (embedding similarity + N-hop traversal)
   Future<GraphRAGQueryResult> query(
     String query, {
@@ -267,8 +362,11 @@ class GraphRAGQueryEngine {
     final stopwatch = Stopwatch()..start();
     final effective = _effectiveConfig(topK: topK, maxHops: maxHops);
 
+    // --- Step 0: Temporal query expansion ---
+    final (expandedQuery, resolvedDates) = _expandTemporalQuery(query);
+
     // --- Step 1: Embedding similarity search ---
-    final queryEmbedding = await embeddingCallback(query);
+    final queryEmbedding = await embeddingCallback(expandedQuery);
 
     final embeddingResults = await repository.searchEntitiesBySimilarity(
       queryEmbedding,
@@ -383,7 +481,46 @@ class GraphRAGQueryEngine {
       }
     }
 
-    // --- Step 2.5: Filter out DOCUMENT_CHUNK when personal entities dominate ---
+    // --- Step 2.5: Date-aware graph traversal ---
+    // If the query resolved to concrete dates, find DATE entities matching
+    // those dates and pull their connected entities into the hop set.
+    if (resolvedDates.isNotEmpty) {
+      for (final dateStr in resolvedDates) {
+        final dateEntityId = 'date_${dateStr.replaceAll('-', '_')}';
+        final dateEntity = await repository.getEntity(dateEntityId);
+        if (dateEntity == null) continue;
+
+        final dateNeighbors = await repository.getEntityNeighbors(
+          dateEntityId,
+          depth: 1,
+        );
+        for (final neighbor in dateNeighbors) {
+          if (seedEntities.containsKey(neighbor.id)) continue;
+          if (hopEntities.containsKey(neighbor.id)) continue;
+          if (effective.hubEntityTypes.contains(neighbor.type)) continue;
+
+          // Fetch embedding for similarity scoring
+          final entities = await repository
+              .getEntitiesWithEmbeddingsByIds([neighbor.id]);
+          if (entities.isEmpty || entities.first.embedding == null) continue;
+          final similarity = MathUtils.cosineSimilarity(
+              queryEmbedding, entities.first.embedding!);
+
+          // Apply a temporal boost (1.3x) since these are date-relevant
+          final boost = GraphRAGQueryConfig.personalEntityTypes
+                  .contains(neighbor.type)
+              ? effective.personalEntityBoost * 1.3
+              : 1.3;
+          hopEntities[neighbor.id] = GraphRAGScoredEntity(
+            entity: neighbor,
+            score: similarity * boost,
+            source: 'graph_traversal',
+          );
+        }
+      }
+    }
+
+    // --- Step 2.6: Filter out DOCUMENT_CHUNK when personal entities dominate ---
     // If the majority of top-scored entities are personal types, discard
     // DOCUMENT_CHUNK / DOCUMENT entities to avoid context pollution.
     _filterDocumentChunksIfPersonalDominates(seedEntities, hopEntities);
@@ -888,15 +1025,16 @@ class GraphRAGQueryEngine {
     if (value == null) return null;
     final dt = _parseDateTimeValue(value);
     if (dt == null) return null;
+    final dayOfWeek = _dayNames[dt.weekday - 1];
     final month = _months[dt.month - 1];
     final day = dt.day;
     final year = dt.year;
     if (dt.hour == 0 && dt.minute == 0) {
-      return '$month $day, $year';
+      return '$dayOfWeek, $month $day, $year';
     }
     final hour = dt.hour.toString().padLeft(2, '0');
     final minute = dt.minute.toString().padLeft(2, '0');
-    return '$month $day, $year at $hour:$minute';
+    return '$dayOfWeek, $month $day, $year at $hour:$minute';
   }
 
   /// Parse a dynamic value into a DateTime, supporting ISO-8601, epoch millis
@@ -1178,21 +1316,22 @@ class GraphRAGQueryEngine {
     }
   }
 
+  /// Day-of-week names used in date formatting and system prompt.
+  static const _dayNames = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+
   static String _buildSystemPrompt() {
-    final now = DateTime.now();
+    final now = DateTime(2025, 9, 1); //DateTime.now();
     final todayStr =
         '${_months[now.month - 1]} ${now.day}, ${now.year}';
-    // Day-of-week name
-    const dayNames = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-    final dayOfWeek = dayNames[now.weekday - 1];
+    final dayOfWeek = _dayNames[now.weekday - 1];
 
     return '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
 Today is $dayOfWeek, $todayStr.
