@@ -54,14 +54,14 @@ class GraphRAGQueryConfig {
   };
 
   GraphRAGQueryConfig({
-    this.topK = 4,
-    this.maxHops = 1,
-    this.similarityThreshold = 0.5,
+    this.topK = 10,
+    this.maxHops = 2,
+    this.similarityThreshold = 0.3,
     this.maxContextTokens = 4096,
     this.contextBudgetRatio = 0.9,
     this.communityDropThreshold = 0.7,
     this.includeCommunityContext = false,
-    this.personalEntityBoost = 1.25,
+    this.personalEntityBoost = 1.15,
     Set<String>? hubEntityTypes,
   }) : hubEntityTypes = hubEntityTypes ?? defaultHubEntityTypes;
 }
@@ -476,8 +476,8 @@ class GraphRAGQueryEngine {
         if (seen.contains(rel.id)) continue;
         seen.add(rel.id);
 
-        // Both endpoints must be in retrieved set
-        if (!entityIds.contains(rel.sourceId) ||
+        // At least one endpoint must be in retrieved set
+        if (!entityIds.contains(rel.sourceId) &&
             !entityIds.contains(rel.targetId)) {
           continue;
         }
@@ -1031,17 +1031,21 @@ class GraphRAGQueryEngine {
     for (final rel in relationships) {
       final targetEntity = entityMap[rel.targetId];
       final sourceEntity = entityMap[rel.sourceId];
-      if (targetEntity == null || sourceEntity == null) continue;
+      // Need at least the source entity for outgoing relationship rendering
+      if (sourceEntity == null) continue;
 
       // Skip relationships pointing TO date entities (already in entity text)
       // but keep relationships FROM date entities (rare but valid)
-      if (targetEntity.type == EntityTypes.date) continue;
+      if (targetEntity != null && targetEntity.type == EntityTypes.date) continue;
+
+      final targetName = targetEntity?.name ?? rel.targetId;
+      final targetType = targetEntity?.type ?? 'Unknown';
 
       outgoingRels.putIfAbsent(rel.sourceId, () => []).add(
             _ResolvedRelationship(
               type: rel.type,
-              targetName: targetEntity.name,
-              targetType: targetEntity.type,
+              targetName: targetName,
+              targetType: targetType,
             ),
           );
     }
