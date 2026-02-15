@@ -61,7 +61,7 @@ class GraphRAGQueryConfig {
     this.contextBudgetRatio = 0.9,
     this.communityDropThreshold = 0.7,
     this.includeCommunityContext = false,
-    this.personalEntityBoost = 1.1,
+    this.personalEntityBoost = 1.25,
     Set<String>? hubEntityTypes,
   }) : hubEntityTypes = hubEntityTypes ?? defaultHubEntityTypes;
 }
@@ -382,6 +382,11 @@ class GraphRAGQueryEngine {
         );
       }
     }
+
+    // --- Step 2.5: Filter out DOCUMENT_CHUNK when personal entities dominate ---
+    // If the majority of top-scored entities are personal types, discard
+    // DOCUMENT_CHUNK / DOCUMENT entities to avoid context pollution.
+    _filterDocumentChunksIfPersonalDominates(seedEntities, hopEntities);
 
     final seedCount = seedEntities.length;
     final hopCount = hopEntities.length;
@@ -1129,6 +1134,46 @@ class GraphRAGQueryEngine {
   /// System prompt for the personal assistant answering from graph context.
   /// Build the system prompt, injecting the current date for temporal
   /// reasoning. Made a method (not a const) so it can include dynamic data.
+  /// Removes DOCUMENT_CHUNK and DOCUMENT entities from the candidate sets
+  /// when the majority of top-scoring results are personal entity types.
+  ///
+  /// This prevents irrelevant PDF content (cars.pdf, paper.pdf, menus) from
+  /// polluting the context when the query clearly targets personal data.
+  static void _filterDocumentChunksIfPersonalDominates(
+    Map<String, GraphRAGScoredEntity> seedEntities,
+    Map<String, GraphRAGScoredEntity> hopEntities,
+  ) {
+    const documentTypes = {
+      EntityTypes.documentChunk,
+      EntityTypes.document,
+    };
+
+    // Merge all candidates and sort by score descending
+    final allCandidates = [
+      ...seedEntities.values,
+      ...hopEntities.values,
+    ]..sort((a, b) => b.score.compareTo(a.score));
+
+    if (allCandidates.isEmpty) return;
+
+    // Check the top candidates (at most 4)
+    final topN = allCandidates.length < 4 ? allCandidates.length : 4;
+    final topSlice = allCandidates.sublist(0, topN);
+
+    final personalCount = topSlice
+        .where((e) =>
+            GraphRAGQueryConfig.personalEntityTypes.contains(e.entity.type))
+        .length;
+
+    // If more than half of the top candidates are personal, drop documents
+    if (personalCount > topN / 2) {
+      seedEntities
+          .removeWhere((_, e) => documentTypes.contains(e.entity.type));
+      hopEntities
+          .removeWhere((_, e) => documentTypes.contains(e.entity.type));
+    }
+  }
+
   static String _buildSystemPrompt() {
     final now = DateTime.now();
     final todayStr =
@@ -1157,7 +1202,24 @@ Instructions:
 - If dates in the context are close to the dates mentioned in the question, use them. Make reasonable inferences from the available data rather than refusing.
 - Use today's date to resolve relative time references like "yesterday", "last week", "last Friday". Check if entity dates match the referenced time period.
 - Call direction: [outgoing] means YOU (the user) called the person. [incoming] means the person called YOU.
-- Be conversational and concise.''';
+- Be conversational and concise.
+
+Examples:
+
+Q: "Who called me yesterday?"
+Today is Wednesday, March 5, 2026.
+Context: Call with Alice (Phone Call) [incoming] — March 4, 2026 at 14:30, 5m 12s
+A: Alice called you yesterday (March 4) at 14:30. The call lasted about 5 minutes.
+
+Q: "Did I call Lucas last week?"
+Today is Sunday, February 15, 2026.
+Context: Call with Lucas Smith (Phone Call) [outgoing] — February 10, 2026 at 09:00, 12m 30s
+A: Yes, you called Lucas Smith on Monday, February 10 at 09:00. The call lasted about 12 minutes. Since the call was outgoing, you initiated it.
+
+Q: "How did I feel last Friday?"
+Today is Sunday, February 15, 2026.
+Context: Mood 3 (Note) — created August 29, 2025 — TODAY I FEEL TIRED AND STRESSED
+A: I don't have a mood entry for last Friday (February 13, 2026). The closest mood note is from August 29, 2025, where you wrote that you felt tired and stressed, but that was months ago, not last Friday.''';
   }
 
   /// Build the full prompt for answer generation.
