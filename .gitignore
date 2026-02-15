@@ -54,3 +54,6 @@ macos/Resources/litertlm-server.jar
 # Temporary/internal documentation
 temporary_docs/
 knowledge_base/*.db
+
+# Native libraries (downloaded at build time)
+**/jniLibs/

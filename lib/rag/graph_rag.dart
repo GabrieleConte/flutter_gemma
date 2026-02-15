@@ -1194,9 +1194,12 @@ class GraphRAG {
   /// Index a note by extracting entities and relationships, with chunking
   /// for long notes.
   ///
-  /// Short notes (<= 2500 chars) are processed as a single entity.
-  /// Longer notes are split into chunks, each processed for entity extraction,
-  /// with NEXT_CHUNK sequential links and PART_OF links to the parent NOTE.
+  /// Short notes (<= 2500 chars) are stored as a single NOTE entity.
+  /// Longer notes are split into chunks with NEXT_CHUNK sequential links
+  /// and PART_OF links to the parent NOTE.
+  ///
+  /// Note: LLM entity extraction is disabled for notes. Only structural
+  /// entities (NOTE, NOTE_CHUNK, DATE) and hub links are created.
   Future<void> indexNoteContent({
     required String noteId,
     required String title,
@@ -1225,101 +1228,6 @@ class GraphRAG {
     final chunks = _splitIntoChunks(content);
     debugPrint(
         '[GraphRAG] Note "$title": ${content.length} chars -> ${chunks.length} chunk(s)');
-
-    // Collect all extracted entity IDs across all chunks (for co-occurrence)
-    final allExtractedEntityIds = <String>[];
-
-    // Process each chunk for entity extraction
-    for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-      final chunkContent = chunks[chunkIndex];
-      final chunkSourceId = '${sourceId}_chunk_$chunkIndex';
-
-      final extraction = await _extractor.extractFromText(
-        chunkContent,
-        sourceId: chunkSourceId,
-        sourceType: 'NOTE',
-      );
-
-      // Add extracted entities
-      for (final entity in extraction.entities) {
-        final embedding = await _embeddingCallback(
-          '${entity.name} ${entity.description ?? ""}',
-        );
-
-        final graphEntity = GraphEntity(
-          id: normalizeId(entity.name, entity.type),
-          name: entity.name,
-          type: entity.type,
-          description: entity.description,
-          embedding: embedding,
-          metadata: {'sourceId': chunkSourceId},
-          lastModified: now,
-        );
-
-        try {
-          await _repository.addEntity(graphEntity);
-        } catch (_) {
-          await _repository.updateEntity(
-            graphEntity.id,
-            name: graphEntity.name,
-            type: graphEntity.type,
-            embedding: embedding,
-            description: graphEntity.description,
-            metadata: graphEntity.metadata,
-            lastModified: now,
-          );
-        }
-
-        allExtractedEntityIds.add(graphEntity.id);
-      }
-
-      // Add extracted relationships
-      for (final rel in extraction.relationships) {
-        final graphRelationship = GraphRelationship(
-          id: '${normalizeId(rel.sourceEntity, '')}_${rel.type.toLowerCase()}_${normalizeId(rel.targetEntity, '')}',
-          sourceId: normalizeId(rel.sourceEntity, ''),
-          targetId: normalizeId(rel.targetEntity, ''),
-          type: rel.type,
-          weight: rel.weight,
-          metadata: {'description': rel.description},
-        );
-
-        try {
-          await _repository.addRelationship(graphRelationship);
-        } catch (_) {}
-      }
-    }
-
-    // Create co-occurrence relationships between entities that don't already
-    // share an explicit relationship. Avoids cluttering the graph with weak
-    // CO_OCCURS_IN edges between entities that are already linked.
-    final uniqueEntityIds = allExtractedEntityIds.toSet().toList();
-    for (var i = 0; i < uniqueEntityIds.length; i++) {
-      for (var j = i + 1; j < uniqueEntityIds.length; j++) {
-        // Check if an explicit relationship already exists between these two
-        final existingRels =
-            await _repository.getRelationships(uniqueEntityIds[i]);
-        final alreadyLinked = existingRels.any(
-          (r) =>
-              (r.targetId == uniqueEntityIds[j] ||
-                  r.sourceId == uniqueEntityIds[j]) &&
-              r.type != 'CO_OCCURS_IN',
-        );
-        if (alreadyLinked) continue;
-
-        final coOccurRel = GraphRelationship(
-          id: '${uniqueEntityIds[i]}_co_occurs_${uniqueEntityIds[j]}',
-          sourceId: uniqueEntityIds[i],
-          targetId: uniqueEntityIds[j],
-          type: 'CO_OCCURS_IN',
-          weight: 0.5,
-          metadata: {'sourceNote': title, 'sourceId': sourceId},
-        );
-        try {
-          await _repository.addRelationship(coOccurRel);
-        } catch (_) {}
-      }
-    }
 
     // --- Create parent NOTE entity ---
     final noteEntityId = normalizeId(title, 'NOTE');
@@ -1518,28 +1426,10 @@ class GraphRAG {
       await _repository.addRelationship(noteHubRel);
     } catch (_) {}
 
-    // Link extracted entities to the note via MENTIONED_IN so the
-    // note node is visually connected to its extracted persons/orgs/etc.
-    for (final entityId in uniqueEntityIds) {
-      final mentionedInRel = GraphRelationship(
-        id: '${entityId}_mentioned_in_$noteEntityId',
-        sourceId: entityId,
-        targetId: noteEntityId,
-        type: 'MENTIONED_IN',
-        weight: 0.8,
-        metadata: {'sourceNote': title},
-      );
-      try {
-        await _repository.addRelationship(mentionedInRel);
-      } catch (_) {}
-    }
+    debugPrint('[GraphRAG] Indexed note "$title": ${chunks.length} chunk(s)');
 
-    debugPrint('[GraphRAG] Indexed note "$title": ${chunks.length} chunk(s), '
-        '${uniqueEntityIds.length} extracted entities');
-
-    // Update communities to include the new note and extracted entities.
-    final newIds = [noteEntityId, ...uniqueEntityIds];
-    await _updateCommunitiesForNewEntities(newIds);
+    // Update communities to include the new note.
+    await _updateCommunitiesForNewEntities([noteEntityId]);
   }
 
   /// Index an alarm created by the user into the knowledge graph.

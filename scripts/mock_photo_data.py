@@ -13,6 +13,7 @@ Requirements:
   - pip install requests (stdlib sqlite3, struct, base64 are used too)
 """
 
+import argparse
 import base64
 import json
 import os
@@ -80,7 +81,36 @@ def embedding_to_blob(embedding: list[float]) -> bytes:
     return struct.pack(f"<{len(embedding)}f", *embedding)
 
 
+def remove_photo_relationships(conn: sqlite3.Connection) -> int:
+    """Delete all PHOTO→PHOTO relationships and return the count of deleted rows."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM relationships "
+        "WHERE source_id LIKE 'photo_%' AND target_id LIKE 'photo_%'"
+    )
+    deleted = cursor.rowcount
+    conn.commit()
+    return deleted
+
+
 def main():
+    parser = argparse.ArgumentParser(
+        description="Mock photo data in graph_rag.db using ollama vision + embedding models."
+    )
+    parser.add_argument(
+        "--no-remove-relationships",
+        action="store_true",
+        default=False,
+        help="Skip removal of PHOTO→PHOTO relationships (removed by default).",
+    )
+    parser.add_argument(
+        "--remove-relationships-only",
+        action="store_true",
+        default=False,
+        help="Only remove PHOTO→PHOTO relationships, skip image processing.",
+    )
+    args = parser.parse_args()
+
     # Verify paths
     if not os.path.exists(DB_PATH):
         print(f"ERROR: Database not found at {DB_PATH}")
@@ -89,6 +119,21 @@ def main():
         print(f"ERROR: Images directory not found at {IMAGES_DIR}")
         sys.exit(1)
 
+    # Connect to DB
+    conn = sqlite3.connect(DB_PATH)
+
+    # Remove PHOTO→PHOTO relationships (unless opted out)
+    if not args.no_remove_relationships:
+        deleted = remove_photo_relationships(conn)
+        print(f"Removed {deleted} PHOTO→PHOTO relationships\n")
+    else:
+        print("Skipping PHOTO→PHOTO relationship removal (--no-remove-relationships)\n")
+
+    if args.remove_relationships_only:
+        conn.close()
+        print("Done (--remove-relationships-only).")
+        return
+
     # Build a lookup: filename -> full path (case-insensitive matching)
     available_images = {}
     for fname in os.listdir(IMAGES_DIR):
@@ -96,8 +141,6 @@ def main():
         if os.path.isfile(full):
             available_images[fname] = full
 
-    # Connect to DB
-    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     # Fetch all PHOTO entities
