@@ -40,6 +40,9 @@ class GraphRAGService {
   GraphRAG? _graphRag;
   bool _isInitialized = false;
   String? _error;
+
+  /// Maximum tokens the model supports (input + output).
+  int _maxTokens = 4096;
   
   // LLM and embedding callbacks
   InferenceChat? _chat;
@@ -122,6 +125,7 @@ class GraphRAGService {
       _embeddingModel = embeddingModel;
       _chatFactory = chatFactory;
       _extractionChatFactory = extractionChatFactory;
+      _maxTokens = maxTokens;
       
       // Get database path
       final directory = await getApplicationDocumentsDirectory();
@@ -319,10 +323,9 @@ class GraphRAGService {
     }
     
     // Truncate prompt if too long
-    // Model has 1024 max tokens total (input + output)
-    // Reserve ~300 tokens for output, allow ~700 tokens for input = ~2800 chars
-    // Being conservative to avoid crashes from model template overhead
-    const maxPromptChars = 2500;
+    // Reserve ~500 tokens for output, use the rest for input.
+    // ~4 chars per token heuristic.
+    final maxPromptChars = (_maxTokens - 500) * 4;
     String truncatedPrompt = prompt;
     if (prompt.length > maxPromptChars) {
       // Smart truncation: try to preserve the question part at the end
