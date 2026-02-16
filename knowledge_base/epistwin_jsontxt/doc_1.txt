@@ -1,0 +1,11 @@
+{
+    "source_app": "documents",
+    "doc": "doc_1”,
+    "metadata": {
+	"path": "Downloads/washing_machine.pdf",
+	"creation_date": “03-Jun-2025",
+	"creation_time": "19:15”,
+	"modified_date": “03-Jun-2025",
+	"modified_time": "19:15”
+    }
+}

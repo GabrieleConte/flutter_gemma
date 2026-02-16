@@ -56,7 +56,7 @@ class GraphRAGQueryConfig {
   GraphRAGQueryConfig({
     this.topK = 6,
     this.maxHops = 2,
-    this.similarityThreshold = 0.3,
+    this.similarityThreshold = 0,
     this.maxContextTokens = 4096,
     this.contextBudgetRatio = 0.9,
     this.communityDropThreshold = 0.7,
@@ -916,33 +916,37 @@ class GraphRAGQueryEngine {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     buf.writeln();
     if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
+      final preview = e.description!;
       buf.writeln('  $preview');
     }
   }
 
-  /// Format DOCUMENT entity: name, type, dates.
+  /// Format DOCUMENT entity: name, type, creation date, path, content preview.
   void _formatDocument(StringBuffer buf, GraphEntity e) {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
-    if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
-      buf.write(' — $preview');
+    final meta = e.metadata;
+    if (meta != null) {
+      final dateStr = _formatDateTimeValue(meta['creationDate']);
+      if (dateStr != null) buf.write(' — created on $dateStr');
+      final path = meta['path']?.toString();
+      if (path != null && path.isNotEmpty) buf.write(' — path: $path');
     }
     buf.writeln();
+    if (e.description != null && e.description!.isNotEmpty) {
+            final preview = e.description!.length > 1000
+          ? '${e.description!.substring(0, 1000)}…'
+          : e.description!;
+      buf.writeln('  $preview');
+    }
+
   }
 
-  /// Format DOCUMENT_CHUNK entity: title (part X/Y) + content preview.
+  /// Format DOCUMENT_CHUNK entity: title (part X/Y) + parent path/date + content preview.
   void _formatDocumentChunk(StringBuffer buf, GraphEntity e) {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     buf.writeln();
     if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
+      final preview = e.description!;
       buf.writeln('  $preview');
     }
   }

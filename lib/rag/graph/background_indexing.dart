@@ -171,6 +171,8 @@ class BackgroundIndexingService {
     required String name,
     required String content,
     String? mimeType,
+    DateTime? creationDate,
+    String? path,
   })? _documentIndexCallback;
   final PlatformService _platform = PlatformService();
 
@@ -245,6 +247,8 @@ class BackgroundIndexingService {
       required String name,
       required String content,
       String? mimeType,
+      DateTime? creationDate,
+      String? path,
     })? documentIndexCallback,
     this.onExtractionPhaseComplete,
     this.onBeforeSummarization,
@@ -602,6 +606,8 @@ class BackgroundIndexingService {
                   name: item.name,
                   content: content,
                   mimeType: item.mimeType,
+                  creationDate: item.createdDate,
+                  path: item.path,
                 );
               } else {
                 assert(() {
