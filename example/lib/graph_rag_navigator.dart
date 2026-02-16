@@ -49,7 +49,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   /// Get available inference models — restricted to gemma3n_2B_litertlm
   /// which supports both text generation and vision (image captioning).
   List<Model> get _availableInferenceModels {
-    return [Model.gemma3n_2B_litertlm, Model.gemma3_1B];
+    return [Model.gemma3n_2B_litertlm];
   }
 
   /// Get available embedding models
