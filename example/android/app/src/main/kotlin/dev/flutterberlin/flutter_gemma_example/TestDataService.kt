@@ -1,6 +1,7 @@
 package dev.flutterberlin.flutter_gemma_example
 
 import android.Manifest
+import android.app.Activity
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -14,6 +15,7 @@ import android.provider.CallLog
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.util.Log
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
@@ -36,7 +38,7 @@ import java.util.*
  *    the knowledge-base files bundled as Flutter assets.
  */
 class TestDataService(
-    private val context: Context,
+    private val activity: Activity,
     flutterEngine: FlutterEngine
 ) : MethodChannel.MethodCallHandler {
 
@@ -46,7 +48,20 @@ class TestDataService(
         private const val GRAPH_DB_NAME = "flutter_gemma_graph.db"
         private const val TIMEZONE = "Europe/Rome"
         private const val REF_DATE = "02-Jun-2025" // anchor for recurrent events
+        private const val PERMISSION_REQUEST_CODE = 9001
+
+        private val WRITE_PERMISSIONS = arrayOf(
+            Manifest.permission.WRITE_CALENDAR,
+            Manifest.permission.READ_CALENDAR,
+            Manifest.permission.WRITE_CONTACTS,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.WRITE_CALL_LOG,
+            Manifest.permission.READ_CALL_LOG
+        )
     }
+
+    // Use activity as context for ContentResolver etc
+    private val context: Context get() = activity
 
     private val channel: MethodChannel = MethodChannel(
         flutterEngine.dartExecutor.binaryMessenger,
@@ -59,8 +74,70 @@ class TestDataService(
     private data class PhotoMeta(val filename: String, val epochSeconds: Long)
     private val photoMetas = mutableListOf<PhotoMeta>()
 
+    // Latch to wait for permission result from background thread
+    private var permissionLatch: java.util.concurrent.CountDownLatch? = null
+    private var permissionsGranted = false
+
     init {
         channel.setMethodCallHandler(this)
+    }
+
+    /**
+     * Called by MainActivity when the permission dialog returns.
+     */
+    fun onPermissionsResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            permissionsGranted = grantResults.isNotEmpty() &&
+                    grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            Log.i(TAG, "Permissions result: granted=$permissionsGranted " +
+                    "(${grantResults.joinToString { if (it == PackageManager.PERMISSION_GRANTED) "GRANTED" else "DENIED" }})")
+            permissionLatch?.countDown()
+        }
+    }
+
+    /**
+     * Ensure WRITE permissions are granted. Blocks the calling (background) thread
+     * until the user responds to the permission dialog.
+     * Returns true if all permissions are granted.
+     */
+    private fun ensureWritePermissions(): Boolean {
+        val missing = WRITE_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            Log.i(TAG, "All WRITE permissions already granted")
+            return true
+        }
+
+        Log.i(TAG, "Requesting missing WRITE permissions: ${missing.joinToString()}")
+        permissionLatch = java.util.concurrent.CountDownLatch(1)
+        permissionsGranted = false
+
+        // Request on main thread (required by Android)
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            ActivityCompat.requestPermissions(
+                activity,
+                missing.toTypedArray(),
+                PERMISSION_REQUEST_CODE
+            )
+        }
+
+        // Block background thread until user responds (max 60 seconds)
+        val received = permissionLatch!!.await(60, java.util.concurrent.TimeUnit.SECONDS)
+        if (!received) {
+            Log.w(TAG, "Permission request timed out after 60s")
+            return false
+        }
+
+        // Double-check all permissions are now granted
+        val stillMissing = WRITE_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (stillMissing.isNotEmpty()) {
+            Log.w(TAG, "Still missing permissions after request: ${stillMissing.joinToString()}")
+            return false
+        }
+        return true
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -124,6 +201,10 @@ class TestDataService(
     // =========================================================================
 
     private fun uploadTestData(): Map<String, Int> {
+        // Ensure WRITE permissions before inserting data
+        if (!ensureWritePermissions()) {
+            Log.e(TAG, "WRITE permissions not granted - data insertion will be incomplete")
+        }
         photoMetas.clear()
 
         // Log permission status for debugging

@@ -352,7 +352,7 @@ class GraphRAGQueryEngine {
     int? topK,
     int? maxHops,
   }) async {
-    final stopwatch = Stopwatch()..start();
+
     final effective = _effectiveConfig(topK: topK, maxHops: maxHops);
     // print("effective.topK: ${effective.topK}");
     // print("effective.maxHops: ${effective.maxHops}");
@@ -361,7 +361,7 @@ class GraphRAGQueryEngine {
 
     // --- Step 1: Embedding similarity search ---
     final queryEmbedding = await embeddingCallback(expandedQuery);
-
+    final stopwatch = Stopwatch()..start();
     final embeddingResults = await repository.searchEntitiesBySimilarity(
       queryEmbedding,
       topK: effective.topK,
@@ -547,7 +547,7 @@ class GraphRAGQueryEngine {
     );
 
     stopwatch.stop();
-
+    print('[GraphRAGQueryEngine] Query execution took ${stopwatch.elapsedMilliseconds}ms');
     return GraphRAGQueryResult(
       entities: budgetResult.entities,
       relationships: contextRelationships,
