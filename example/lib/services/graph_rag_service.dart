@@ -160,7 +160,7 @@ class GraphRAGService {
         databasePath: dbPath,
         queryConfig: GraphRAGQueryConfig(
           maxContextTokens: maxTokens,
-          similarityThreshold: 0.4
+          similarityThreshold: 0
         ),
         indexingConfig: IndexingConfig(
           enableImageCaptioning: enableImageCaptioning && visionChat != null,
@@ -765,6 +765,8 @@ class GraphRAGService {
             name: doc.name,
             content: content,
             mimeType: doc.mimeType,
+            creationDate: doc.createdDate,
+            path: doc.path,
           );
         } else {
           debugPrint('[GraphRAGService] Skipping empty document: ${doc.name}');

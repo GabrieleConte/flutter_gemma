@@ -1235,6 +1235,13 @@ class SystemDataConnector(
                         }
                     }
 
+                    // Use the earlier of dateAdded vs dateModified as the
+                    // creation date.  MediaStore sets DATE_ADDED to the time
+                    // the file was first indexed ("now"), whereas DATE_MODIFIED
+                    // reflects the file-system mtime (which `touch -t` sets
+                    // to the real creation date for pushed test data).
+                    val effectiveCreatedDate = minOf(dateAdded, dateModified)
+
                     results.add(DocumentResult(
                         id = docId.toString(),
                         name = name,
@@ -1242,7 +1249,7 @@ class SystemDataConnector(
                         documentType = docType,
                         mimeType = mimeType,
                         fileSize = size,
-                        createdDate = dateAdded,
+                        createdDate = effectiveCreatedDate,
                         modifiedDate = dateModified,
                         textPreview = textPreview
                     ))

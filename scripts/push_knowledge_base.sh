@@ -135,7 +135,12 @@ echo "🧹 Cleaning up previous RUVA data on device..."
 # 1. Remove old images & documents
 adb_cmd shell "rm -rf '$DEST_IMAGES'/*" 2>/dev/null || true
 adb_cmd shell "rm -rf '$DEST_DOCS'/*" 2>/dev/null || true
-echo "   ✅ Old files removed from device."
+
+# 1b. Clean up the Downloads folder (remove all files pushed by previous runs)
+adb_cmd shell "rm -rf /sdcard/Download/*" 2>/dev/null || true
+adb_cmd shell "content delete --uri content://media/external/file \
+    --where \"_data LIKE '/sdcard/Download/%'\"" > /dev/null 2>&1 || true
+echo "   ✅ Old files removed from device (including Downloads)."
 
 # 2. Delete MediaStore entries for the old files so stale records don't linger
 adb_cmd shell "content delete --uri content://media/external/images/media \
@@ -308,11 +313,54 @@ echo "   ✅ $IMAGE_COUNT image(s) pushed."
 echo ""
 echo "📄 Pushing documents to $DEST_DOCS ..."
 DOC_COUNT=0
+
+# Helper: find the doc JSON metadata file matching a document filename.
+# Searches doc_*.txt files for a matching path ending with the given filename.
+find_doc_json() {
+    local doc_basename="$1"
+    for f in "$KB_JSON"/doc_*.txt; do
+        [ -f "$f" ] || continue
+        local path_val
+        path_val=$(json_field "$f" "metadata.path" 2>/dev/null || true)
+        if [ -n "$path_val" ]; then
+            local path_basename
+            path_basename="$(basename "$path_val")"
+            if [ "$path_basename" = "$doc_basename" ]; then
+                echo "$f"
+                return
+            fi
+        fi
+    done
+}
+
+# Collect document basenames and their correct epoch timestamps for MediaStore update
+declare -a DOC_BASENAMES=()
+declare -a DOC_EPOCHS=()
+
 for doc in "$KB_DOCS"/*.pdf "$KB_DOCS"/*.PDF "$KB_DOCS"/*.txt "$KB_DOCS"/*.docx; do
     [ -f "$doc" ] || continue
     BASENAME="$(basename "$doc")"
     echo "   -> $BASENAME"
     adb_cmd push "$doc" "$DEST_DOCS/$BASENAME" > /dev/null
+
+    # Look up the creation date from the corresponding JSON metadata file
+    JSON_FILE=$(find_doc_json "$BASENAME")
+    if [ -n "$JSON_FILE" ]; then
+        CREATION_DATE=$(json_field "$JSON_FILE" "metadata.creation_date")
+        CREATION_TIME=$(json_field "$JSON_FILE" "metadata.creation_time")
+        TOUCH_TS=$(to_touch_ts "$CREATION_DATE" "$CREATION_TIME")
+        EPOCH_SEC=$(to_epoch_sec "$CREATION_DATE" "$CREATION_TIME")
+
+        # Set the file modification time on the device so MediaScanner picks it up
+        adb_cmd shell "touch -t $TOUCH_TS '$DEST_DOCS/$BASENAME'" 2>/dev/null || true
+
+        DOC_BASENAMES+=("$BASENAME")
+        DOC_EPOCHS+=("$EPOCH_SEC")
+        echo "      📅 date set to $CREATION_DATE $CREATION_TIME"
+    else
+        echo "      ⚠️  no metadata file found, keeping push timestamp"
+    fi
+
     DOC_COUNT=$((DOC_COUNT + 1))
 done
 echo "   ✅ $DOC_COUNT document(s) pushed."
@@ -383,6 +431,28 @@ for i in "${!IMAGE_BASENAMES[@]}"; do
     FIXED_COUNT=$((FIXED_COUNT + 1))
 done
 echo "   ✅ $FIXED_COUNT photo date(s) fixed in MediaStore."
+
+# ---------- Fix document dates in MediaStore ----------
+echo ""
+echo "📅 Updating document dates in MediaStore..."
+# Wait for the media scanner to finish indexing documents
+sleep 2
+
+DOC_FIXED_COUNT=0
+for i in "${!DOC_BASENAMES[@]}"; do
+    BNAME="${DOC_BASENAMES[$i]}"
+    EPOCH="${DOC_EPOCHS[$i]}"
+
+    # Update date_added and date_modified in MediaStore (values in seconds)
+    adb_cmd shell "content update --uri content://media/external/file \
+        --bind date_added:i:$EPOCH \
+        --bind date_modified:i:$EPOCH \
+        --where \"_display_name='$BNAME'\"" > /dev/null 2>&1 || true
+
+    echo "   -> $BNAME → epoch $EPOCH"
+    DOC_FIXED_COUNT=$((DOC_FIXED_COUNT + 1))
+done
+echo "   ✅ $DOC_FIXED_COUNT document date(s) fixed in MediaStore."
 
 # ==========================================================================
 #  PART 2 — Insert structured data via Android content providers

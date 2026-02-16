@@ -1,0 +1,11 @@
+{
+    "source_app": "documents",
+    "doc": "doc_9”,
+    "metadata": {
+	"path": "Downloads/Flight_Milan.pdf",
+	"creation_date": “01-Sep-2025",
+	"creation_time": "10:00",
+	"modified_date": “01-Sep-2025",
+	"modified_time": "10:00"
+    }
+}
