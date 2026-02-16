@@ -56,7 +56,7 @@ class GraphRAGQueryConfig {
   GraphRAGQueryConfig({
     this.topK = 6,
     this.maxHops = 2,
-    this.similarityThreshold = 0.3,
+    this.similarityThreshold = 0,
     this.maxContextTokens = 4096,
     this.contextBudgetRatio = 0.9,
     this.communityDropThreshold = 0.7,
@@ -909,9 +909,7 @@ class GraphRAGQueryEngine {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     buf.writeln();
     if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
+      final preview = e.description!;
       buf.writeln('  $preview');
     }
   }
@@ -920,9 +918,7 @@ class GraphRAGQueryEngine {
   void _formatDocument(StringBuffer buf, GraphEntity e) {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
+      final preview = e.description!;
       buf.write(' — $preview');
     }
     buf.writeln();
@@ -933,9 +929,7 @@ class GraphRAGQueryEngine {
     buf.write('${e.name} (${_entityTypeLabel(e.type)})');
     buf.writeln();
     if (e.description != null && e.description!.isNotEmpty) {
-      final preview = e.description!.length > 200
-          ? '${e.description!.substring(0, 200)}…'
-          : e.description!;
+      final preview = e.description!;
       buf.writeln('  $preview');
     }
   }
