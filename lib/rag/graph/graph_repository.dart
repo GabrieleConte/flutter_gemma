@@ -458,7 +458,7 @@ class NativeGraphRepository implements GraphRepository {
   @override
   Future<List<ScoredEntity>> searchEntitiesBySimilarity(
     List<double> queryEmbedding, {
-    int topK = 10,
+    int topK = 6,
     double threshold = 0.0,
     String? entityType,
   }) async {
@@ -477,7 +477,7 @@ class NativeGraphRepository implements GraphRepository {
   @override
   Future<List<ScoredCommunity>> searchCommunitiesBySimilarity(
     List<double> queryEmbedding, {
-    int topK = 10,
+    int topK = 6,
     int? level,
   }) async {
     _checkInitialized();
