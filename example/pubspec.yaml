@@ -65,6 +65,10 @@ flutter:
   assets:
     - assets/
     - assets/models/
+    - assets/test_data/
+    - assets/test_data/jsontxt/
+    - assets/test_data/images/
+    - assets/test_data/docs/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware

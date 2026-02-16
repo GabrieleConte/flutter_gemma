@@ -1,0 +1,12 @@
+{
+    "source_app": "calendar",
+    "event": "recurrentEvent_2”,
+    "reurrence_type": "recurrent",
+    "metadata": {
+	"label": "Work",
+        "start_time": "09:00",
+	"end_time": "18:00",
+        "repeat_frequency": "weekly",
+        "on": "Monday, Tuesday, Wednesday, Thursday, Friday"
+    }
+}

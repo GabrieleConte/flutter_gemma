@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250617”,
+	"metadata": {
+		"path": "Downloads/photo_20250617.jpg",
+		"creation_date": “17-Jun-2025",
+		"creation_time": “11:00",
+		"location": Camp Nou, Les Corts,  Barcelona, Spagna
+	}
+}

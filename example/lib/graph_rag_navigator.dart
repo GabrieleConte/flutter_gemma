@@ -11,6 +11,7 @@ import 'package:flutter_gemma_example/models/embedding_model.dart'
 import 'package:flutter_gemma_example/graph_rag_index_screen.dart';
 import 'package:flutter_gemma_example/graph_rag_chat_screen.dart';
 import 'package:flutter_gemma_example/notes_management_screen.dart';
+import 'package:flutter_gemma_example/services/test_data_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Navigator that checks model installation and provides tab navigation
@@ -35,6 +36,10 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   bool _isInitializing = false;
   String? _initError;
   String _statusMessage = 'Checking models...';
+
+  // Test data button states
+  bool _isResettingGraph = false;
+  bool _isUploadingTestData = false;
 
   // User-selected models
   late Model _selectedInferenceModel;
@@ -384,6 +389,166 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Test Data Handlers
+  // ---------------------------------------------------------------------------
+
+  Future<void> _handleResetTestGraph() async {
+    if (_isResettingGraph) return;
+    setState(() {
+      _isResettingGraph = true;
+      _initError = null;
+    });
+
+    try {
+      // 1. Close only the graph store (models stay alive)
+      debugPrint('[GraphRAGNavigator] Closing graph store for DB reset...');
+      await _service.closeGraph();
+
+      // 2. Replace the DB file with the bundled test snapshot
+      debugPrint('[GraphRAGNavigator] Replacing DB file...');
+      await TestDataService.resetTestGraph();
+
+      // 3. Reopen the graph store on the new file
+      debugPrint('[GraphRAGNavigator] Reopening graph store...');
+      await _service.reopenGraph();
+
+      debugPrint('[GraphRAGNavigator] Graph reset complete ✅');
+      _showSnackBar('Test graph restored successfully!');
+    } catch (e, stack) {
+      debugPrint('[GraphRAGNavigator] Reset failed: $e\n$stack');
+      setState(() => _initError = 'Reset failed: $e');
+      _showSnackBar('Reset failed: $e', isError: true);
+    } finally {
+      setState(() => _isResettingGraph = false);
+    }
+  }
+
+  Future<void> _handleUploadTestData() async {
+    if (_isUploadingTestData) return;
+    setState(() {
+      _isUploadingTestData = true;
+      _initError = null;
+    });
+
+    try {
+      debugPrint('[GraphRAGNavigator] Uploading test data...');
+      final counts = await TestDataService.uploadTestData();
+
+      final summary = [
+        if ((counts['images'] ?? 0) > 0) '${counts['images']} images',
+        if ((counts['documents'] ?? 0) > 0) '${counts['documents']} docs',
+        if ((counts['events'] ?? 0) > 0) '${counts['events']} events',
+        if ((counts['recurrentEvents'] ?? 0) > 0)
+          '${counts['recurrentEvents']} recurring',
+        if ((counts['contacts'] ?? 0) > 0) '${counts['contacts']} contacts',
+        if ((counts['calls'] ?? 0) > 0) '${counts['calls']} calls',
+      ].join(', ');
+
+      debugPrint('[GraphRAGNavigator] Upload complete: $summary');
+      _showSnackBar('Test data uploaded: $summary');
+    } catch (e, stack) {
+      debugPrint('[GraphRAGNavigator] Upload failed: $e\n$stack');
+      setState(() => _initError = 'Upload failed: $e');
+      _showSnackBar('Upload failed: $e', isError: true);
+    } finally {
+      setState(() => _isUploadingTestData = false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Test Data Section UI (used inside Settings tab)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildTestDataSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1a3a5c),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.science, color: Colors.orange, size: 22),
+              SizedBox(width: 8),
+              Text(
+                'Test Data',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Load pre-built test data for development and evaluation.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+
+          // --- Reset test graph button ---
+          ElevatedButton.icon(
+            onPressed: (_isResettingGraph || !_service.isInitialized)
+                ? null
+                : _handleResetTestGraph,
+            icon: _isResettingGraph
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.restore),
+            label: Text(_isResettingGraph
+                ? 'Resetting...'
+                : 'Reset test graph'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepOrange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Replaces the current graph database with a pre-built test snapshot.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+
+          const SizedBox(height: 16),
+
+          // --- Upload test data button ---
+          ElevatedButton.icon(
+            onPressed: _isUploadingTestData ? null : _handleUploadTestData,
+            icon: _isUploadingTestData
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.upload_file),
+            label: Text(_isUploadingTestData
+                ? 'Uploading...'
+                : 'Upload test data'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Pushes images, documents, calendar events, contacts, and call log '
+            'entries into the device for the indexing pipeline to discover.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Settings tab that allows changing models after initialization
   Widget _buildSettingsTab() {
     return SingleChildScrollView(
@@ -419,6 +584,8 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           ),
           const SizedBox(height: 24),
           _buildModelSelectionContent(),
+          const SizedBox(height: 32),
+          _buildTestDataSection(),
         ],
       ),
     );

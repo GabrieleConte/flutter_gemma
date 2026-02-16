@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250729”,
+	"metadata": {
+		"path": "Downloads/photo_20250729.jpg",
+		"creation_date": “29-Jul-2025",
+		"creation_time": “23:00",
+		"location": Rome Fiumicino "Leonardo da Vinci" International Airport, Via dell'Aeroporto di Fiumicino, Fiumicino, Italy
+	}
+}

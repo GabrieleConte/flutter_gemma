@@ -936,6 +936,29 @@ class GraphRAGService {
     _error = null;
     debugPrint('[GraphRAGService] Disposed');
   }
+
+  /// Close only the graph store (keeps LLM and embedding models alive).
+  ///
+  /// Use this together with [reopenGraph] to replace the underlying database
+  /// file without recreating the expensive inference models.
+  Future<void> closeGraph() async {
+    _checkInitialized();
+    await _graphRag!.close();
+    debugPrint('[GraphRAGService] Graph store closed (models still alive)');
+  }
+
+  /// Re-open the graph store after [closeGraph] (e.g. after DB file swap).
+  ///
+  /// This re-creates the native graph repository, connectors, extractors,
+  /// query engine, and indexing service — but reuses the existing LLM and
+  /// embedding model instances.
+  Future<void> reopenGraph() async {
+    if (_graphRag == null) {
+      throw StateError('GraphRAGService: _graphRag is null, cannot reopen');
+    }
+    await _graphRag!.initialize();
+    debugPrint('[GraphRAGService] Graph store reopened');
+  }
   
   void _checkInitialized() {
     if (!_isInitialized || _graphRag == null) {

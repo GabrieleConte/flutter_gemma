@@ -1,0 +1,12 @@
+{
+    "source_app": "calendar",
+    "event": "recurrentEvent_1”,
+    "reurrence_type": "recurrent",
+    "metadata": {
+	"label": “Gym”,
+        "start_time": "07:00",
+	"end_time": “08:30",
+        "repeat_frequency": "weekly",
+        "on": "Monday, Wednesday, Friday"
+    }
+}

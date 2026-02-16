@@ -1,0 +1,10 @@
+{
+	"source_app": "photos",
+	"photo": "photo_20250615(2)”,
+	"metadata": {
+		"path": "Downloads/photo_20250615(2).jpg",
+		"creation_date": “15-Jun-2025",
+		"creation_time": “20:00",
+		"location": Plaça Rosa Del Vents 1, Final, Pg. de Joan de Borbó, Barcelona, Spain
+	}
+}

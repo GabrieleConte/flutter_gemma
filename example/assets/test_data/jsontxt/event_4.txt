@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_4”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Arrival paris",
+	"date": “29-Jul-2025",
+        "start_time": “21:00",
+	"end_time": “23:00"
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_11”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Call Sarah Green”,
+	"date": “31-Aug-2025",
+        "start_time": “19:00",
+	"end_time": “19:30"
+    }
+}

@@ -1,0 +1,12 @@
+{
+    "source_app": "phone",
+    "call": "phoneCall_6”,
+    "metadata": {
+        "date": “30-Aug-2025",
+        "start_time": “13:00:40”,
+        "end_time": “13:35:50”,
+        "duration": "0h, 35min, 10sec",
+        "call_direction": “outgoing”,
+        "with_contact": “LucasSmith_888”
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_9”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Job meeting”,
+	"date": “29-Aug-2025",
+        "start_time": “14:00",
+	"end_time": “18:00"
+    }
+}

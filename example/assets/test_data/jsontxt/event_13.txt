@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_13”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": “Graduation John's girlfriend”,
+	"date": “14-Sep-2025",
+        "start_time": “11:00",
+	"end_time": “18:00"
+    }
+}

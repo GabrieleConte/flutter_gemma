@@ -57,3 +57,5 @@ knowledge_base/*.db
 
 # Native libraries (downloaded at build time)
 **/jniLibs/
+/scripts/.*
+!/example/assets/test_data/*

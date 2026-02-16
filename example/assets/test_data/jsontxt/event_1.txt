@@ -1,0 +1,11 @@
+{
+    "source_app": "calendar",
+    "event": "event_1”,
+    "reurrence_type": "single-occurrence",
+    "metadata": {
+	"label": "Visit Casa Batllo",
+	"date": "14-Jun-2025",
+        "start_time": "12:00",
+	"end_time": "13:00"
+    }
+}
