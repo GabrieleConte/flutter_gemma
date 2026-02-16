@@ -61,7 +61,7 @@ class GraphRAGQueryConfig {
     this.contextBudgetRatio = 0.9,
     this.communityDropThreshold = 0.7,
     this.includeCommunityContext = false,
-    this.personalEntityBoost = 1.15,
+    this.personalEntityBoost = 1.35,
     Set<String>? hubEntityTypes,
   }) : hubEntityTypes = hubEntityTypes ?? defaultHubEntityTypes;
 }
@@ -354,7 +354,8 @@ class GraphRAGQueryEngine {
   }) async {
     final stopwatch = Stopwatch()..start();
     final effective = _effectiveConfig(topK: topK, maxHops: maxHops);
-
+    // print("effective.topK: ${effective.topK}");
+    // print("effective.maxHops: ${effective.maxHops}");
     // --- Step 0: Temporal query expansion ---
     final (expandedQuery, resolvedDates) = _expandTemporalQuery(query);
 
@@ -414,35 +415,15 @@ class GraphRAGQueryEngine {
         depth: effective.maxHops,
       );
 
-      // Collect direct neighbors and pass-through HUB neighbors
-      final hubIds = <String>[];
+      // Skip all HUB ids
       for (final neighbor in neighbors) {
         if (seedEntities.containsKey(neighbor.id)) continue;
-        if (effective.hubEntityTypes.contains(neighbor.type)) {
-          // HUB node: remember for pass-through expansion
-          hubIds.add(neighbor.id);
-          continue;
-        }
+        if (effective.hubEntityTypes.contains(neighbor.type)) continue;
+
         neighborIdSet.add(neighbor.id);
         neighborEntities[neighbor.id] = neighbor;
       }
-
-      // Pass-through: expand HUB neighbors one more hop to reach
-      // entities on the other side of the hub (e.g. hub_notes → note_X)
-      for (final hubId in hubIds) {
-        final hubNeighbors = await repository.getEntityNeighbors(
-          hubId,
-          depth: 1,
-        );
-        for (final hn in hubNeighbors) {
-          if (seedEntities.containsKey(hn.id)) continue;
-          if (effective.hubEntityTypes.contains(hn.type)) continue;
-          if (hn.id == seed.entity.id) continue; // skip back-link
-          neighborIdSet.add(hn.id);
-          neighborEntities[hn.id] = hn;
-        }
       }
-    }
 
     // Batch-fetch embeddings for all hop candidates and compute similarity
     final hopEntities = <String, GraphRAGScoredEntity>{};
@@ -516,6 +497,14 @@ class GraphRAGQueryEngine {
     // --- Step 2.6: Filter out DOCUMENT_CHUNK when personal entities dominate ---
     // If the majority of top-scored entities are personal types, discard
     // DOCUMENT_CHUNK / DOCUMENT entities to avoid context pollution.
+    // for (final e in seedEntities.values) {
+    //   print(
+    //       "Seed entity: ${e.entity.name} (${e.entity.type}), score: ${e.score}, source: ${e.source}");
+    // }
+    // for (final e in hopEntities.values) {
+    //   print(
+    //       "Hop entity: ${e.entity.name} (${e.entity.type}), score: ${e.score}, source: ${e.source}");
+    // }
     _filterDocumentChunksIfPersonalDominates(seedEntities, hopEntities);
 
     final seedCount = seedEntities.length;
@@ -1331,37 +1320,18 @@ class GraphRAGQueryEngine {
     final dayOfWeek = _dayNames[now.weekday - 1];
 
     return '''You are a helpful personal assistant. The user's personal knowledge graph has been searched and the most relevant information is provided below.
-Today is $dayOfWeek, $todayStr.
-
+Today is $dayOfWeek, $todayStr. If a question involves time, reason based on this date and understand if the provided dates in the context are in the past or present.
 The context includes entities (people, events, photos, notes, calls, locations, documents) and the relationships connecting them (shown as "→ relationship → target").
 
 Instructions:
 - Answer based ONLY on the context provided. Do not use external knowledge.
 - Be specific: use names, dates, and details from the entities.
 - Use the relationships to connect information (e.g., who attended an event, where a photo was taken, when a call happened).
-- If dates in the context are close to the dates mentioned in the question, use them.
 - Make reasonable inferences from the available data rather than refusing.
-- Use today's date to resolve relative time references like "yesterday", "last week", "last Friday". Check if entity dates match the referenced time period.
 - Call direction: [outgoing] means YOU (the user) called the person. [incoming] means the person called YOU.
-- Be conversational and concise.
 - The context may include irrelevant information; focus on what's relevant to the question.
-
-Examples:
-
-Q: "Who called me yesterday?"
-Today is Wednesday, March 5, 2026.
-Context: Call with Alice (Phone Call) [incoming] — March 4, 2026 at 14:30, 5m 12s
-A: Alice called you yesterday (March 4) at 14:30. The call lasted about 5 minutes.
-
-Q: "Did I call Lucas last week?"
-Today is Sunday, February 15, 2026.
-Context: Call with Lucas Smith (Phone Call) [outgoing] — February 10, 2026 at 09:00, 12m 30s
-A: Yes, you called Lucas Smith on Monday, February 10 at 09:00. The call lasted about 12 minutes. Since the call was outgoing, you initiated it.
-
-Q: "How did I feel last Friday?"
-Today is Sunday, February 15, 2026.
-Context: Mood 3 (Note) — created August 29, 2025 — TODAY I FEEL TIRED AND STRESSED
-A: I don't have a mood entry for last Friday (February 13, 2026). The closest mood note is from August 29, 2025, where you wrote that you felt tired and stressed, but that was months ago, not last Friday.''';
+- FOCUS on the provided dates in the context for temporal reasoning, rather than making assumptions based on the current date. For example, if the context mentions an event on "June 14, 2025" and the question is "What events are coming up?", consider that event as upcoming even if today's date is after June 14, 2025.
+''';
   }
 
   /// Build the full prompt for answer generation.
