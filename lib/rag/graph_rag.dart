@@ -83,11 +83,11 @@ class GraphRAG {
   /// Callback to prepare main LLM before summarization (can reallocate if needed)
   final Future<void> Function()? _onBeforeSummarization;
 
-  late final NativeGraphRepository _repository;
-  late final ConnectorManager _connectorManager;
-  late final EntityExtractor _extractor;
-  late final GraphRAGQueryEngine _queryEngine;
-  late final BackgroundIndexingService _indexingService;
+  late NativeGraphRepository _repository;
+  late ConnectorManager _connectorManager;
+  late EntityExtractor _extractor;
+  late GraphRAGQueryEngine _queryEngine;
+  late BackgroundIndexingService _indexingService;
 
   /// Cache manager for model caching (5-10x faster reloads)
   late final ModelCacheManager _cacheManager;

@@ -1,8 +1,10 @@
 package dev.flutterberlin.flutter_gemma_example
 
+import android.Manifest
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -12,6 +14,7 @@ import android.provider.CallLog
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.util.Log
+import androidx.core.content.ContextCompat
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -122,6 +125,9 @@ class TestDataService(
 
     private fun uploadTestData(): Map<String, Int> {
         photoMetas.clear()
+
+        // Log permission status for debugging
+        logPermissionStatus()
 
         // Discover asset files
         val jsonDir = flutterLoader.getLookupKeyForAsset("assets/test_data/jsontxt")
@@ -685,6 +691,22 @@ class TestDataService(
     // Helper Methods
     // =========================================================================
 
+    private fun logPermissionStatus() {
+        val perms = mapOf(
+            "WRITE_CALENDAR" to Manifest.permission.WRITE_CALENDAR,
+            "WRITE_CONTACTS" to Manifest.permission.WRITE_CONTACTS,
+            "WRITE_CALL_LOG" to Manifest.permission.WRITE_CALL_LOG,
+            "READ_CALENDAR" to Manifest.permission.READ_CALENDAR,
+            "READ_CONTACTS" to Manifest.permission.READ_CONTACTS,
+            "READ_CALL_LOG" to Manifest.permission.READ_CALL_LOG,
+        )
+        for ((name, perm) in perms) {
+            val granted = ContextCompat.checkSelfPermission(context, perm) ==
+                    PackageManager.PERMISSION_GRANTED
+            Log.i(TAG, "Permission $name: ${if (granted) "GRANTED" else "DENIED"}")
+        }
+    }
+
     private fun findRuvaRawContactIds(): List<Long> {
         val ids = mutableListOf<Long>()
         val cursor = context.contentResolver.query(
@@ -716,12 +738,37 @@ class TestDataService(
     }
 
     private fun readJsonAsset(assetPath: String): JSONObject {
-        val text = context.assets.open(assetPath).bufferedReader().use { it.readText() }
-        // Clean up common JSON issues (smart quotes)
-        val cleaned = text
+        var text = context.assets.open(assetPath).bufferedReader().use { it.readText() }
+
+        // 1. Replace Unicode smart quotes with standard ASCII quotes
+        text = text
             .replace('\u201c', '"').replace('\u201d', '"')
             .replace('\u2018', '\'').replace('\u2019', '\'')
-        return JSONObject(cleaned)
+
+        // 2. Fix unquoted values (e.g. "location": Florida Street , Rome , Italy)
+        //    Matches key-value lines where the value is not properly quoted.
+        val unquotedValueRegex = Regex(
+            """^(\s*"[^"]+"\s*:\s*)([^"{}'\[\]0-9tfn\s][^\n]*)$""",
+            RegexOption.MULTILINE
+        )
+        text = unquotedValueRegex.replace(text) { match ->
+            val prefix = match.groupValues[1]
+            var rawValue = match.groupValues[2].trimEnd()
+            val hasComma = rawValue.endsWith(",")
+            if (hasComma) rawValue = rawValue.dropLast(1).trimEnd()
+            // Escape embedded double quotes
+            rawValue = rawValue.replace("\"", "\\\"")
+            "$prefix\"$rawValue\"${if (hasComma) "," else ""}"
+        }
+
+        // 3. Fix missing closing braces (some files are malformed)
+        val openBraces = text.count { it == '{' }
+        val closeBraces = text.count { it == '}' }
+        if (openBraces > closeBraces) {
+            text += "}".repeat(openBraces - closeBraces)
+        }
+
+        return JSONObject(text)
     }
 
     /**

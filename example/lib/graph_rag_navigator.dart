@@ -432,6 +432,14 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
     });
 
     try {
+      debugPrint('[GraphRAGNavigator] Requesting permissions for test data upload...');
+      try {
+        await _service.requestPermissions();
+      } catch (e) {
+        debugPrint('[GraphRAGNavigator] Permission request warning: $e');
+        // Continue anyway — some permissions may already be granted
+      }
+
       debugPrint('[GraphRAGNavigator] Uploading test data...');
       final counts = await TestDataService.uploadTestData();
 
