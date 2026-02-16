@@ -54,7 +54,7 @@ class GraphRAGQueryConfig {
   };
 
   GraphRAGQueryConfig({
-    this.topK = 10,
+    this.topK = 6,
     this.maxHops = 2,
     this.similarityThreshold = 0.3,
     this.maxContextTokens = 4096,
@@ -1335,10 +1335,12 @@ Instructions:
 - Answer based ONLY on the context provided. Do not use external knowledge.
 - Be specific: use names, dates, and details from the entities.
 - Use the relationships to connect information (e.g., who attended an event, where a photo was taken, when a call happened).
-- If dates in the context are close to the dates mentioned in the question, use them. Make reasonable inferences from the available data rather than refusing.
+- If dates in the context are close to the dates mentioned in the question, use them.
+- Make reasonable inferences from the available data rather than refusing.
 - Use today's date to resolve relative time references like "yesterday", "last week", "last Friday". Check if entity dates match the referenced time period.
 - Call direction: [outgoing] means YOU (the user) called the person. [incoming] means the person called YOU.
 - Be conversational and concise.
+- The context may include irrelevant information; focus on what's relevant to the question.
 
 Examples:
 

@@ -613,7 +613,7 @@ class GraphRAGService {
   /// Search entities by similarity
   Future<List<ScoredEntity>> searchEntities(
     String query, {
-    int topK = 10,
+    int topK = 6,
     String? entityType,
   }) async {
     _checkInitialized();
