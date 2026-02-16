@@ -286,12 +286,16 @@ class GraphRAG {
         required String name,
         required String content,
         String? mimeType,
+        DateTime? creationDate,
+        String? path,
       }) =>
           indexDocumentContent(
         documentId: documentId,
         name: name,
         content: content,
         mimeType: mimeType,
+        creationDate: creationDate,
+        path: path,
       ),
       onExtractionPhaseComplete: _onExtractionPhaseComplete,
       onBeforeSummarization: _onBeforeSummarization,
@@ -852,6 +856,8 @@ class GraphRAG {
     required String name,
     required String content,
     String? mimeType,
+    DateTime? creationDate,
+    String? path,
   }) async {
     _checkInitialized();
 
@@ -893,6 +899,9 @@ class GraphRAG {
         'documentId': documentId,
         'chunkCount': chunks.length,
         'totalLength': content.length,
+        if (creationDate != null)
+          'creationDate': creationDate.millisecondsSinceEpoch,
+        if (path != null) 'path': path,
       },
       lastModified: now,
     );
@@ -1033,6 +1042,44 @@ class GraphRAG {
     try {
       await _repository.addRelationship(docHubRel);
     } catch (_) {}
+
+    // --- Create DATE entity and CREATED_ON relationship ---
+    if (creationDate != null) {
+      final dateStr =
+          '${creationDate.year}-${creationDate.month.toString().padLeft(2, '0')}-${creationDate.day.toString().padLeft(2, '0')}';
+      final dateEntityId = normalizeId(dateStr, 'DATE');
+
+      // Create or update DATE entity
+      final existingDate = await _repository.getEntity(dateEntityId);
+      if (existingDate == null) {
+        final dateEmbedding = await _embeddingCallback(dateStr);
+        final dateEntity = GraphEntity(
+          id: dateEntityId,
+          name: dateStr,
+          type: 'DATE',
+          description: null,
+          embedding: dateEmbedding,
+          metadata: {},
+          lastModified: now,
+        );
+        try {
+          await _repository.addEntity(dateEntity);
+        } catch (_) {}
+      }
+
+      // CREATED_ON: document -> date
+      final createdOnRel = GraphRelationship(
+        id: '${docEntityId}_CREATED_ON_$dateEntityId',
+        sourceId: docEntityId,
+        targetId: dateEntityId,
+        type: 'CREATED_ON',
+        weight: 1.0,
+        metadata: {},
+      );
+      try {
+        await _repository.addRelationship(createdOnRel);
+      } catch (_) {}
+    }
 
     debugPrint(
         '[GraphRAG] Indexed document "$name": ${chunks.length} chunk(s)');

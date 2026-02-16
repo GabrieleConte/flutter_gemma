@@ -765,6 +765,8 @@ class GraphRAGService {
             name: doc.name,
             content: content,
             mimeType: doc.mimeType,
+            creationDate: doc.createdDate,
+            path: doc.path,
           );
         } else {
           debugPrint('[GraphRAGService] Skipping empty document: ${doc.name}');
