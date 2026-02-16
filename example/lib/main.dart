@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
-import 'package:flutter_gemma_example/home_screen.dart';
+import 'package:flutter_gemma_example/graph_rag_navigator.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +21,7 @@ class ChatApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Gemma Example',
+      title: 'RUVA',
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         textTheme: const TextTheme(
@@ -30,7 +30,10 @@ class ChatApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.dark,
-      home: const SafeArea(child: HomeScreen()),
+      home: const PopScope(
+        canPop: false,
+        child: SafeArea(child: GraphRAGNavigator()),
+      ),
     );
   }
 }
