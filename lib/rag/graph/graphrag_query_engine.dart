@@ -1242,7 +1242,7 @@ class GraphRAGQueryEngine {
     String contextString = buf.toString();
 
     // Phase 3 safety: hard-cap the context string length
-    final maxChars = tokenBudget * 4; // inverse of token estimate (assuming ~3 chars per token)
+    final maxChars = tokenBudget * 3; // inverse of token estimate (assuming ~3 chars per token)
     if (contextString.length > maxChars) {
       contextString = '${contextString.substring(0, maxChars)}…';
     }
