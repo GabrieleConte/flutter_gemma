@@ -573,8 +573,8 @@ class GraphRAGQueryEngine {
   // ---------------------------------------------------------------------------
 
   /// Estimate number of tokens for a text string.
-  /// Uses ~4 characters per token heuristic (matches codebase convention).
-  int _estimateTokens(String text) => (text.length / 4).ceil();
+  /// Uses ~4.5 characters per token heuristic (matches codebase convention).
+  int _estimateTokens(String text) => (text.length / 3.5).ceil();
 
   /// Fetch relationships between retrieved entities, filtering out noise.
   ///
