@@ -58,7 +58,7 @@ class GraphRAGQueryConfig {
     this.maxHops = 2,
     this.similarityThreshold = 0,
     this.maxContextTokens = 4096,
-    this.contextBudgetRatio = 0.9,
+    this.contextBudgetRatio = 0.85,
     this.communityDropThreshold = 0.7,
     this.includeCommunityContext = false,
     this.personalEntityBoost = 1.35,
@@ -574,7 +574,7 @@ class GraphRAGQueryEngine {
 
   /// Estimate number of tokens for a text string.
   /// Uses ~4.5 characters per token heuristic (matches codebase convention).
-  int _estimateTokens(String text) => (text.length / 3.5).ceil();
+  int _estimateTokens(String text) => (text.length / 3).ceil();
 
   /// Fetch relationships between retrieved entities, filtering out noise.
   ///
@@ -1242,7 +1242,7 @@ class GraphRAGQueryEngine {
     String contextString = buf.toString();
 
     // Phase 3 safety: hard-cap the context string length
-    final maxChars = tokenBudget * 4; // inverse of token estimate
+    final maxChars = tokenBudget * 4; // inverse of token estimate (assuming ~3 chars per token)
     if (contextString.length > maxChars) {
       contextString = '${contextString.substring(0, maxChars)}…';
     }
