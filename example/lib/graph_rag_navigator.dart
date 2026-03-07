@@ -44,7 +44,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   /// Get available inference models — restricted to gemma3n_2B_litertlm
   /// which supports both text generation and vision (image captioning).
   List<Model> get _availableInferenceModels {
-    return [Model.gemma3n_2B_litertlm, Model.gemma3_1B];
+    return [Model.gemma3n_2B_litertlm, Model.qwen35_0_8B, Model.qwen3_4B_thinking];
   }
 
   /// Get available embedding models
@@ -184,11 +184,14 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         debugPrint('[GraphRAGNavigator] Model loaded with CPU (image captioning disabled)');
       }
         */
-      const gpuAvailable = false; // Force CPU for now since vision encoder is not fully stable yet
-      debugPrint('[GraphRAGNavigator] Creating native model (CPU backend)...');
+      // Vision is enabled for models that declare supportImage (e.g. Qwen3.5 0.8B works on CPU)
+      final supportsVision = _selectedInferenceModel.supportImage;
+      debugPrint('[GraphRAGNavigator] Creating native model (CPU backend, vision=$supportsVision)...');
       final model = await FlutterGemma.getActiveModel(
           maxTokens: _selectedInferenceModel.maxTokens,
           preferredBackend: PreferredBackend.cpu,
+          supportImage: supportsVision,
+          maxNumImages: supportsVision ? (_selectedInferenceModel.maxNumImages ?? 1) : null,
       );
       debugPrint('[GraphRAGNavigator] Native model created successfully');
 
@@ -211,21 +214,22 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         ...LinkValidationTools.all,
       ];
       final extractionChat = await model.createChat(
-        temperature: 0.0,
+        temperature: _selectedInferenceModel.temperature,
         randomSeed: 1,
         topK: _selectedInferenceModel.topK,
         supportsFunctionCalls: true,
         tools: extractionTools,
+        supportImage: supportsVision,
         modelType: _selectedInferenceModel.modelType,
       );
       debugPrint('[GraphRAGNavigator] Extraction chat created with ${extractionTools.length} tools');
 
-      // Vision chat only if GPU is available (vision encoder requires GPU)
+      // Vision chat for models that support image input (e.g. Qwen3.5 0.8B on CPU)
       InferenceChat? visionChat;
-      if (gpuAvailable && _selectedInferenceModel.supportImage) {
+      if (supportsVision) {
         setState(() => _statusMessage = 'Creating vision chat for image captioning...');
         visionChat = await model.createChat(
-          temperature: 0.3,
+          temperature: _selectedInferenceModel.temperature,
           randomSeed: 1,
           topK: _selectedInferenceModel.topK,
           supportImage: true,
@@ -233,7 +237,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         );
         debugPrint('[GraphRAGNavigator] Vision chat created for image captioning');
       } else {
-        debugPrint('[GraphRAGNavigator] Vision chat skipped (GPU not available or model does not support images)');
+        debugPrint('[GraphRAGNavigator] Vision chat skipped (model does not support images)');
       }
 
       setState(() => _statusMessage = 'Loading embedding model...');
@@ -284,7 +288,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
           preferredBackend: PreferredBackend.cpu,
         );
         final freshChat = await freshModel.createChat(
-          temperature: 0.0,
+          temperature: _selectedInferenceModel.temperature,
           randomSeed: 1,
           topK: _selectedInferenceModel.topK,
           supportsFunctionCalls: true,

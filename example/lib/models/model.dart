@@ -127,6 +127,23 @@ enum Model implements InferenceModelInterface {
     supportsFunctionCalls: true,
   ),
 
+    qwen35_0_8B(
+    baseUrl:
+        'https://huggingface.co/g-ntovas/Qwen3.5-0.8B-LiteRT/resolve/main/qwen35_mm_q8_ekv2048.litertlm',
+    filename: 'qwen35_mm_q8_ekv2048.litertlm',
+    displayName: 'Qwen3.5 0.8B (LiteRT-LM)',
+    size: '1.2GB',
+    licenseUrl: 'https://huggingface.co/g-ntovas/Qwen3.5-0.8B-LiteRT',
+    needsAuth: false,
+    preferredBackend: PreferredBackend.cpu,
+    modelType: ModelType.qwen,
+    temperature: 1.0,
+    topK: 20,
+    topP: 0.95,
+    maxTokens: 2048,
+    supportsFunctionCalls: true,
+  ),
+
   // Gemma 3 Nano E4B LiteRT-LM (same model, different engine)
   gemma3n_4B_litertlm(
     baseUrl:
@@ -233,6 +250,24 @@ enum Model implements InferenceModelInterface {
     topK: 40,
     topP: 0.7,
     supportsFunctionCalls: true,
+    isThinking: true,
+  ),
+
+  // Qwen3 4B Thinking (MediaPipe .task — same <think> format as DeepSeek)
+  qwen3_4B_thinking(
+    baseUrl:
+        'https://huggingface.co/harithoppil/qwen3-4b-thinking-litert/resolve/main/qwen3_thinking_4b_q4_block128_ekv2048.task',
+    filename: 'qwen3_thinking_4b_q4_block128_ekv2048.task',
+    displayName: 'Qwen3 4B Thinking',
+    size: '2.0GB',
+    licenseUrl: 'https://huggingface.co/harithoppil/qwen3-4b-thinking-litert',
+    needsAuth: false,
+    preferredBackend: PreferredBackend.gpu,
+    modelType: ModelType.qwen,
+    temperature: 0.7,
+    topK: 40,
+    topP: 0.95,
+    maxTokens: 2048,
     isThinking: true,
   ),
 

@@ -181,9 +181,10 @@ class ModelThinkingFilter {
   static Stream<ModelResponse> filterThinkingStream(Stream<ModelResponse> originalStream,
       {required ModelType modelType}) async* {
     switch (modelType) {
+      case ModelType.qwen: // Qwen3-Thinking uses same <think>...</think> format
       case ModelType.deepSeek:
-        // Apply DeepSeek thinking filtration
-        // DeepSeek starts with thinking content, ends with </think>
+        // Apply thinking filtration (<think>...</think> blocks)
+        // DeepSeek/Qwen3-Thinking start with thinking content, end with </think>
         bool insideThinking = true;
         StringBuffer thinkingBuffer = StringBuffer();
 
@@ -232,7 +233,6 @@ class ModelThinkingFilter {
 
       case ModelType.general:
       case ModelType.gemmaIt:
-      case ModelType.qwen:
       case ModelType.llama:
       case ModelType.hammer:
       case ModelType.functionGemma:
@@ -247,14 +247,14 @@ class ModelThinkingFilter {
   /// Only supports DeepSeek (<think>...</think>) models
   static String removeThinkingFromText(String text, {required ModelType modelType}) {
     switch (modelType) {
+      case ModelType.qwen: // Qwen3-Thinking uses same <think>...</think> format
       case ModelType.deepSeek:
-        // Remove all <think>...</think> blocks (DeepSeek specific)
+        // Remove all <think>...</think> blocks
         RegExp thinkingRegex = RegExp(r'<think>.*?</think>', dotAll: true);
         return text.replaceAll(thinkingRegex, '').trim();
 
       case ModelType.general:
       case ModelType.gemmaIt:
-      case ModelType.qwen:
       case ModelType.llama:
       case ModelType.hammer:
       case ModelType.functionGemma:

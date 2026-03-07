@@ -55,11 +55,12 @@ class LiteRtLmEngine(
         }
 
         // Map PreferredBackend to LiteRT-LM Backend
+        // Note: alpha06 changed Backend from singleton objects to instantiable classes
         val backend = when (config.preferredBackend) {
-            PreferredBackend.GPU -> Backend.GPU
-            PreferredBackend.NPU -> Backend.NPU // LiteRT-LM supports NPU (Google Tensor, Qualcomm)
+            PreferredBackend.GPU -> Backend.GPU()
+            PreferredBackend.NPU -> Backend.NPU() // LiteRT-LM supports NPU (Google Tensor, Qualcomm)
             PreferredBackend.CPU,
-            null -> Backend.CPU
+            null -> Backend.CPU()
         }
 
         try {
