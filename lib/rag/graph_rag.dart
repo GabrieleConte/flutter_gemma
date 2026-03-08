@@ -83,6 +83,14 @@ class GraphRAG {
   /// Callback to prepare main LLM before summarization (can reallocate if needed)
   final Future<void> Function()? _onBeforeSummarization;
 
+  /// Callback invoked once before the photo/vision batch is processed.
+  /// Allows callers to swap in a dedicated vision model (e.g. FastVLM).
+  final Future<void> Function()? _onBeforeVisionPhase;
+
+  /// Callback invoked once after all photo/vision items have been processed.
+  /// Allows callers to close the vision model and restore the main text model.
+  final Future<void> Function()? _onAfterVisionPhase;
+
   late final NativeGraphRepository _repository;
   late final ConnectorManager _connectorManager;
   late final EntityExtractor _extractor;
@@ -114,6 +122,8 @@ class GraphRAG {
         extractionLlmCallback,
     Future<void> Function()? onExtractionPhaseComplete,
     Future<void> Function()? onBeforeSummarization,
+    Future<void> Function()? onBeforeVisionPhase,
+    Future<void> Function()? onAfterVisionPhase,
     DeviceCapabilityDetector? deviceDetector,
     ModelCacheManager? cacheManager,
   })  : _config = config,
@@ -123,7 +133,9 @@ class GraphRAG {
         _visionLlmCallback = visionLlmCallback,
         _extractionLlmCallback = extractionLlmCallback,
         _onExtractionPhaseComplete = onExtractionPhaseComplete,
-        _onBeforeSummarization = onBeforeSummarization {
+        _onBeforeSummarization = onBeforeSummarization,
+        _onBeforeVisionPhase = onBeforeVisionPhase,
+        _onAfterVisionPhase = onAfterVisionPhase {
     // Initialize capability detector (can be mocked for testing)
     _deviceDetector = deviceDetector ?? DeviceCapabilityDetector();
 
@@ -299,6 +311,8 @@ class GraphRAG {
       ),
       onExtractionPhaseComplete: _onExtractionPhaseComplete,
       onBeforeSummarization: _onBeforeSummarization,
+      onBeforeVisionPhase: _onBeforeVisionPhase,
+      onAfterVisionPhase: _onAfterVisionPhase,
       config: _config.indexingConfig,
     );
 
@@ -1737,6 +1751,8 @@ class GraphRAGFactory {
         extractionLlmCallback,
     Future<void> Function()? onExtractionPhaseComplete,
     Future<void> Function()? onBeforeSummarization,
+    Future<void> Function()? onBeforeVisionPhase,
+    Future<void> Function()? onAfterVisionPhase,
   }) {
     return GraphRAG(
       config: config,
@@ -1747,6 +1763,8 @@ class GraphRAGFactory {
       extractionLlmCallback: extractionLlmCallback,
       onExtractionPhaseComplete: onExtractionPhaseComplete,
       onBeforeSummarization: onBeforeSummarization,
+      onBeforeVisionPhase: onBeforeVisionPhase,
+      onAfterVisionPhase: onAfterVisionPhase,
     );
   }
 }

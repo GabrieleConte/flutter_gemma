@@ -207,6 +207,7 @@ class GraphRAGQueryEngine {
       contextBudgetRatio: config.contextBudgetRatio,
       communityDropThreshold: config.communityDropThreshold,
       includeCommunityContext: config.includeCommunityContext,
+      personalEntityBoost: config.personalEntityBoost,
       hubEntityTypes: config.hubEntityTypes,
     );
   }

@@ -32,6 +32,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   bool _checkingModels = true;
   bool _inferenceModelReady = false;
   bool _embeddingModelReady = false;
+  bool _visionModelReady = false;
   bool _isInitializing = false;
   String? _initError;
   String _statusMessage = 'Checking models...';
@@ -40,6 +41,12 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
   late Model _selectedInferenceModel;
   late app_models.EmbeddingModel _selectedEmbeddingModel;
   String _token = '';
+
+  /// Holds the Gemma3n E2B vision model from the previous visionModelFactory() call.
+  /// Closed at the start of the NEXT call to force a fresh native Engine each
+  /// photo — LiteRT-LM 0.9.x corrupts memory when reusing the same Engine
+  /// across multiple Conversation create/destroy cycles.
+  InferenceModel? _prevVisionModel;
 
   /// Get available inference models — restricted to gemma3n_2B_litertlm
   /// which supports both text generation and vision (image captioning).
@@ -116,14 +123,20 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         _selectedEmbeddingModel.filename,
       );
 
+      // Check if Qwen3.5-0.8B mm is installed (vision captioning, CPU-compatible)
+      final visionInstalled = await FlutterGemma.isModelInstalled(
+        Model.qwen35_0_8B.filename,
+      );
+
       setState(() {
         _inferenceModelReady = inferenceInstalled;
         _embeddingModelReady = embeddingInstalled;
+        _visionModelReady = visionInstalled;
         _checkingModels = false;
       });
 
       // If all models are ready, auto-initialize
-      if (inferenceInstalled && embeddingInstalled) {
+      if (inferenceInstalled && embeddingInstalled && visionInstalled) {
         await _initializeWithExistingModels();
       }
     } catch (e) {
@@ -184,14 +197,13 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         debugPrint('[GraphRAGNavigator] Model loaded with CPU (image captioning disabled)');
       }
         */
-      // Vision is enabled for models that declare supportImage (e.g. Qwen3.5 0.8B works on CPU)
-      final supportsVision = _selectedInferenceModel.supportImage;
-      debugPrint('[GraphRAGNavigator] Creating native model (CPU backend, vision=$supportsVision)...');
+      // Main inference model is text-only; vision captioning is handled separately
+      // by visionModelFactory (uses qwen35_0_8B which is CPU-compatible).
+      // Do NOT pass supportImage here — vision encoder backend constraints vary per model.
+      debugPrint('[GraphRAGNavigator] Creating native model (CPU backend, text-only)...');
       final model = await FlutterGemma.getActiveModel(
           maxTokens: _selectedInferenceModel.maxTokens,
           preferredBackend: PreferredBackend.cpu,
-          supportImage: supportsVision,
-          maxNumImages: supportsVision ? (_selectedInferenceModel.maxNumImages ?? 1) : null,
       );
       debugPrint('[GraphRAGNavigator] Native model created successfully');
 
@@ -219,26 +231,11 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         topK: _selectedInferenceModel.topK,
         supportsFunctionCalls: true,
         tools: extractionTools,
-        supportImage: supportsVision,
         modelType: _selectedInferenceModel.modelType,
       );
       debugPrint('[GraphRAGNavigator] Extraction chat created with ${extractionTools.length} tools');
-
-      // Vision chat for models that support image input (e.g. Qwen3.5 0.8B on CPU)
-      InferenceChat? visionChat;
-      if (supportsVision) {
-        setState(() => _statusMessage = 'Creating vision chat for image captioning...');
-        visionChat = await model.createChat(
-          temperature: _selectedInferenceModel.temperature,
-          randomSeed: 1,
-          topK: _selectedInferenceModel.topK,
-          supportImage: true,
-          modelType: _selectedInferenceModel.modelType,
-        );
-        debugPrint('[GraphRAGNavigator] Vision chat created for image captioning');
-      } else {
-        debugPrint('[GraphRAGNavigator] Vision chat skipped (model does not support images)');
-      }
+      // Vision captioning is always handled by the dedicated FastVLM model.
+      // We do NOT create a vision chat from the main model here.
 
       setState(() => _statusMessage = 'Loading embedding model...');
 
@@ -256,55 +253,158 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         preferredBackend: PreferredBackend.cpu,
       );
 
+      // ──────────────────────────────────────────────────────────────────────
+      // Install Qwen3.5-0.8B mm as the vision-captioning model.
+      // It is swapped in only during the photo-processing phase of indexing,
+      // then swapped back out to keep the main inference model active.
+      // Qwen3.5-0.8B mm vision encoder has no GPU backend constraint → CPU ok.
+      // ──────────────────────────────────────────────────────────────────────
+      setState(() => _statusMessage = 'Installing Qwen3.5-0.8B vision model...');
+      await FlutterGemma.installModel(
+        modelType: Model.qwen35_0_8B.modelType,
+        fileType: Model.qwen35_0_8B.fileType,
+      ).fromNetwork(Model.qwen35_0_8B.url).install();
+      setState(() {
+        _visionModelReady = true;
+      });
+      debugPrint('[GraphRAGNavigator] Qwen3.5-0.8B vision model installed ✅');
+
+      // Re-activate main inference model spec so factories produce chats from it.
+      if (_selectedInferenceModel.localModel) {
+        await FlutterGemma.installModel(
+          modelType: _selectedInferenceModel.modelType,
+          fileType: _selectedInferenceModel.fileType,
+        ).fromAsset(_selectedInferenceModel.url).install();
+      } else {
+        final token = _selectedInferenceModel.needsAuth && _token.isNotEmpty ? _token : null;
+        await FlutterGemma.installModel(
+          modelType: _selectedInferenceModel.modelType,
+          fileType: _selectedInferenceModel.fileType,
+        ).fromNetwork(_selectedInferenceModel.url, token: token).install();
+      }
+      debugPrint('[GraphRAGNavigator] Main model spec reactivated after vision model install ✅');
+
       setState(() => _statusMessage = 'Initializing GraphRAG...');
 
-      // Initialize service — enable image captioning only if vision chat is available
-      final enableCaptioning = visionChat != null;
-      
-      // Provide a factory that can recreate the model+chat from scratch
-      // if the native model/session goes stale ("Model is closed").
+      // ──────────────────────────────────────────────────────────────────────
+      // Closures provided to GraphRAGService:
+      //
+      // chatFactory           — recreates main chat if session goes stale
+      // extractionChatFactory — recreates extraction chat on demand
+      // visionModelFactory    — installs Gemma3n E2B as active spec and returns
+      //                         a vision-capable InferenceChat
+      // reactivateMainModel   — reinstalls main model as active spec after
+      //                         vision captioning finishes
+      // ──────────────────────────────────────────────────────────────────────
+
+      // Capture mutable model references so closures don't capture stale this
+      final capturedSelectedModel = _selectedInferenceModel;
+      final capturedToken = _token;
+
       Future<InferenceChat> chatFactory() async {
         debugPrint('[GraphRAGNavigator] chatFactory: recreating model + chat...');
         final freshModel = await FlutterGemma.getActiveModel(
-          maxTokens: _selectedInferenceModel.maxTokens,
+          maxTokens: capturedSelectedModel.maxTokens,
           preferredBackend: PreferredBackend.cpu,
         );
         final freshChat = await freshModel.createChat(
-          temperature: _selectedInferenceModel.temperature,
+          temperature: capturedSelectedModel.temperature,
           randomSeed: 1,
-          topK: _selectedInferenceModel.topK,
-          modelType: _selectedInferenceModel.modelType,
+          topK: capturedSelectedModel.topK,
+          modelType: capturedSelectedModel.modelType,
         );
         debugPrint('[GraphRAGNavigator] chatFactory: model + chat recreated ✅');
         return freshChat;
       }
-      
-      // Factory to recreate the extraction chat on demand (e.g. after indexing
-      // pipeline released it, but user then adds a note/document/alarm).
+
       Future<InferenceChat> extractionChatFactory() async {
         debugPrint('[GraphRAGNavigator] extractionChatFactory: recreating extraction chat...');
         final freshModel = await FlutterGemma.getActiveModel(
-          maxTokens: _selectedInferenceModel.maxTokens,
+          maxTokens: capturedSelectedModel.maxTokens,
           preferredBackend: PreferredBackend.cpu,
         );
         final freshChat = await freshModel.createChat(
-          temperature: _selectedInferenceModel.temperature,
+          temperature: capturedSelectedModel.temperature,
           randomSeed: 1,
-          topK: _selectedInferenceModel.topK,
+          topK: capturedSelectedModel.topK,
           supportsFunctionCalls: true,
           tools: extractionTools,
-          modelType: _selectedInferenceModel.modelType,
+          modelType: capturedSelectedModel.modelType,
         );
         debugPrint('[GraphRAGNavigator] extractionChatFactory: extraction chat recreated ✅');
         return freshChat;
       }
-      
+
+      /// Installs Qwen35 0.8B as the active model and returns a vision chat.
+      Future<InferenceChat> visionModelFactory() async {
+        // Close the previous model first to release the native engine.
+        // LiteRT-LM 0.9.x crashes (SIGSEGV) when the same Engine handle is
+        // reused for more than ~2 Conversation create/destroy cycles.
+        final modelToClose = _prevVisionModel;
+        _prevVisionModel = null;
+        if (modelToClose != null) {
+          try {
+            await modelToClose.close();
+          } catch (e) {
+            debugPrint('[GraphRAGNavigator] Warning: error closing previous vision model: $e');
+          }
+        }
+
+        debugPrint('[GraphRAGNavigator] visionModelFactory: installing Qwen35 0.8B...');
+        await FlutterGemma.installModel(
+          modelType: Model.qwen35_0_8B.modelType,
+          fileType: Model.qwen35_0_8B.fileType,
+        ).fromNetwork(Model.qwen35_0_8B.url).install();
+        final visionModel = await FlutterGemma.getActiveModel(
+          maxTokens: Model.qwen35_0_8B.maxTokens,
+          // GPU is avoided: Backend.GPU() for vision (visionBackend in LiteRtLmEngine)
+          // fails to lock the soft_tokens tensor buffer on emulators and many
+          // real devices on LiteRT-LM 0.9.x. CPU is reliable across all hardware.
+          // CPU is used: Qwen3.5-0.8B mm vision encoder has no GPU backend
+          // constraint so it runs on CPU reliably across all hardware.
+          preferredBackend: PreferredBackend.cpu,
+          supportImage: true,
+          maxNumImages: Model.qwen35_0_8B.maxNumImages,
+        );
+        _prevVisionModel = visionModel; // remember for cleanup on next call
+        final visionChat = await visionModel.createChat(
+          temperature: Model.qwen35_0_8B.temperature,
+          randomSeed: 1,
+          topK: Model.qwen35_0_8B.topK,
+          supportImage: true,
+          modelType: Model.qwen35_0_8B.modelType,
+        );
+        debugPrint('[GraphRAGNavigator] visionModelFactory: Qwen35 0.8B vision chat ready ✅');
+        return visionChat;
+      }
+
+      /// Reinstalls the main inference model as the active spec so subsequent
+      /// chatFactory / extractionChatFactory calls use the correct model.
+      Future<void> reactivateMainModel() async {
+        debugPrint('[GraphRAGNavigator] reactivateMainModel: reinstalling main model spec...');
+        final token = capturedSelectedModel.needsAuth && capturedToken.isNotEmpty
+            ? capturedToken
+            : null;
+        if (capturedSelectedModel.localModel) {
+          await FlutterGemma.installModel(
+            modelType: capturedSelectedModel.modelType,
+            fileType: capturedSelectedModel.fileType,
+          ).fromAsset(capturedSelectedModel.url).install();
+        } else {
+          await FlutterGemma.installModel(
+            modelType: capturedSelectedModel.modelType,
+            fileType: capturedSelectedModel.fileType,
+          ).fromNetwork(capturedSelectedModel.url, token: token).install();
+        }
+        debugPrint('[GraphRAGNavigator] reactivateMainModel: main model spec restored ✅');
+      }
+
       await _service.initialize(
         chat: chat,
         embeddingModel: embeddingModel,
         extractionChat: extractionChat,
-        visionChat: visionChat,
-        enableImageCaptioning: enableCaptioning,
+        visionModelFactory: visionModelFactory,
+        reactivateMainModelCallback: reactivateMainModel,
         chatFactory: chatFactory,
         extractionChatFactory: extractionChatFactory,
         maxTokens: _selectedInferenceModel.maxTokens,
@@ -315,8 +415,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         _statusMessage = '';
       });
 
-      final modeLabel = enableCaptioning ? 'with image captioning' : 'text-only (no GPU)';
-      _showSnackBar('GraphRAG ready $modeLabel! 🎉');
+      _showSnackBar('GraphRAG ready');
     } catch (e, stackTrace) {
       debugPrint('[GraphRAGNavigator] Initialization failed: $e\n$stackTrace');
       setState(() {
@@ -546,7 +645,7 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
         ] else ...[
           // Action button
           Center(
-            child: _inferenceModelReady && _embeddingModelReady
+            child: _inferenceModelReady && _embeddingModelReady && _visionModelReady
                 ? ElevatedButton.icon(
                     onPressed: _initializeWithExistingModels,
                     icon: const Icon(Icons.play_arrow),
@@ -560,9 +659,9 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
                 : ElevatedButton.icon(
                     onPressed: _downloadAndInitialize,
                     icon: const Icon(Icons.download),
-                    label: Text(!_inferenceModelReady && !_embeddingModelReady
+                    label: Text(!_inferenceModelReady || !_embeddingModelReady || !_visionModelReady
                         ? 'Download & Initialize'
-                        : 'Download Missing & Initialize'),
+                        : 'Initialize GraphRAG'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 24, vertical: 12),
@@ -582,9 +681,13 @@ class _GraphRAGNavigatorState extends State<GraphRAGNavigator>
     final embeddingInstalled = await FlutterGemma.isModelInstalled(
       _selectedEmbeddingModel.filename,
     );
+    final visionInstalled = await FlutterGemma.isModelInstalled(
+      Model.qwen35_0_8B.filename,
+    );
     setState(() {
       _inferenceModelReady = inferenceInstalled;
       _embeddingModelReady = embeddingInstalled;
+      _visionModelReady = visionInstalled;
     });
   }
 

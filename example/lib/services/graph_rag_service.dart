@@ -47,7 +47,6 @@ class GraphRAGService {
   // LLM and embedding callbacks
   InferenceChat? _chat;
   InferenceChat? _extractionChat;
-  InferenceChat? _visionChat;
   EmbeddingModel? _embeddingModel;
   
   /// Factory callback to recreate the main chat when the underlying model/session
@@ -59,6 +58,16 @@ class GraphRAGService {
   /// Used when the extraction chat was released after the indexing pipeline
   /// completed but the user then adds a note, document, or alarm.
   Future<InferenceChat> Function()? _extractionChatFactory;
+
+  /// Factory that installs FastVLM, creates an InferenceModel with vision support,
+  /// and returns an InferenceChat ready for image captioning.
+  /// Called once per photo (fresh session each time) — see [_generateVisionResponse].
+  Future<InferenceChat> Function()? _visionModelFactory;
+
+  /// Callback that reinstalls the main inference model as the active model.
+  /// After calling this, [_chatFactory] and [_extractionChatFactory] will
+  /// correctly create chats from the main model rather than FastVLM.
+  Future<void> Function()? _reactivateMainModelCallback;
   
   /// Mutex that serializes every LLM call through the single native session.
   final _AsyncMutex _llmLock = _AsyncMutex();
@@ -96,7 +105,14 @@ class GraphRAGService {
   /// [extractionChat] - Optional chat model for entity extraction with tool support.
   ///                    If provided and supportsFunctionCalls is true, enables
   ///                    structured function calling for entity extraction.
-  /// [visionChat] - Optional vision-capable chat for image captioning.
+  /// [visionModelFactory] - Optional factory that installs FastVLM and returns a
+  ///                        vision-capable InferenceChat.  When provided, image
+  ///                        captioning is always enabled via FastVLM regardless of
+  ///                        whether the main inference model supports images.
+  ///                        Called once before the photo-processing phase.
+  /// [reactivateMainModelCallback] - Optional callback to reinstall the main model
+  ///                                 as active after FastVLM finishes captioning.
+  ///                                 Should be provided together with [visionModelFactory].
   /// [chatFactory] - Factory callback to recreate the main chat if the underlying
   ///                 model/session becomes stale ("Model is closed").  If null,
   ///                 stale-model errors will propagate as-is.
@@ -106,8 +122,8 @@ class GraphRAGService {
     required InferenceChat chat,
     required EmbeddingModel embeddingModel,
     InferenceChat? extractionChat,
-    InferenceChat? visionChat,
-    bool enableImageCaptioning = false,
+    Future<InferenceChat> Function()? visionModelFactory,
+    Future<void> Function()? reactivateMainModelCallback,
     Future<InferenceChat> Function()? chatFactory,
     Future<InferenceChat> Function()? extractionChatFactory,
     int maxTokens = 4096,
@@ -121,22 +137,23 @@ class GraphRAGService {
       debugPrint('[GraphRAGService] Initializing...');
       _chat = chat;
       _extractionChat = extractionChat;
-      _visionChat = visionChat;
       _embeddingModel = embeddingModel;
       _chatFactory = chatFactory;
       _extractionChatFactory = extractionChatFactory;
+      _visionModelFactory = visionModelFactory;
+      _reactivateMainModelCallback = reactivateMainModelCallback;
       _maxTokens = maxTokens;
       
       // Get database path
       final directory = await getApplicationDocumentsDirectory();
       final dbPath = '${directory.path}/graph_rag.db';
       debugPrint('[GraphRAGService] Database path: $dbPath');
-      
-      // Determine vision callback based on whether vision chat is provided
-      Future<String> Function(String, Uint8List)? visionCallback;
-      if (visionChat != null && enableImageCaptioning) {
-        visionCallback = _generateVisionResponse;
-        debugPrint('[GraphRAGService] Vision LLM enabled for image captioning');
+
+      // Image captioning is enabled whenever a visionModelFactory is provided.
+      // FastVLM is swapped in/out via onBeforeVisionPhase/onAfterVisionPhase.
+      final enableImageCaptioning = visionModelFactory != null;
+      if (enableImageCaptioning) {
+        debugPrint('[GraphRAGService] Image captioning enabled via FastVLM (dedicated vision model)');
       }
       
       // Determine extraction callback for structured function calling
@@ -163,7 +180,7 @@ class GraphRAGService {
           similarityThreshold: 0
         ),
         indexingConfig: IndexingConfig(
-          enableImageCaptioning: enableImageCaptioning && visionChat != null,
+          enableImageCaptioning: enableImageCaptioning,
           calendarNameFilter: {'RUVA'},
         ),
         extendedConfig: GraphRAGExtendedConfig(
@@ -180,10 +197,12 @@ class GraphRAGService {
         platform: PlatformService(),
         llmCallback: _generateLLMResponse,
         embeddingCallback: _generateEmbedding,
-        visionLlmCallback: visionCallback,
+        visionLlmCallback: enableImageCaptioning ? _generateVisionResponse : null,
         extractionLlmCallback: extractionCallback,
         onExtractionPhaseComplete: _handleExtractionPhaseComplete,
         onBeforeSummarization: _handleBeforeSummarization,
+        onBeforeVisionPhase: enableImageCaptioning ? _handleBeforeVisionPhase : null,
+        onAfterVisionPhase: enableImageCaptioning ? _handleAfterVisionPhase : null,
       );
       
       await _graphRag!.initialize();
@@ -244,33 +263,114 @@ class GraphRAGService {
     }
   }
   
-  /// Generate vision LLM response using the vision chat model
+  /// Called just before the photo-processing batch.
+  /// Warms up FastVLM by calling the factory once (installs spec + verifies the
+  /// model loads).  The resulting chat is closed immediately because
+  /// [_generateVisionResponse] creates its own fresh chat per photo.
+  Future<void> _handleBeforeVisionPhase() async {
+    if (_visionModelFactory == null) return;
+    debugPrint('[GraphRAGService] Before vision phase: warming up FastVLM...');
+    try {
+      final warmup = await _visionModelFactory!();
+      // Close the warmup session so the model slot is free for the first photo.
+      try {
+        await warmup.session.close();
+      } catch (_) {}
+      debugPrint('[GraphRAGService] FastVLM warmed up ✅');
+    } catch (e, stack) {
+      debugPrint('[GraphRAGService] Failed to warm up FastVLM: $e');
+      debugPrint('[GraphRAGService] Stack: $stack');
+      // Do not rethrow — captioning will be skipped gracefully for this batch.
+    }
+  }
+
+  /// Called just after the photo-processing batch.
+  /// Reinstalls the main model and recreates main/extraction chats.
+  Future<void> _handleAfterVisionPhase() async {
+    debugPrint('[GraphRAGService] After vision phase: restoring main model...');
+
+    // Reinstall main model as the active spec so the factories create chats from it.
+    if (_reactivateMainModelCallback != null) {
+      try {
+        await _reactivateMainModelCallback!();
+        debugPrint('[GraphRAGService] Main model spec reactivated ✅');
+      } catch (e) {
+        debugPrint('[GraphRAGService] Warning: could not reactivate main model: $e');
+      }
+    }
+
+    // Recreate main chat from factory.
+    if (_chatFactory != null) {
+      try {
+        _chat = await _chatFactory!();
+        debugPrint('[GraphRAGService] Main chat restored ✅');
+      } catch (e) {
+        debugPrint('[GraphRAGService] Warning: could not restore main chat: $e');
+      }
+    }
+
+    // Recreate extraction chat from factory if available.
+    if (_extractionChatFactory != null) {
+      try {
+        _extractionChat = await _extractionChatFactory!();
+        debugPrint('[GraphRAGService] Extraction chat restored ✅');
+      } catch (e) {
+        debugPrint('[GraphRAGService] Warning: could not restore extraction chat: $e');
+      }
+    }
+  }
+
+  /// Generate vision LLM response using the vision chat model.
+  /// A fresh vision chat is created for every call via [_visionModelFactory] and
+  /// its native session is closed immediately after the response is received.
+  ///
+  /// Why per-call creation?
+  /// - The vision model (FastVLM) and the extraction/main models share the same
+  ///   single native session slot in FlutterGemmaPlugin.
+  /// - Reusing [_visionChat] across photos leaves _createCompleter set on the
+  ///   shared model instance, so the subsequent chatFactory() call for
+  ///   extraction inherits the vision Conversation (with image history and
+  ///   large message sizes), causing garbage extraction output.
+  /// - Closing the session after each caption resets the model's session slot so
+  ///   chatFactory() always gets a clean, text-only Conversation.
   Future<String> _generateVisionResponse(String prompt, Uint8List imageBytes) async {
-    if (_visionChat == null) {
-      throw StateError('Vision chat model not initialized');
+    if (_visionModelFactory == null) {
+      throw StateError('Vision chat model not initialized and no visionModelFactory provided');
     }
-    
+
     debugPrint('[GraphRAGService] Generating vision response for prompt (${prompt.length} chars)');
-    
-    // Clear history before each call
-    await _visionChat!.clearHistory();
-    
-    // Add query with image
-    await _visionChat!.addQuery(Message.withImage(
-      text: prompt,
-      imageBytes: imageBytes,
-      isUser: true,
-    ));
-    
-    final response = await _visionChat!.generateChatResponse();
-    
-    String responseText = '';
-    if (response is TextResponse) {
-      responseText = response.token;
+
+    // Always create a fresh vision chat so we start from a clean Conversation.
+    final visionChat = await _visionModelFactory!();
+    try {
+      // Add query with image
+      await visionChat.addQuery(Message.withImage(
+        text: prompt,
+        imageBytes: imageBytes,
+        isUser: true,
+      ));
+
+      final response = await visionChat.generateChatResponse();
+
+      String responseText = '';
+      if (response is TextResponse) {
+        responseText = response.token;
+      }
+
+      debugPrint('[GraphRAGService] Vision response: ${responseText.substring(0, responseText.length.clamp(0, 100))}...');
+      return responseText;
+    } finally {
+      // Close the vision session immediately so the model's _createCompleter is
+      // nulled out.  Without this, chatFactory() would call
+      // visionModel.createSession() which returns the cached vision session
+      // (still open, with image Conversation history) instead of creating a
+      // fresh text-only session for entity extraction.
+      try {
+        await visionChat.session.close();
+      } catch (e) {
+        debugPrint('[GraphRAGService] Warning: error closing vision session: $e');
+      }
     }
-    
-    debugPrint('[GraphRAGService] Vision response: ${responseText.substring(0, responseText.length.clamp(0, 100))}...');
-    return responseText;
   }
   
   /// Generate extraction LLM response with tool support for structured entity extraction.
@@ -930,10 +1030,11 @@ class GraphRAGService {
     }
     _chat = null;
     _extractionChat = null;
-    _visionChat = null;
     _embeddingModel = null;
     _chatFactory = null;
     _extractionChatFactory = null;
+    _visionModelFactory = null;
+    _reactivateMainModelCallback = null;
     _isInitialized = false;
     _error = null;
     debugPrint('[GraphRAGService] Disposed');

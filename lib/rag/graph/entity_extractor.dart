@@ -416,14 +416,7 @@ Unified Summary:''';
     final context =
         contextInfo.isNotEmpty ? '\n\nContext information:\n$contextInfo' : '';
 
-    return '''Describe this image in detail. Include:
-1. Main subjects (people, objects, animals)
-2. Activities or actions taking place
-3. Setting or environment
-4. Notable objects or items
-5. Any text visible in the image$context
-
-Provide a detailed caption:''';
+    return '''Describe this image concisely in one paragraph. Include the main subjects, what is happening, the setting, and any visible text or notable items.$context''';
   }
 
   /// Prompt to extract entities from an image caption
@@ -1913,8 +1906,15 @@ class VisionEntityExtractor {
     );
 
     try {
-      final caption = await visionLlmCallback(prompt, imageBytes);
-      return caption.trim();
+      final raw = await visionLlmCallback(prompt, imageBytes);
+      // Strip Gemma/LiteRT-LM chat-template control tokens that the model may
+      // accidentally echo into its output (e.g. <start_of_turn>X, <end_of_turn>).
+      final caption = raw
+          .replaceAll(RegExp(r'<start_of_turn>[^\n]*'), '')
+          .replaceAll('<end_of_turn>', '')
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+          .trim();
+      return caption;
     } catch (e) {
       assert(() {
         print('[VisionEntityExtractor] Caption generation failed: $e');

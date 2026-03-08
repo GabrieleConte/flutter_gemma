@@ -141,6 +141,8 @@ enum Model implements InferenceModelInterface {
     topK: 20,
     topP: 0.95,
     maxTokens: 2048,
+    supportImage: true,
+    maxNumImages: 1,
     supportsFunctionCalls: true,
   ),
 

@@ -157,6 +157,15 @@ class BackgroundIndexingService {
   /// Callback to prepare main LLM before summarization (can reallocate if needed)
   final Future<void> Function()? onBeforeSummarization;
 
+  /// Optional: Called once before photo/vision items start processing.
+  /// Implementations may use this to swap in a dedicated vision model (e.g. FastVLM)
+  /// before captioning begins, so the main text model is not required to support images.
+  final Future<void> Function()? onBeforeVisionPhase;
+
+  /// Optional: Called once after all photo/vision items have been processed.
+  /// Implementations may use this to close the vision model and restore the main text model.
+  final Future<void> Function()? onAfterVisionPhase;
+
   late final LeidenCommunityDetector _communityDetector;
   late final CommunitySummarizer? _summarizer;
   late final LinkPredictor? _linkPredictor;
@@ -252,6 +261,8 @@ class BackgroundIndexingService {
     })? documentIndexCallback,
     this.onExtractionPhaseComplete,
     this.onBeforeSummarization,
+    this.onBeforeVisionPhase,
+    this.onAfterVisionPhase,
     IndexingConfig? config,
   }) : config = config ?? IndexingConfig() {
     _documentIndexCallback = documentIndexCallback;
@@ -525,19 +536,34 @@ class BackgroundIndexingService {
       final dataType = entry.key;
       final items = entry.value;
 
+      // Detect whether this batch is a photo/vision batch that needs captioning.
+      // If so, fire lifecycle callbacks so the caller can swap to a vision model
+      // (e.g. FastVLM) before processing starts and restore the main model after.
+      final normalizedType = _normalizeDataType(dataType);
+      final isVisionBatch = (normalizedType.toUpperCase() == 'PHOTO' ||
+              normalizedType.toUpperCase() == 'PHOTOS') &&
+          config.enableImageCaptioning &&
+          _visionLlmCallback != null;
+
+      if (isVisionBatch && onBeforeVisionPhase != null) {
+        print('[BackgroundIndexing] Vision phase starting — invoking onBeforeVisionPhase');
+        await onBeforeVisionPhase!();
+      }
+
       _updateProgress(_progress.copyWith(
         currentPhase: 'Processing $dataType',
       ));
 
       // Process in batches
       for (var i = 0; i < items.length; i += config.batchSize) {
-        if (_cancelRequested) return;
+        if (_cancelRequested) break;
 
         // Wait if paused
         while (_progress.status == IndexingStatus.paused) {
           await Future.delayed(const Duration(milliseconds: 500));
-          if (_cancelRequested) return;
+          if (_cancelRequested) break;
         }
+        if (_cancelRequested) break;
 
         final batch = items.skip(i).take(config.batchSize).toList();
         await _processBatch(batch, dataType);
@@ -549,6 +575,13 @@ class BackgroundIndexingService {
         // Yield to allow other operations
         await Future.delayed(config.batchDelay);
       }
+
+      if (isVisionBatch && onAfterVisionPhase != null) {
+        print('[BackgroundIndexing] Vision phase complete — invoking onAfterVisionPhase');
+        await onAfterVisionPhase!();
+      }
+
+      if (_cancelRequested) return;
     }
   }
 
